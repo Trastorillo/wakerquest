@@ -33,6 +33,7 @@
 
 extern "C" int pc_debug_warp_list(char* out, size_t size);                                         // pc_menu.cpp
 extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, int layer, char* done, size_t size);
+extern "C" int pc_debug_event(const char* name);                                                    // pc_menu.cpp
 extern "C" int pc_debug_status(char* out, size_t size);
 extern "C" unsigned int pc_debug_shot_request(const char* path, int overlay);                     // pc_shot.cpp
 extern "C" unsigned int pc_debug_shot_done(int* ok);
@@ -90,6 +91,18 @@ debugsrv::Reply warp(const debugsrv::Args& a) {
     fprintf(stderr, "[cos] debug server: warp to %s requested\n", done);
     return debugsrv::ok(std::string("warp to ") + done +
                         " requested (it happens once a file is being played and no scene change is in progress)");
+}
+
+// "event NAME": an event of the stage's event list, ordered by the game thread (the log says if it ran)
+debugsrv::Reply event(const debugsrv::Args& a) {
+    if (a.size() != 1) {
+        return debugsrv::err("usage: event <name from the stage's event list>, e.g. getperl_jab");
+    }
+    if (!pc_debug_event(a[0].c_str())) {
+        return debugsrv::err("an event name has 31 characters at most");
+    }
+    fprintf(stderr, "[cos] debug server: event %s requested\n", a[0].c_str());
+    return debugsrv::ok("event " + a[0] + " requested (the log says whether it started)");
 }
 
 // "shot [game]": the next frame end writes the PNG (pc_shot.cpp); sent, then deleted
@@ -156,6 +169,7 @@ extern "C" void cos_switch_debug_start(void) {
     debugsrv::add_command("info", "info                   build, frame, stage, memory, address", info);
     debugsrv::add_command("warps", "warps                  the travel destinations, numbered", warps);
     debugsrv::add_command("warp", "warp <n> | warp <stage> [room] [point] [layer]", warp);
+    debugsrv::add_command("event", "event <name>           order an event of the stage's event list", event);
     debugsrv::add_command("shot", "shot [game]            PNG of the next frame (game: without the panel and menu)", shot);
     debugsrv::add_command("reload", "reload                 restart: the forwarder loads the NRO again (put it first)", reload);
     debugsrv::add_command("quit", "quit                   end the program", quit);

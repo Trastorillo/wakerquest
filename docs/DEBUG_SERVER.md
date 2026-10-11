@@ -44,6 +44,7 @@ not in git).
 | `hold X`, `release [X]` | held until released (`release` alone lets go of everything) |
 | `stick L\|R x y [ms]` | stick override, -1..1, y up; `stick L 0 0` lets go |
 | `warps`, `warp N`, `warp STAGE [ROOM] [POINT] [LAYER]` | the options menu's travel list, by number or by name; LAYER forces the stage's actor layer (default: the game's choice; e.g. `warp Pjavdou 0 1 8` = Jabun's cave with Jabun, on the boat); applied once a file is being played |
+| `event NAME` | orders an event of the current stage's event list (as the Mac's event sweep: the player orders it, every frame until an event runs, 240 frames at most; the log says `event NAME running` or `did not start`). Jabun's cutscene (issue #3): Navegar in the menu, `warp Pjavdou 0 1 8`, then `event getperl_jab` |
 | `get`, `put`, `ls`, `rm`, `mkdir` | SD card files; paths are relative to `sdmc:/switch/switchwaker` unless they start with `/` |
 | `logs`, `lastlog [LOCAL]` | the session logs in `native/logs/`; download the newest one. The running session's file cannot be opened while the game writes it, so `lastlog` then takes the text the console keeps in memory (`logtext`, the last 2 MiB, from the first line) |
 | `crashes [--fetch DIR]` | Atmosphère's crash reports (`/atmosphere/crash_reports`) |

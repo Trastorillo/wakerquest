@@ -45,6 +45,7 @@
 #include "m_Do/m_Do_MemCardRWmng.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_manager.h"
+#include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_name.h"
 
 #include <imgui.h>
@@ -1475,6 +1476,15 @@ struct DebugWarp {
     int room = 0, point = 0;
     int layer = -1;  // -1: the game's own choice (time of day, story)
 } sDebugWarp;
+// "event NAME": an event of the stage's event list ordered as the event sweep orders it (the player as the
+// ordering actor, pc_event_sweep.cpp), every frame until an event runs, kDebugEventFrames at most. For
+// testing a cutscene without a save at that point (issue #3: warp Pjavdou 0 1 8, then event getperl_jab).
+constexpr unsigned int kDebugEventFrames = 240;
+struct DebugEvent {
+    bool pending = false;
+    char name[32] = {};
+    unsigned int frames = 0;
+} sDebugEvent;
 struct DebugStatus {
     unsigned int frame = 0;
     bool play = false;
@@ -1496,6 +1506,27 @@ void debugFrameEnd(unsigned int frame) {
         writef(STDERR_FILENO, "[cos] debug server: warp to %s room %d point %d layer %d\n", sDebugWarp.stage,
                sDebugWarp.room, sDebugWarp.point, sDebugWarp.layer);
         dComIfGp_setNextStage(sDebugWarp.stage, (s16)sDebugWarp.point, (s8)sDebugWarp.room, (s8)sDebugWarp.layer);
+    }
+    if (sDebugEvent.pending && play && !dComIfGp_isEnableNextStage() && dComIfGp_getPlayer(0) != nullptr) {
+        if (sDebugEvent.frames > 0 && dComIfGp_event_runCheck()) {
+            sDebugEvent.pending = false;
+            writef(STDERR_FILENO, "[cos] debug server: event %s running\n", sDebugEvent.name);
+        } else if (sDebugEvent.frames++ >= kDebugEventFrames) {
+            sDebugEvent.pending = false;
+            writef(STDERR_FILENO, "[cos] debug server: event %s did not start\n", sDebugEvent.name);
+        } else {
+            const s16 idx = dComIfGp_evmng_getEventIdx(sDebugEvent.name);
+            if (idx < 0) {
+                sDebugEvent.pending = false;
+                writef(STDERR_FILENO, "[cos] debug server: no event %s in this stage's list\n", sDebugEvent.name);
+            } else {
+                // from the play scene's layer, as the sweep (a process made from the root layer is drawn twice)
+                layer_class* saved = fpcLy_CurrentLayer();
+                fpcLy_SetCurrentLayer(&static_cast<process_node_class*>((void*)fpcM_Search(isPlayScene, nullptr))->mLayer);
+                fopAcM_orderOtherEventId(dComIfGp_getPlayer(0), idx, 0xFF, 0xFFFF, 1);
+                fpcLy_SetCurrentLayer(saved);
+            }
+        }
     }
 }
 
@@ -1551,6 +1582,18 @@ extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, 
     pc::sDebugWarp.point = w.point;
     pc::sDebugWarp.layer = index >= 0 ? -1 : layer;
     snprintf(done, size, "%s room %d point %d layer %d", pc::sDebugWarp.stage, w.room, w.point, pc::sDebugWarp.layer);
+    return 1;
+}
+
+// An event of the current stage's list, by name, from the debug server (see sDebugEvent). 0: name too long.
+extern "C" int pc_debug_event(const char* name) {
+    if (strlen(name) >= sizeof(pc::sDebugEvent.name)) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    snprintf(pc::sDebugEvent.name, sizeof(pc::sDebugEvent.name), "%s", name);
+    pc::sDebugEvent.frames = 0;
+    pc::sDebugEvent.pending = true;
     return 1;
 }
 
