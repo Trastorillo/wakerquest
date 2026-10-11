@@ -63,6 +63,11 @@ public:
     /* 0x44 */ daDemo00_shadow_c* mpShadow;
     /* 0x48 */ DEMO_PLIGHT* mpPlight;
     /* 0x4C */ daDemo00_bgc_c* mBgc;
+#if TARGET_PC
+    // Bug B39: a BRK made in createHeap for an STB slot whose file B35 dropped, kept out of
+    // mpBrkAnm (never initialised) until the STB names a real BRK for it.
+    mDoExt_brkAnm* mpPcSpareBrkAnm;
+#endif
 };
 
 class daDemo00_c : public fopAc_ac_c {
@@ -94,6 +99,9 @@ public:
     /* 0x29F */ u8 field_0x29f;
     /* 0x2A0 */ daDemo00_resID_c mNextID;
     /* 0x2C8 */ daDemo00_model_c mModel;
+#if TARGET_PC
+    bool mPcBrkWrongKind;  // the STB's last BRK ID was dropped by B35
+#endif
 };
 
 #endif /* D_A_DEMO00_H */

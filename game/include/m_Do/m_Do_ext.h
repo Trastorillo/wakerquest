@@ -97,6 +97,12 @@ public:
     void entryFrame(f32 frame) { mpAnm->setFrame(frame); }
 
     J3DAnmTevRegKey* getBrkAnm() const { return mpAnm; }
+#if TARGET_PC
+    // Bug B39: the colour-register arrays an init without i_modify makes, for i_num of each, so a
+    // later init with i_modify (taking up to that many) has them, and its frame control; no
+    // animation yet (mpAnm NULL).
+    int pcReserve(u16 i_num);
+#endif
 
 private:
     /* 0x08 */ J3DAnmTevRegKey* mpAnm;

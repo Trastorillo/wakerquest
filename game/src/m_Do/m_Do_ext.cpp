@@ -323,6 +323,20 @@ void mDoExt_brkAnm::entry(J3DModelData* i_modelData, f32 i_frame) {
     entry(&i_modelData->getMaterialTable(), i_frame);
 }
 
+#if TARGET_PC
+int mDoExt_brkAnm::pcReserve(u16 i_num) {
+    mpAnm = NULL;
+    mCRegUpdateMaterialNum = i_num;
+    mpCRegAnm = new J3DTevColorAnm[i_num];
+    mKRegUpdateMaterialNum = i_num;
+    mpKRegAnm = new J3DTevKColorAnm[i_num];
+    if (mpCRegAnm == NULL || mpKRegAnm == NULL) {
+        return 0;
+    }
+    return initPlay(0, J3DFrameCtrl::EMode_NULL, 1.0f, 0, -1, false);
+}
+#endif
+
 /* 8000EBC4-8000EEE8       .text init__13mDoExt_brkAnmFP16J3DMaterialTableP15J3DAnmTevRegKeyiifssbi */
 int mDoExt_brkAnm::init(J3DMaterialTable* i_matTable, J3DAnmTevRegKey* i_brk, BOOL i_anmPlay, int i_attribute, f32 i_rate, s16 i_startF, s16 i_endF, bool i_modify, BOOL i_entry) {
     JUT_ASSERT(VERSION_SELECT(898, 898, 910, 910), i_modify || isCurrentSolidHeap());

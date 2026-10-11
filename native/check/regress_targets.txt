@@ -184,3 +184,7 @@ event-sweep 0 --stage sea:1:0 --env COS_EVENT_SWEEP=120 --env COS_EVENT_SWEEP_SE
 # its stage change
 event-sweep 0 --stage Edaichi:0:0 --env COS_EVENT_SWEEP=61 --env COS_BOOT_EVENTS=2D01 --env COS_EVENT_SWEEP_DEMOS=dance_zola.stb:27
 event-sweep 0 --stage Ekaze:0:0 --env COS_EVENT_SWEEP=60 --env COS_BOOT_EVENTS=2D01 --env COS_EVENT_SWEEP_DEMOS=dance_kokiri.stb:30
+# COS_SMOKE=event-sweep (bug B39, issue #3): Jabun's cutscene (getperl_jab.stb in Demo18) names a BTK
+# as a model's BRK (dropped by B35, so the model had no BRK) and later a real BRK for it, which
+# actPerformance initialised through the missing BRK (SIGSEGV). The demo plays to its stage change
+event-sweep 0 --stage Pjavdou:0:1:8 --preset sailing --env COS_EVENT_SWEEP=64 --env COS_EVENT_SWEEP_SECONDS=60

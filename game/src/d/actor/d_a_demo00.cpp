@@ -45,6 +45,10 @@ BOOL daDemo00_c::create() {
 #if VERSION > VERSION_DEMO
     field_0x29d = -1;
 #endif
+#if TARGET_PC
+    mModel.mpPcSpareBrkAnm = NULL;
+    mPcBrkWrongKind = false;
+#endif
     return cPhs_COMPLEATE_e;
 }
 
@@ -69,6 +73,9 @@ void daDemo00_model_c::reset() {
     mpBtpAnm = NULL;
     mpBtkAnm = NULL;
     mpBrkAnm = NULL;
+#if TARGET_PC
+    mpPcSpareBrkAnm = NULL;
+#endif
     if (mpPlight != NULL) {
         dKydm_demo_plight_delete(mpPlight);
         mpPlight = NULL;
@@ -164,9 +171,10 @@ BOOL awaCheck(J3DModel* model) {
 #if TARGET_PC
 // Bug B35: an STB animation ID whose demo-bank file is not of the animation kind its slot needs
 // (J3DAnmBase::getKind: 2 texture pattern, 4 texture SRT, 5 TEV register) becomes -1 (none).
-static void pcDropWrongKindAnm(u32& id, s32 kind) {
+// Returns true when it dropped the ID.
+static bool pcDropWrongKindAnm(u32& id, s32 kind) {
     if (id == (u32)-1) {
-        return;
+        return false;
     }
     J3DAnmBase* anm = (J3DAnmBase*)dComIfG_getObjectIDRes(dStage_roomControl_c::getDemoArcName(), (u16)id);
     if (anm != NULL && anm->getKind() != kind) {
@@ -177,7 +185,9 @@ static void pcDropWrongKindAnm(u32& id, s32 kind) {
                 dStage_roomControl_c::getDemoArcName(), (unsigned)(u16)id, (int)anm->getKind(), (int)kind);
         }
         id = (u32)-1;
+        return true;
     }
+    return false;
 }
 #endif
 
@@ -242,6 +252,20 @@ BOOL daDemo00_c::createHeap() {
                 return FALSE;
             }
         }
+#if TARGET_PC
+        // Bug B39: on the GameCube a wrong-kind BRK (dropped by B35) still made mpBrkAnm here, and
+        // a later STB frame naming a real BRK re-initialised it with i_modify (getperl_jab.stb,
+        // Demo18, Jabun's cave: file 0x3B, a BTK, then BRK 0x36; without it: SIGSEGV in
+        // actPerformance, issue #3). Make the BRK now, before the solid heap closes.
+        if (mModel.mID.mBrkID == -1 && mPcBrkWrongKind) {
+            // The GameCube sized its register arrays from the BTK's bytes; here: 4 colour
+            // registers per material, the most a TEV-register animation can name.
+            mModel.mpPcSpareBrkAnm = new mDoExt_brkAnm();
+            if (mModel.mpPcSpareBrkAnm == NULL || !mModel.mpPcSpareBrkAnm->pcReserve(modelData->getMaterialNum() * 4)) {
+                return FALSE;
+            }
+        }
+#endif
         
         if (mModel.mID.mBckID == -1) {
             mModel.mpMorf = NULL;
@@ -398,6 +422,22 @@ BOOL daDemo00_c::actPerformance(dDemo_actor_c* actor) {
             if (anmTev == NULL) {
                 return TRUE;
             }
+#if TARGET_PC
+            // Bug B39: the model was made with no BRK (see createHeap).
+            if (mModel.mpBrkAnm == NULL) {
+                mModel.mpBrkAnm = mModel.mpPcSpareBrkAnm;
+                mModel.mpPcSpareBrkAnm = NULL;
+            }
+            if (mModel.mpBrkAnm == NULL) {
+                static u32 sLogged = (u32)-1;
+                if (sLogged != mNextID.mBrkID) {
+                    sLogged = mNextID.mBrkID;
+                    fprintf(stderr, "[cos] daDemo00: %s BRK 0x%x for a model made without one: skipped (bug B39)\n",
+                        dStage_roomControl_c::getDemoArcName(), (unsigned)(u16)mNextID.mBrkID);
+                }
+                return TRUE;
+            }
+#endif
 
             mModel.mpBrkAnm->init(
                 mModel.mpModel->getModelData(),
@@ -845,7 +885,7 @@ BOOL daDemo00_c::execute() {
                     // file is not of the kind its slot needs is dropped, as if the STB named none.
                     pcDropWrongKindAnm(mNextID.mBtpID, 2);
                     pcDropWrongKindAnm(mNextID.mBtkID, 4);
-                    pcDropWrongKindAnm(mNextID.mBrkID, 5);
+                    mPcBrkWrongKind = pcDropWrongKindAnm(mNextID.mBrkID, 5);
 #endif
                 }
             }
