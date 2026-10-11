@@ -43,7 +43,7 @@ not in git).
 | `press A [B ...] [ms]` | buttons pressed together (`A+B` is the same); 120 ms by default; replies once released |
 | `hold X`, `release [X]` | held until released (`release` alone lets go of everything) |
 | `stick L\|R x y [ms]` | stick override, -1..1, y up; `stick L 0 0` lets go |
-| `warps`, `warp N`, `warp STAGE [ROOM] [POINT]` | the options menu's travel list, by number or by name; applied once a file is being played |
+| `warps`, `warp N`, `warp STAGE [ROOM] [POINT] [LAYER]` | the options menu's travel list, by number or by name; LAYER forces the stage's actor layer (default: the game's choice; e.g. `warp Pjavdou 0 1 8` = Jabun's cave with Jabun, on the boat); applied once a file is being played |
 | `get`, `put`, `ls`, `rm`, `mkdir` | SD card files; paths are relative to `sdmc:/switch/switchwaker` unless they start with `/` |
 | `logs`, `lastlog [LOCAL]` | the session logs in `native/logs/`; download the newest one. The running session's file cannot be opened while the game writes it, so `lastlog` then takes the text the console keeps in memory (`logtext`, the last 2 MiB, from the first line) |
 | `crashes [--fetch DIR]` | Atmosphère's crash reports (`/atmosphere/crash_reports`) |

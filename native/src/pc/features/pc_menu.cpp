@@ -1473,6 +1473,7 @@ struct DebugWarp {
     bool pending = false;
     char stage[8] = {};
     int room = 0, point = 0;
+    int layer = -1;  // -1: the game's own choice (time of day, story)
 } sDebugWarp;
 struct DebugStatus {
     unsigned int frame = 0;
@@ -1492,9 +1493,9 @@ void debugFrameEnd(unsigned int frame) {
     if (sDebugWarp.pending && play && !dComIfGp_isEnableNextStage()) {
         sDebugWarp.pending = false;
         setOpen(false);
-        writef(STDERR_FILENO, "[cos] debug server: warp to %s room %d point %d\n", sDebugWarp.stage, sDebugWarp.room,
-               sDebugWarp.point);
-        dComIfGp_setNextStage(sDebugWarp.stage, (s16)sDebugWarp.point, (s8)sDebugWarp.room, -1);
+        writef(STDERR_FILENO, "[cos] debug server: warp to %s room %d point %d layer %d\n", sDebugWarp.stage,
+               sDebugWarp.room, sDebugWarp.point, sDebugWarp.layer);
+        dComIfGp_setNextStage(sDebugWarp.stage, (s16)sDebugWarp.point, (s8)sDebugWarp.room, (s8)sDebugWarp.layer);
     }
 }
 
@@ -1532,9 +1533,10 @@ extern "C" int pc_debug_warp_list(char* out, size_t size) {
     return (int)std::min(used, size);
 }
 
-// A warp from the debug server: index >= 0 picks the list's entry, else stage / room / point. The game thread
-// applies it once a file is being played (pc_menu debugFrameEnd). 0: no such entry.
-extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, char* done, size_t size) {
+// A warp from the debug server: index >= 0 picks the list's entry, else stage / room / point / layer (-1: the
+// game's choice; e.g. 8 for Jabun's cave with Jabun, Pjavdou 0 1 8). The game thread applies it once a file is
+// being played (pc_menu debugFrameEnd). 0: no such entry.
+extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, int layer, char* done, size_t size) {
     pc::Warp w{stage, room, point, nullptr, nullptr};
     if (index >= 0) {
         if (index >= pc::kMainWarpCount + pc::kAllWarpCount) {
@@ -1547,7 +1549,8 @@ extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, 
     snprintf(pc::sDebugWarp.stage, sizeof(pc::sDebugWarp.stage), "%s", w.stage);
     pc::sDebugWarp.room = w.room;
     pc::sDebugWarp.point = w.point;
-    snprintf(done, size, "%s room %d point %d", pc::sDebugWarp.stage, w.room, w.point);
+    pc::sDebugWarp.layer = index >= 0 ? -1 : layer;
+    snprintf(done, size, "%s room %d point %d layer %d", pc::sDebugWarp.stage, w.room, w.point, pc::sDebugWarp.layer);
     return 1;
 }
 

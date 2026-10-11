@@ -13,7 +13,7 @@ log says '[switch] debug server listening on <ip>:6543'. The console's address: 
                                                  check it, restart
   switchwaker_debug.py shot [OUT.png] [--game]   screenshot of the next frame
   switchwaker_debug.py press A [B ...] [ms]      also hold, release, stick L|R x y [ms]
-  switchwaker_debug.py warps | warp N | warp STAGE [ROOM] [POINT]
+  switchwaker_debug.py warps | warp N | warp STAGE [ROOM] [POINT] [LAYER]
   switchwaker_debug.py get REMOTE [LOCAL] | put LOCAL REMOTE | ls [REMOTE] | rm REMOTE | mkdir REMOTE
   switchwaker_debug.py logs | lastlog [LOCAL]    session logs (native/logs/); the newest one (also while it runs)
   switchwaker_debug.py crashes [--fetch DIR]     Atmosphere's crash reports

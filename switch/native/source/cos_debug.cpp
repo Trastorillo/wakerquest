@@ -32,7 +32,7 @@
 #endif
 
 extern "C" int pc_debug_warp_list(char* out, size_t size);                                         // pc_menu.cpp
-extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, char* done, size_t size);
+extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, int layer, char* done, size_t size);
 extern "C" int pc_debug_status(char* out, size_t size);
 extern "C" unsigned int pc_debug_shot_request(const char* path, int overlay);                     // pc_shot.cpp
 extern "C" unsigned int pc_debug_shot_done(int* ok);
@@ -73,7 +73,7 @@ debugsrv::Reply warps(const debugsrv::Args&) {
 
 debugsrv::Reply warp(const debugsrv::Args& a) {
     if (a.empty()) {
-        return debugsrv::err("usage: warp <number from warps> | warp <stage> [room] [point]");
+        return debugsrv::err("usage: warp <number from warps> | warp <stage> [room] [point] [layer]");
     }
     char* end;
     const long index = strtol(a[0].c_str(), &end, 10);
@@ -81,9 +81,10 @@ debugsrv::Reply warp(const debugsrv::Args& a) {
     if (!byIndex && a[0].size() > 7) {
         return debugsrv::err("a stage name has 7 characters at most");
     }
-    char done[64];
+    char done[80];
     if (!pc_debug_warp(byIndex ? (int)index : -1, a[0].c_str(), a.size() > 1 ? atoi(a[1].c_str()) : 0,
-                       a.size() > 2 ? atoi(a[2].c_str()) : 0, done, sizeof(done))) {
+                       a.size() > 2 ? atoi(a[2].c_str()) : 0, a.size() > 3 ? atoi(a[3].c_str()) : -1, done,
+                       sizeof(done))) {
         return debugsrv::err("no warp number " + a[0] + " (warps lists them)");
     }
     fprintf(stderr, "[cos] debug server: warp to %s requested\n", done);
@@ -154,7 +155,7 @@ extern "C" void cos_switch_debug_start(void) {
     gPort = atoi(e) > 1 ? atoi(e) : 6543;
     debugsrv::add_command("info", "info                   build, frame, stage, memory, address", info);
     debugsrv::add_command("warps", "warps                  the travel destinations, numbered", warps);
-    debugsrv::add_command("warp", "warp <n> | warp <stage> [room] [point]", warp);
+    debugsrv::add_command("warp", "warp <n> | warp <stage> [room] [point] [layer]", warp);
     debugsrv::add_command("shot", "shot [game]            PNG of the next frame (game: without the panel and menu)", shot);
     debugsrv::add_command("reload", "reload                 restart: the forwarder loads the NRO again (put it first)", reload);
     debugsrv::add_command("quit", "quit                   end the program", quit);
