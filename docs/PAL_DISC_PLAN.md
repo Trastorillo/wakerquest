@@ -1,6 +1,8 @@
 # The European disc (GZLP01): plan
 
-Issue #5. Status: **plan**, 2026-10-12, branch `feature/pal-disc`. The USA disc (GZLE01 revision 0)
+Issue #5. Status: **implemented and checked on the Mac**, 2026-10-12, branch `feature/pal-disc`
+(written first as the plan; what was built and how it was checked: [Implementation](#implementation-2026-10-12)).
+Console tests pending. The USA disc (GZLE01 revision 0)
 stays the reference build: every change below keeps the USA build's output and checks unchanged.
 
 ## What is already there
@@ -20,10 +22,10 @@ stays the reference build: every change below keeps the USA build's output and c
 
 | Topic | Decision |
 |---|---|
-| Builds | The game version is a compile-time constant (`VERSION`), so EUR is a second build: `-DCOS_VERSION=3` (the `COS_GAME_ID` follows: `GZLP01`). Mac: its own build directory (e.g. `build/native-mac-eur`). Switch: `switchwaker-eur.nro` (NACP name "SwitchWaker (EUR)"), in the same `sdmc:/switch/switchwaker/` folder as `switchwaker.nro`: settings, pipeline caches and logs are shared (the logs are named after the NRO), saves are separate (Aurora's region folders). |
+| Builds | The game version is a compile-time constant (`VERSION`), so EUR is a second build: `-DCOS_VERSION=3` (the `COS_GAME_ID` follows: `GZLP01`). Mac: its own build directory (e.g. `build/native-mac-eur`). Switch: `switchwaker-eur.nro` (NACP name "SwitchWaker EUR"), in the same `sdmc:/switch/switchwaker/` folder as `switchwaker.nro`: settings and pipeline caches are shared, logs are named and pruned per NRO, saves are separate (Aurora's region folders). |
 | Disc file | `sdmc:/switch/switchwaker/GZLP01.iso` for the EUR NRO (`GZLE01.iso` for the USA one), so both discs can sit side by side. Revision 0, uncompressed, as for USA. |
 | Disc ID in code | One place: the build defines `COS_GAME_ID_STR` ("GZLE01" / "GZLP01") for the harness; the disc checks, messages, the default path on the Switch and the smoke tests use it instead of the literal. |
-| Language | PAL has 5 languages: English, German, French, Spanish, Italian (`dComIfGs_getPalLanguage()` 0-4). A new setting `COS_GAME_LANGUAGE` (EUR build only): `auto` (default) = the console's system language on the Switch, the OS locale on the Mac (`COS_LANG`, `LC_ALL`, `LANG`, then the macOS preferred languages); any language other than the five = English. Explicit choices `en`/`de`/`fr`/`es`/`it`. Takes effect at the next start (the game loads its message archives once, in the logo scene), so it is `PC_SETTING_RESTART`. The game's own choice (the language byte the memory card's save carries, else `OSGetLanguage`) is replaced by this setting at the same point (`d_s_logo.cpp` phase_1), under `TARGET_PC`. The menu tab: a new "Juego / Game" tab is out of scope; the row goes in the first tab (Gráficos) to keep the change small (the QoL lane may add a game tab later; then it moves there). |
+| Language | PAL has 5 languages: English, German, French, Spanish, Italian (`dComIfGs_getPalLanguage()` 0-4). The console's language takes the place of the GameCube's IPL language (`OSGetLanguage`, through the SDK's SRAM): the Switch's system language, the Mac's preferred locale (`SDL_GetPreferredLocales`); any language other than the five = English, as on the GameCube. A new setting `COS_GAME_LANGUAGE` (EUR build only, `PC_SETTING_RESTART`: the game loads its message archives once, in the logo scene): `auto` (default) keeps the GameCube's order, the language the memory card's save remembers (the PAL file select can change it), else the console's; `en`/`de`/`fr`/`es`/`it` force one, at the logo scene and wherever the game restores a save's language. The row is the last of the first tab (Gráficos: no "Game" tab yet; the menu scripts count rows from the top). |
 | 50/60 Hz | Always 60 Hz (EuRGB60), never the PAL 50 Hz mode: under `TARGET_PC` the PAL build selects the EuRGB60 render mode at `mDoMch_Create` (what the game does after the player says yes) and the logo scene never shows the refresh-rate prompt (`checkProgSelect`). The 50 Hz render mode (`VI_TVMODE_PAL_INT`, a 534-line XFB) is never used. |
 | USA build | Unchanged: every new branch is `#if VERSION == VERSION_PAL` (game code) or reads the disc ID macro; the USA build's checks (regress.sh) must still pass. |
 
@@ -61,6 +63,36 @@ stays the reference build: every change below keeps the USA build's output and c
 10. **Docs.** README, INSTALL.md (which disc, file name, which NRO), docs/SWITCH_BUILD.md,
     native/README.md, this file's status.
 
+## Implementation (2026-10-12)
+
+| Part | As built |
+|---|---|
+| Build | `GameConfig.cmake` derives `COS_GAME_ID` from `COS_VERSION` and defines `COS_GAME_ID_STR`; `native/include/pc/pc_game_id.h` names the disc, its region and image. `gen_assets.sh`/`gen_asset_stubs.py`/`check_runtime_assets.py --version GZLP01`. GZLP01's `config.yml` has no module hashes: the stubs take them from the decomp's `build.sha1` (main.dol and the 7 RELs with arrays, checked against the decompressed files of the disc). 167 arrays (163 + the four extra language message tables). |
+| Lost PAL code | The zeldaret convergence (step G4) had replaced `d_file_select`, `d_menu_window` and `d_a_bst` with zeldaret's units, which have no PAL branches (45, 48 and 15 PAL conditionals in snrubrm's; 5, 1 and 0 in zeldaret's): the PAL file select's language panes, the menu window's PAL textures and Gohdan's PAL cutscene timings. For VERSION_PAL each converged unit includes the pre-convergence unit (snrubrm's code with our host hunks) from `game/src/pal/`; the USA build compiles the converged code unchanged. Accessor names added to `d_file_select.h` and `d_menu_collect.h`. |
+| Host fixes, PAL only | The title's archive name written into a string literal (SIGBUS at the opening); three PAL strings longer than their buffers (Spanish/Italian shot count, German " Ritterwappen", the name entry's "O.K."/"FINE" in a 4-byte "END" string). Found by booting and by a review of every PAL `strcpy`/`strcat`/`sprintf` of a localized literal. |
+| Review of the PC fixes | Every `TARGET_PC` block nested in a version conditional: only the three units above had fixes on the USA side alone (handled by `game/src/pal/`). Heaps: every PAL heap size goes through the same host multiplier. 60 fps, widescreen and meter hooks: no message IDs, addresses or file names; the 16:9 meter values are the same in both versions. The profile list (`MSG3`'s place) follows the version. |
+| 60 Hz | EuRGB60 render mode at `mDoMch_Create`, the logo scene's question skipped. |
+| Tools | `run.sh`/`regress.sh` pass the build's ID to `disc_manifest.py --verify --game` (GZLP01 image and main.dol SHA-1 added); the sweeps follow `COS_BUILD_DIR`; `run.sh` runs the EUR build in English unless `COS_GAME_LANGUAGE` is given; msg-sweep checks all five language archives; the save smoke knows PAL's language word and header strings. |
+| Switch | `build_native.sh --eur [--build-dir]`, `docker/build.sh` and `make_sd.sh` follow the disc's ID, `push.sh native-eur`, `guard_nro.py --version GZLP01`, `package_switch.sh --with-eur`. Logs pruned per NRO name. |
+
+Checked on the Mac (EUR build, `-DCOS_VERSION=3`, runtime assets, the Redump-verified GZLP01 image):
+
+- `COS_SMOKE=assets`: 167 of 167 arrays identical to dtk's split of the PAL disc.
+- Disc checks: EUR + PAL disc boots; EUR + USA disc and USA + PAL disc exit 14 naming the other build.
+- Boot: Nintendo and Dolby logos, opening, title, no 50/60 Hz question even with B held.
+- Languages: file select, name entry and a cutscene's text in each of the five (forced); auto with
+  an empty card follows the system (es-ES -> Spanish); auto with an English save -> English.
+- Stages with 60 fps, camera shake and heat haze on: Outset (with its arrival cutscene), Windfall,
+  Dragon Roost Cavern, Forbidden Woods.
+- Sweeps: tool 18/18; save 7/7 situations saved and loaded back equal; item 213 ok + 1 expected
+  failure (0x16, the same as USA's), 41 not given; event sweep on sea, M_NewD2, Asoko, Omori and
+  kindan: 507 results (174 played to their end), no fault signature; the fairy events' crash in
+  `setDemoTextureAnime` (gone with flag 0x2D01) happens on the USA build too.
+- Switch: `switchwaker-eur.nro` (17,615,328 bytes) and, from the same branch, `switchwaker.nro`
+  (17,598,944 bytes) build; `guard_nro.py` finds none of the disc's arrays in either.
+- Full regression (`regress.sh`, 82 checks: build, static checks and 76 game runs) passes for both
+  builds, EUR and the unchanged USA reference.
+
 ## Verification (Mac)
 
 - EUR build with the PAL disc: title screen, file select, Outset, the sea, a dungeon, events and
@@ -71,9 +103,15 @@ stays the reference build: every change below keeps the USA build's output and c
 
 ## Pending after this branch (needs the user)
 
-- Console tests of `switchwaker-eur.nro` (boot, languages, 60 Hz, saves next to USA saves).
-- Release packaging: two NROs in one release, and the HOME-menu forwarder (it starts
-  `switchwaker.nro`; an EUR forwarder or a choice is a separate decision).
+- Console tests of `switchwaker-eur.nro`: boot with `GZLP01.iso` on the card, the language from the
+  console's system language and from the menu row, 60 Hz, a save (`EUR/Card A`) next to USA saves,
+  the logs (`switchwaker-eur_*.log`).
+- Release packaging: one zip with both NROs (`package_switch.sh TAG --with-eur`, the default
+  installs both side by side) or a separate download; CI building the EUR NRO.
+- The HOME-menu forwarder starts `switchwaker.nro` only: an EUR forwarder (another title ID) or a
+  chooser is a separate decision.
+- The debug server's `deploy` uploads `switchwaker.nro` only.
+- An HD texture pack built from the USA disc does not cover PAL's localized textures.
 
 ## Risks
 
