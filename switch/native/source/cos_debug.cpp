@@ -4,7 +4,7 @@
 // read, so a change applies at the next start; it is off by default, and without it the log text kept since
 // start is let go.
 //
-//   info               build, frame, stage, memory, applet type, address
+//   info               build, game (disc ID and NRO), frame, stage, memory, applet type, address
 //   warps, warp ...    the options menu's travel list (pc_menu.cpp), applied by the game thread once a file is played
 //   event NAME         an event of the stage's event list (pc_menu.cpp)
 //   give NAME|ITEM ... items through the game's own item-get functions (pc_menu.cpp), once a file is played
@@ -63,9 +63,10 @@ debugsrv::Reply info(const debugsrv::Args&) {
     svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
     svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
     const AppletType type = appletGetAppletType();
-    char b[640];
-    snprintf(b, sizeof(b), "version %s\n%smemory used %llu MiB of %llu MiB\nrunning as %s\naddress %s:%d\n",
-             COS_SWITCH_VERSION_STR, status, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20),
+    char b[704];
+    // "game": the disc this NRO runs (GZLE01, GZLP01 for switchwaker-eur), for deploy's guard
+    snprintf(b, sizeof(b), "version %s\ngame %s (" COS_SWITCH_NRO_NAME ".nro)\n%smemory used %llu MiB of %llu MiB\nrunning as %s\naddress %s:%d\n",
+             COS_SWITCH_VERSION_STR, COS_GAME_ID_STR, status, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20),
              type == AppletType_Application ? "application (the HOME menu forwarder: reload works)"
                                             : "applet or hbmenu (reload does not work: quit, then start it again)",
              ipText().c_str(), gPort);

@@ -14,6 +14,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -26,7 +27,68 @@ namespace pc {
 
 namespace {
 char sDiscError[512];
+// For the player's message (exitDisc): COS_DISC does not exist; COS_DISC is the other region's disc
+// (revision 0), so the player started the other build or misnamed the image.
+bool sDiscMissing;
+bool sOtherRegionDisc;
+
+#if defined(__SWITCH__)
+// One build as the player knows it: its disc, its Homebrew Menu entry, its download (pc_game_id.h).
+struct PlayerBuild {
+    const char* id;        // GZLE01
+    const char* iso;       // GZLE01.iso
+    const char* discEn;    // the USA disc
+    const char* discEs;    // el disco de EE. UU.
+    const char* entry;     // SwitchWaker
+    const char* zip;       // -switch.zip
+};
+constexpr PlayerBuild kUsaBuild{PC_GAME_ID_USA, PC_GAME_ID_USA ".iso", "the USA disc", "el disco de EE. UU.",
+                                PC_GAME_ENTRY_USA, PC_GAME_ZIP_USA};
+constexpr PlayerBuild kEurBuild{PC_GAME_ID_EUR, PC_GAME_ID_EUR ".iso", "the European disc", "el disco europeo",
+                                PC_GAME_ENTRY_EUR, PC_GAME_ZIP_EUR};
+
+// The disc folder: COS_SWITCH_DEFAULT_DISC without its file name.
+constexpr const char kDiscDir[] = "sdmc:/switch/switchwaker/";
+
+// The message for the player: with the other region's disc in the folder (and not this build's), or
+// at this build's path, name the build that runs it, its entry and its download. English, then Spanish.
+void playerMessage(char* text, size_t size) {
+    const PlayerBuild& self = PC_GAME_IS_EUR ? kEurBuild : kUsaBuild;
+    const PlayerBuild& other = PC_GAME_IS_EUR ? kUsaBuild : kEurBuild;
+    struct stat st;
+    const bool otherInFolder =
+        sDiscMissing && stat((std::string("/switch/switchwaker/") + other.iso).c_str(), &st) == 0;
+    if (otherInFolder) {
+        snprintf(text, size,
+                 "This is %s, for %s (%s), but %s holds %s (%s). For that disc, start \"%s\" in the Homebrew "
+                 "Menu: it comes in the download whose name ends in \"%s\".\n\n"
+                 "Esto es %s, para %s (%s), pero %s contiene %s (%s). Para ese disco, abre \"%s\" en el "
+                 "Homebrew Menu: viene en la descarga cuyo nombre termina en \"%s\".",
+                 self.entry, self.discEn, self.iso, kDiscDir, other.iso, other.discEn, other.entry, other.zip,
+                 self.entry, self.discEs, self.iso, kDiscDir, other.iso, other.discEs, other.entry, other.zip);
+        return;
+    }
+    if (sOtherRegionDisc) {
+        snprintf(text, size,
+                 "%s%s is %s (%s), and this is %s, for %s. Rename the file to %s and start \"%s\" in the "
+                 "Homebrew Menu: it comes in the download whose name ends in \"%s\".\n\n"
+                 "%s%s es %s (%s), y esto es %s, para %s. Cambia el nombre del archivo a %s y abre \"%s\" en "
+                 "el Homebrew Menu: viene en la descarga cuyo nombre termina en \"%s\".",
+                 kDiscDir, self.iso, other.discEn, other.id, self.entry, self.discEn, other.iso, other.entry,
+                 other.zip, kDiscDir, self.iso, other.discEs, other.id, self.entry, self.discEs, other.iso,
+                 other.entry, other.zip);
+        return;
+    }
+    snprintf(text, size,
+             "%s needs your own disc of The Wind Waker (%s, %s, revision 0) as an uncompressed image at %s%s.\n\n"
+             "%s\n\n"
+             "%s necesita tu propio disco de The Wind Waker (%s, %s, revision 0) como imagen sin comprimir "
+             "en %s%s.",
+             self.entry, PC_GAME_REGION_EN, self.id, kDiscDir, self.iso, sDiscError, self.entry, PC_GAME_REGION_ES,
+             self.id, kDiscDir, self.iso);
 }
+#endif
+} // namespace
 
 void discMessage(const char* fmt, ...) {
     va_list ap;
@@ -38,14 +100,9 @@ void discMessage(const char* fmt, ...) {
 
 void exitDisc() {
 #if defined(__SWITCH__)
-    char text[1024];
-    snprintf(text, sizeof text,
-             "SwitchWaker needs your own disc of The Wind Waker (%s, %s, revision 0) as an uncompressed "
-             "image at sdmc:/switch/switchwaker/%s.\n\n%s\n\n"
-             "SwitchWaker necesita tu propio disco de The Wind Waker (%s, %s, revision 0) como "
-             "imagen sin comprimir en sdmc:/switch/switchwaker/%s.",
-             PC_GAME_REGION_EN, COS_GAME_ID_STR, PC_GAME_ISO_NAME, sDiscError, PC_GAME_REGION_ES,
-             COS_GAME_ID_STR, PC_GAME_ISO_NAME);
+    char text[2048];
+    playerMessage(text, sizeof text);
+    writef(STDERR_FILENO, "[cos] DISC: shown: %s\n", text);
     cos_switch_show_error(text);
 #endif
     pc_exit(PC_EXIT_DISC);
@@ -60,6 +117,7 @@ int checkDisc() {
     }
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
+        sDiscMissing = errno == ENOENT;
         discMessage("cannot open COS_DISC=%s: %s", path, strerror(errno));
         return PC_EXIT_DISC;
     }
@@ -100,6 +158,7 @@ int checkDisc() {
         const bool usa = strcmp(id, PC_GAME_ID_USA) == 0 && version == 0;
         const bool eur = strcmp(id, PC_GAME_ID_EUR) == 0 && version == 0;
         if (usa || eur) {
+            sOtherRegionDisc = true;
             discMessage("%s is %s revision 0, the %s disc: it runs with the %s build (%s); this build is for %s",
                         path, id, usa ? "USA" : "European", usa ? "USA" : "European",
                         usa ? PC_GAME_NRO_USA : PC_GAME_NRO_EUR, COS_GAME_ID_STR);
