@@ -666,10 +666,20 @@ void heapReport(const char* why) {
                           (unsigned)child->getFreeSize() / 1024);
         }
     };
+    // dComIfGp_getExpHeap2D() still points at the play scene's 2D heap after the scene destroyed
+    // it (d_s_play.cpp does not clear it): walk it only while it is one of the game heap's children.
+    // The menu opened on the title screen after playing read the freed heap and crashed.
+    JKRHeap* heap2D = nullptr;
     if (JKRHeap* game = mDoExt_getGameHeap()) {
         expChildren(game, "game-exp");
+        JSUTree<JKRHeap>& tree = game->getHeapTree();
+        for (JSUTreeIterator<JKRHeap> it(tree.getFirstChild()); it != tree.getEndChild(); ++it) {
+            if (it.getObject() == (JKRHeap*)dComIfGp_getExpHeap2D()) {
+                heap2D = it.getObject();
+            }
+        }
     }
-    if (JKRHeap* heap2D = (JKRHeap*)dComIfGp_getExpHeap2D()) {
+    if (heap2D != nullptr) {
         expChildren(heap2D, "2D-child");
     }
     if (n < (int)sizeof(line)) {
