@@ -38,8 +38,9 @@ scripts/switch/build_native.sh       # build/switch-native/switchwaker.nro and s
 scripts/switch/build_native.sh --eur --runtime-assets   # build/switch-native-eur/switchwaker-eur.nro (GZLP01)
 ```
 
-`--eur` builds the European version (`COS_VERSION=3`): "SwitchWaker EUR" in the Homebrew Menu, which
-reads `GZLP01.iso`, with the game's language from the console's (English, German, French, Spanish or
+`--eur` builds the European version (`COS_VERSION=3`): "SwitchWaker EUR" in the Homebrew Menu, installed
+as `sdmc:/switch/switchwaker-eur/switchwaker-eur.nro` (its own folder: hbmenu lists one NRO per folder), which
+reads `sdmc:/switch/switchwaker/GZLP01.iso` and the same caches, settings and `native/` as the USA NRO, with the game's language from the console's (English, German, French, Spanish or
 Italian; the options menu's *Idioma del juego* / *Game language* fixes one). `--build-dir DIR` builds in
 another directory (the container sees it where the CMake cache expects `build/switch-native`, so an
 APFS copy of an existing build directory, `cp -cR`, reuses its Dawn objects).
@@ -81,7 +82,7 @@ APFS copy of an existing build directory, `cp -cR`, reuses its Dawn objects).
 ```sh
 scripts/switch/push.sh --disc /path/to/GZLE01.iso   # once: the disc image, named after its ID (skipped if already there)
 scripts/switch/push.sh native                       # the NRO and the bundled pipeline cache, read back and checked by SHA-256
-scripts/switch/push.sh native-eur                   # the same for the European NRO
+scripts/switch/push.sh native-eur                   # the same for the European NRO (to switch/switchwaker-eur/)
 scripts/switch/push.sh --pipeline-cache             # only the bundled pipeline cache (see "Pipeline precompile")
 ```
 
@@ -90,7 +91,7 @@ SD card layout:
 | Path on the SD card | Contents |
 |---|---|
 | `switch/switchwaker/switchwaker.nro` | the app (deko3d renderer): "SwitchWaker" in the Homebrew Menu |
-| `switch/switchwaker/switchwaker-eur.nro` | the European build (`--eur`): "SwitchWaker EUR"; logs `switchwaker-eur_<date>_<time>.log` |
+| `switch/switchwaker-eur/switchwaker-eur.nro` | the European build (`--eur`): "SwitchWaker EUR", in its own folder (the Homebrew Menu lists one NRO per folder); everything else it reads from `switch/switchwaker/` (fixed paths: `COS_SWITCH_NRO_DIR`, `COS_SWITCH_ROOT`); logs `switchwaker-eur_<date>_<time>.log`. The HOME-menu forwarder starts the USA NRO only |
 | `switch/switchwaker/GZLE01.iso` | your disc image (`GZLP01.iso`: the European disc, for `switchwaker-eur.nro`) |
 | `switch/switchwaker/initial_pipeline_cache.db` | the bundled pipeline list (`native/data/`, committed; `build_native.sh` puts a copy next to the NRO) |
 | `switch/switchwaker/initial_dksh_cache.bin` | the compiled shaders of those pipelines (about 6 MB; see "The deko3d renderer") |

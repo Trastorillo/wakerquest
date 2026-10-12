@@ -21,7 +21,11 @@ scripts/switch/build_native.sh && scripts/switch/switchwaker_debug.py deploy
 `deploy` uploads `build/switch-native/switchwaker.nro` (the deko3d NRO, the only renderer) with the
 `initial_pipeline_cache.db` and `initial_dksh_cache.bin` built next to it, checks each CRC32, restarts the game
 and waits until it answers. The restart (`reload`) needs the game started from the HOME-menu forwarder; from hbmenu,
-`deploy --no-reload`, then ask the user to start it again. Building: [docs/SWITCH_BUILD.md](docs/SWITCH_BUILD.md).
+`deploy --no-reload`, then ask the user to start it again. The European NRO: `build_native.sh --eur`, then
+`deploy --eur` (to `/switch/switchwaker-eur/switchwaker-eur.nro`, its own folder, as hbmenu lists one NRO per
+folder; the caches still go to `/switch/switchwaker/`); it runs from hbmenu, so it is never reloaded: ask the
+user to start "SwitchWaker EUR" again. `info`'s `game` line says which NRO is running. Building:
+[docs/SWITCH_BUILD.md](docs/SWITCH_BUILD.md).
 
 ## Debug
 

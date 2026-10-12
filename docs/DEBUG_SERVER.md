@@ -36,9 +36,9 @@ not in git).
 
 | Command | What it does |
 |---|---|
-| `info` | version, frame, stage and room, memory, applet type, address |
+| `info` | version, game (`game GZLE01 (switchwaker.nro)`, `GZLP01 (switchwaker-eur.nro)` for the European NRO), frame, stage and room, memory, applet type, address |
 | `log [--all] [--save F] [--grep RE] [--seconds N]` | the log as it is written; `--all` starts with the last 2 MiB |
-| `deploy [NRO] [--no-reload]` | uploads `build/switch-native/switchwaker.nro`, checks its CRC32, restarts the game, waits until it answers again |
+| `deploy [NRO] [--eur] [--no-reload] [--nro-only]` | uploads `build/switch-native/switchwaker.nro` and the `initial_pipeline_cache.db` and `initial_dksh_cache.bin` built next to it (always to `sdmc:/switch/switchwaker/`, where every NRO reads them), checks each CRC32, restarts the game, waits until it answers again. `--eur` (or an NRO named `*-eur.nro`): `build/switch-native-eur/switchwaker-eur.nro` to `sdmc:/switch/switchwaker-eur/switchwaker-eur.nro`, and no restart, as with `--no-reload`: the European NRO runs from hbmenu (the forwarder starts the USA NRO), so quit it and start "SwitchWaker EUR" again. The guard against SwitchWakerHD's server (same port) applies to both |
 | `shot [OUT.png] [--game]` | PNG of the next frame, with the FPS panel and the options menu drawn over it; `--game` gives the game's picture alone |
 | `press A [B ...] [ms]` | buttons pressed together (`A+B` is the same); 120 ms by default; replies once released |
 | `hold X`, `release [X]` | held until released (`release` alone lets go of everything) |
@@ -96,7 +96,8 @@ scripts/switch/switchwaker_debug.py warp 2 && sleep 10 && scripts/switch/switchw
 
 `reload` restarts the application (`appletRestartProgram`: the GPU profile is restored and the log written
 first, as at an exit), so it only works when the game was started from the HOME-menu forwarder. Started from
-hbmenu, use `quit`, then start it again. A game that crashed takes the server down with it: start it again
+hbmenu, use `quit`, then start it again. The forwarder starts the USA NRO only, so the European NRO
+(`switchwaker-eur.nro`, from hbmenu) never reloads. A game that crashed takes the server down with it: start it again
 from the console, then fetch `lastlog` (the crashed session is then the second newest, see `logs`) and
 `crashes`.
 

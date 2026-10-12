@@ -22,7 +22,7 @@ stays the reference build: every change below keeps the USA build's output and c
 
 | Topic | Decision |
 |---|---|
-| Builds | The game version is a compile-time constant (`VERSION`), so EUR is a second build: `-DCOS_VERSION=3` (the `COS_GAME_ID` follows: `GZLP01`). Mac: its own build directory (e.g. `build/native-mac-eur`). Switch: `switchwaker-eur.nro` (NACP name "SwitchWaker EUR"), in the same `sdmc:/switch/switchwaker/` folder as `switchwaker.nro`: settings and pipeline caches are shared, logs are named and pruned per NRO, saves are separate (Aurora's region folders). |
+| Builds | The game version is a compile-time constant (`VERSION`), so EUR is a second build: `-DCOS_VERSION=3` (the `COS_GAME_ID` follows: `GZLP01`). Mac: its own build directory (e.g. `build/native-mac-eur`). Switch: `switchwaker-eur.nro` (NACP name "SwitchWaker EUR") in its own folder, `sdmc:/switch/switchwaker-eur/` (revised 2026-10-12, see [SD card layout](#sd-card-layout-2026-10-12): hbmenu lists one NRO per folder), reading everything else from `sdmc:/switch/switchwaker/` as `switchwaker.nro` does: settings and pipeline caches are shared, logs are named and pruned per NRO, saves are separate (Aurora's region folders). |
 | Disc file | `sdmc:/switch/switchwaker/GZLP01.iso` for the EUR NRO (`GZLE01.iso` for the USA one), so both discs can sit side by side. Revision 0, uncompressed, as for USA. |
 | Disc ID in code | One place: the build defines `COS_GAME_ID_STR` ("GZLE01" / "GZLP01") for the harness; the disc checks, messages, the default path on the Switch and the smoke tests use it instead of the literal. |
 | Language | PAL has 5 languages: English, German, French, Spanish, Italian (`dComIfGs_getPalLanguage()` 0-4). The console's language takes the place of the GameCube's IPL language (`OSGetLanguage`, through the SDK's SRAM): the Switch's system language, the Mac's preferred locale (`SDL_GetPreferredLocales`); any language other than the five = English, as on the GameCube. A new setting `COS_GAME_LANGUAGE` (EUR build only, `PC_SETTING_RESTART`: the game loads its message archives once, in the logo scene): `auto` (default) keeps the GameCube's order, the language the memory card's save remembers (the PAL file select can change it), else the console's; `en`/`de`/`fr`/`es`/`it` force one, at the logo scene and wherever the game restores a save's language. The row is the last of the first tab (Gráficos: no "Game" tab yet; the menu scripts count rows from the top). |
@@ -106,12 +106,42 @@ Checked on the Mac (EUR build, `-DCOS_VERSION=3`, runtime assets, the Redump-ver
 - Console tests of `switchwaker-eur.nro`: boot with `GZLP01.iso` on the card, the language from the
   console's system language and from the menu row, 60 Hz, a save (`EUR/Card A`) next to USA saves,
   the logs (`switchwaker-eur_*.log`).
-- Release packaging: one zip with both NROs (`package_switch.sh TAG --with-eur`, the default
-  installs both side by side) or a separate download; CI building the EUR NRO.
-- The HOME-menu forwarder starts `switchwaker.nro` only: an EUR forwarder (another title ID) or a
-  chooser is a separate decision.
-- The debug server's `deploy` uploads `switchwaker.nro` only.
+- ~~Release packaging~~: resolved 2026-10-12, two downloads ([SD card layout](#sd-card-layout-2026-10-12)).
+  CI building the EUR NRO is still open.
+- ~~The HOME-menu forwarder starts `switchwaker.nro` only~~: resolved 2026-10-12 as a known limitation:
+  the European NRO starts from hbmenu (in title mode); an EUR forwarder (another title ID) or a chooser
+  can come later.
+- ~~The debug server's `deploy` uploads `switchwaker.nro` only~~: resolved 2026-10-12, `deploy --eur`.
 - An HD texture pack built from the USA disc does not cover PAL's localized textures.
+
+## SD card layout (2026-10-12)
+
+Found on the console: hbmenu shows one NRO per folder, so `switchwaker-eur.nro` next to `switchwaker.nro`
+in `sdmc:/switch/switchwaker/` never appeared ("SwitchWaker EUR" was missing). The NRO's paths are fixed
+at build time (`COS_SWITCH_NRO_DIR` /switch/switchwaker for the bundled caches, `COS_SWITCH_ROOT`
+/switch/switchwaker/native, the disc `COS_SWITCH_DEFAULT_DISC`); nothing depends on where the NRO itself
+is (argv[0] is only logged; the log names, the `.elf` name and the crash report use `COS_SWITCH_NRO_NAME`;
+the debug server's root is fixed; `reload` restarts the forwarder's program). So:
+
+```
+sdmc:/switch/switchwaker/        switchwaker.nro (USA), GZLE01.iso, GZLP01.iso, initial_pipeline_cache.db,
+                                 initial_dksh_cache.bin, native/ (saves, settings, caches, logs): shared
+sdmc:/switch/switchwaker-eur/    switchwaker-eur.nro ("SwitchWaker EUR")
+```
+
+- Release: two self-contained downloads, the player picks one: `SwitchWaker-<tag>-switch.zip` (USA) and
+  `SwitchWaker-<tag>-switch-eur.zip` (`switch/switchwaker-eur/switchwaker-eur.nro` and the caches in
+  `switch/switchwaker/`). The caches are built from the same pipeline database and are byte-identical for
+  both builds; `package_switch.sh --with-eur` refuses to package them if they differ, so both zips can be
+  extracted onto one card.
+- `make_sd.sh`, `push.sh native-eur` and the debug client's `deploy --eur` put the European NRO in its folder
+  and the caches in `switch/switchwaker/`.
+- The wrong program for the disc on the card (SwitchWaker EUR with only `GZLE01.iso`, SwitchWaker with only
+  `GZLP01.iso`, or the other region's disc under this build's file name): the console's message names the
+  program to start ("SwitchWaker" / "SwitchWaker EUR") and the end of its download's name, in English and
+  Spanish (`pc_disc.cpp`).
+- Players who copied `switchwaker-eur.nro` into `switch/switchwaker/` move it to `switch/switchwaker-eur/`
+  (INSTALL.md, "Updating").
 
 ## Risks
 
