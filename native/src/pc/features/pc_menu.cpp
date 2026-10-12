@@ -720,7 +720,7 @@ const PcSettingDesc kBuiltins[] = {
 
 // ---- menu state ----------------------------------------------------------------------------------
 
-enum class RowKind { EditMode, Setting, Warp, Sailing, Screenshot, Reload };
+enum class RowKind { EditMode, Setting, Warp, Sailing, Screenshot, Reload, QolBetterWW, QolOriginal };
 
 struct Row {
     RowKind kind;
@@ -768,6 +768,10 @@ std::vector<Row> rowsOf(int tab) {
     std::vector<Row> rows;
     if (tab == PC_SETTING_TAB_GRAPHICS) {
         rows.push_back({RowKind::EditMode});
+    }
+    if (tab == PC_SETTING_TAB_QOL) {
+        rows.push_back({RowKind::QolBetterWW});
+        rows.push_back({RowKind::QolOriginal});
     }
     if (tab == PC_SETTING_TAB_DEBUG) {
         rows.push_back({RowKind::Warp});
@@ -871,6 +875,39 @@ void doSailing() {
     dComIfGp_setNextStage(kSailingSpawn.stage, (s16)kSailingSpawn.point, (s8)kSailingSpawn.room, -1);
 }
 
+// Calidad de vida > "Experiencia BetterWW" / "Valores originales": every QoL row set at once, as if
+// changed by hand (saved to settings.ini, each row still editable after). BetterWW's own defaults
+// (wwr_ui/randomizer_window.ui at 4501481): everything on but the full sea chart and the unrestricted
+// boat; its "remove title and ending videos" also skips the intro and fixes the original's bugs.
+struct QolPresetValue {
+    PcQol which;
+    const char* betterww;
+};
+const QolPresetValue kQolPreset[] = {
+    {PC_QOL_INSTANT_TEXT, "1"}, {PC_QOL_FAST_ROLL, "1"},      {PC_QOL_FAST_BLOCKS, "1"},
+    {PC_QOL_FAST_GRAPPLE, "1"}, {PC_QOL_FAST_CLIMB, "1"},     {PC_QOL_FAST_BALLAD, "1"},
+    {PC_QOL_SKIP_VIDEOS, "1"},  {PC_QOL_SKIP_INTRO, "1"},     {PC_QOL_REVEAL_CHART, "0"},
+    {PC_QOL_TINGLE_CHESTS, "1"}, {PC_QOL_SAIL, "swift"},      {PC_QOL_FREE_BOAT, "0"},
+    {PC_QOL_SWING_TURN, "1"},   {PC_QOL_NO_SONG_REPLAY, "1"}, {PC_QOL_FIX_BUGS, "1"},
+};
+static_assert(sizeof(kQolPreset) / sizeof(kQolPreset[0]) == PC_QOLS, "a QoL option without a preset value");
+
+void applyQolPreset(bool betterww) {
+    int locked = 0;
+    for (const QolPresetValue& p : kQolPreset) {
+        const char* key = pc_qol_key(p.which);
+        if (pc_settings_locked(key)) {
+            locked++;
+            continue;
+        }
+        pc_settings_set_mode(key, pc_settings_mode(), betterww ? p.betterww : "0");
+    }
+    writef(STDERR_FILENO, "[cos] menu: QoL preset %s applied (%d rows set by the environment kept)\n",
+           betterww ? "BetterWW" : "original", locked);
+    toast(betterww ? T("Calidad de vida: valores de BetterWW", "Quality of life: BetterWW's values")
+                   : T("Calidad de vida: juego original", "Quality of life: the original game"));
+}
+
 void activate(const Row& r, int dir) {
     switch (r.kind) {
     case RowKind::EditMode:
@@ -893,6 +930,12 @@ void activate(const Row& r, int dir) {
     case RowKind::Screenshot:
         if (dir == 0) {
             m.pendingShot = true;
+        }
+        break;
+    case RowKind::QolBetterWW:
+    case RowKind::QolOriginal:
+        if (dir == 0) {
+            applyQolPreset(r.kind == RowKind::QolBetterWW);
         }
         break;
     case RowKind::Reload:
@@ -1003,6 +1046,8 @@ std::string rowLabel(const Row& r) {
     case RowKind::Sailing: return T("Navegar (barco, vela y batuta)", "Sail (boat, sail and baton)");
     case RowKind::Screenshot: return T("Capturar pantalla", "Take a screenshot");
     case RowKind::Reload: return T("Recargar ajustes del archivo", "Reload settings from the file");
+    case RowKind::QolBetterWW: return T("Experiencia BetterWW", "BetterWW experience");
+    case RowKind::QolOriginal: return T("Valores originales", "Original values");
     case RowKind::Setting: break;
     }
     std::string s = settingLabel(r.desc);
@@ -1020,6 +1065,8 @@ std::string rowValue(const Row& r) {
     case RowKind::Sailing: return inPlay() ? T("A: zarpar", "A: set sail") : T("solo en partida", "in game only");
     case RowKind::Screenshot: return T("A: capturar", "A: capture");
     case RowKind::Reload: return T("A: recargar", "A: reload");
+    case RowKind::QolBetterWW:
+    case RowKind::QolOriginal: return T("A: aplicar", "A: apply");
     case RowKind::Setting: break;
     }
     return choiceLabel(r.desc, pc_settings_get_mode(r.desc->key, rowMode(r.desc)));
@@ -1069,6 +1116,16 @@ std::string rowHelp(const Row& r) {
                  "Saves the game's image (without the menu) as shot-<frame>.png in the game's folder.");
     case RowKind::Reload:
         return std::string(T("Vuelve a leer ", "Reads ")) + pc_settings_path() + T(".", " again.");
+    case RowKind::QolBetterWW:
+        return T("Pone las opciones de esta pestaña como las trae BetterWW (de WideBoner, basado en el "
+                 "randomizer wwrando de LagoLunatic): todo activado menos la carta náutica completa y el barco "
+                 "sin restricciones; vela rápida. Después se puede cambiar cada opción.",
+                 "Sets this tab's options to BetterWW's defaults (by WideBoner, based on LagoLunatic's wwrando "
+                 "randomizer): everything on but the full sea chart and the unrestricted boat; Swift Sail. "
+                 "Each option can be changed afterwards.");
+    case RowKind::QolOriginal:
+        return T("Desactiva todas las opciones de esta pestaña: el juego original.",
+                 "Turns every option of this tab off: the original game.");
     case RowKind::Setting: break;
     }
     const char* descHelp = settingHelp(r.desc);

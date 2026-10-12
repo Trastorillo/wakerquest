@@ -131,6 +131,10 @@ options-menu 0 --stage sea:44:206 --input native/check/input/menu-sailing.txt
 options-menu 0 --stage sea:44:206 --input native/check/input/menu-fps60.txt
 # Calidad de vida (docs/QOL_PLAN.md): a QoL row turned on from the menu, saved, then in effect live
 options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol.txt
+# Calidad de vida's "Experiencia BetterWW" (every QoL row to BetterWW's defaults, saved, still editable) and
+# "Valores originales" (every row off)
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol-preset.txt
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol-original.txt
 # QoL "Barco sin restricciones" (COS_QOL_FREE_BOAT): the sailing smoke before Dragon Roost's arrival (0x0902
 # cleared) crosses into room 18, which the boat's story path 0 forbids then (it fails with the option off), and
 # with neither 0x1980 nor 0x0A80 the boat still offers "get in" (the reboard fails with the option off)
