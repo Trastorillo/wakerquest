@@ -8,7 +8,9 @@
 #                 the run harness and the header checks built with clang on x86_64 and aarch64
 #                 (with the decomp's resource index enums only: gen_assets.sh --res-only), and
 #                 the unit tests cos_sdk_smoke and cos_pc_tests run; then the game executable
-#                 switchwaker itself with COS_RUNTIME_ASSETS=ON (gen_assets.sh --stubs)
+#                 switchwaker itself with COS_RUNTIME_ASSETS=ON (gen_assets.sh --stubs), for both
+#                 discs: the USA build (GZLE01) and the European one (GZLP01, COS_VERSION=3,
+#                 docs/PAL_DISC_PLAN.md)
 #   switch-image  the Switch build image (scripts/switch/Containerfile.native), built
 #                 and kept in the GitHub Actions cache, so a later job (or a fork) starts warm
 # Downloads (Aurora, Dawn and nod packages, SDL 3 ...) are cached across runs with actions/cache;
@@ -94,16 +96,21 @@ jobs:
                 cos_sdk_shadow_check
             build/ci-linux/cos_sdk_smoke
             build/ci-linux/cos_pc_tests'
-      - name: Build the game (runtime assets, no disc)
+      - name: Build the game (runtime assets, no disc), USA and European versions
         run: |
           docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" -w /work \
               centollos-linux-build:ci bash -c '
             set -e
             # Stub assets/ headers: names, sizes and the disc locations of the arrays, no game data.
-            native/tools/gen_assets.sh --stubs --decomp /work/build/decomp-ci --out /work/build/ci-stubs/GZLE01
-            cmake -S native -B build/ci-linux-game -G Ninja -DCOS_RUNTIME_ASSETS=ON \
-                -DCOS_ASSETS_DIR=/work/build/ci-stubs/GZLE01
-            ninja -C build/ci-linux-game switchwaker'
+            # GZLE01: the USA build (COS_VERSION 2, the default); GZLP01: the European one (3).
+            for v in GZLE01:2 GZLP01:3; do
+              id=${v%%:*} ver=${v##*:}
+              native/tools/gen_assets.sh --version $id --stubs --decomp /work/build/decomp-ci \
+                  --out /work/build/ci-stubs/$id
+              cmake -S native -B build/ci-linux-game-$id -G Ninja -DCOS_RUNTIME_ASSETS=ON \
+                  -DCOS_VERSION=$ver -DCOS_ASSETS_DIR=/work/build/ci-stubs/$id
+              ninja -C build/ci-linux-game-$id switchwaker
+            done'
 
   switch-image:
     runs-on: ubuntu-24.04
