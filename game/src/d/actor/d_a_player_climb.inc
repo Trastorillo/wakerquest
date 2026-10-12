@@ -210,7 +210,14 @@ void daPy_lk_c::checkBgClimbMove() {
 
 /* 80136588-801365F4       .text procClimbUpStart_init_sub__9daPy_lk_cFv */
 void daPy_lk_c::procClimbUpStart_init_sub() {
+#if TARGET_PC
+    // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): getting on a vine wall at
+    // 1.6 instead of 1.0
+    setSingleMoveAnime(ANM_LADDERUPST, pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mLadder.m.field_0x4, 0.0f, -1,
+                       m_HIO->mLadder.m.field_0x8);
+#else
     setSingleMoveAnime(ANM_LADDERUPST, m_HIO->mLadder.m.field_0x4, 0.0f, -1, m_HIO->mLadder.m.field_0x8);
+#endif
     mProcVar6.m3570 = 1;
     m34C2 = 4;
     dComIfGp_setPlayerStatus1(0, daPyStts1_UNK10000_e);

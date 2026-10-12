@@ -126,7 +126,15 @@ BOOL daPy_lk_c::procPushMove_init() {
     }
 
     commonProcInit(daPyProc_PUSH_MOVE_e);
+#if TARGET_PC
+    // QoL "Empujar bloques más rápido" (pc_qol.h; wwrando increase_block_moving_animation): push
+    // animation 1.4 instead of 1.0. Not in dProcPushMove_init (the event push of doors), so
+    // Forsaken Fortress's door keeps its timing (wwrando needs fix_forsaken_fortress_door_softlock)
+    setSingleMoveAnime(ANM_WALKPUSH, pc_qol(PC_QOL_FAST_BLOCKS) ? 1.4f : m_HIO->mPushpull.m.field_0x8, 0.0f, -1,
+                       m_HIO->mPushpull.m.field_0xC);
+#else
     setSingleMoveAnime(ANM_WALKPUSH, m_HIO->mPushpull.m.field_0x8, 0.0f, -1, m_HIO->mPushpull.m.field_0xC);
+#endif
     mProcVar6.m3570 = 1;
     dComIfGp_setPlayerStatus0(0, daPyStts0_UNK4000000_e);
 
@@ -169,7 +177,13 @@ BOOL daPy_lk_c::procPullMove_init() {
     }
 
     commonProcInit(daPyProc_PULL_MOVE_e);
+#if TARGET_PC
+    // QoL "Empujar bloques más rápido": pull animation 1.4 instead of 1.0
+    setSingleMoveAnime(ANM_WALKPULL, pc_qol(PC_QOL_FAST_BLOCKS) ? 1.4f : m_HIO->mPushpull.m.field_0x10, 0.0f, -1,
+                       m_HIO->mPushpull.m.field_0x14);
+#else
     setSingleMoveAnime(ANM_WALKPULL, m_HIO->mPushpull.m.field_0x10, 0.0f, -1, m_HIO->mPushpull.m.field_0x14);
+#endif
     mProcVar6.m3570 = 1;
     dComIfGp_setPlayerStatus0(0, daPyStts0_UNK4000000_e);
 

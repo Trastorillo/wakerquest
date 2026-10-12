@@ -25,6 +25,9 @@
 #include "JSystem/J2DGraph/J2DGrafContext.h"
 #include "stdio.h"
 #include "string.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 
 enum {
@@ -3316,7 +3319,13 @@ void dMap_c::drawPointGc(u8 kind, f32 posX, f32 posY, f32 posZ, s8 roomNo, s16 a
                 }
                 break;
             case MAP_POINT_TBOX:
+#if TARGET_PC
+                // QoL "Cofres de Tingle sin Tingle Tuner" (pc_qol.h; BetterWW tingle_chests_without_tuner.asm):
+                // Tingle chests (opened flag 0xF or 0x10) show on the minimap with the compass too
+                if (pc_qol(PC_QOL_TINGLE_CHESTS) || (param_7 != 0xF && param_7 != 0x10)) {
+#else
                 if (param_7 != 0xF && param_7 != 0x10) {
+#endif
                     if (getKindMapType() == MAP_KIND_DUNGEON) {
                         if (dComIfGs_isDungeonItemCompass()) {
                             if (mMapDispMode == MAP_DISP_FULL) {

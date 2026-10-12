@@ -23,6 +23,9 @@
 #include "d/actor/d_a_obj_mkie.h"
 #include "d/actor/d_a_player.h"
 #include "d/actor/d_a_obj_eff.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 namespace daObjMovebox {
 
@@ -1598,6 +1601,19 @@ void Act_c::mode_wait() {
         ((daPy_py_c*)dComIfGp_getPlayer(0))->onPushPullKeep();
         mode_walk_init();
         
+#if TARGET_PC
+        // QoL "Empujar bloques más rápido" (pc_qol.h; wwrando increase_block_moving_animation): every
+        // block type moves one step in 12 frames instead of its m04 / m0A (20)
+        const s16 pullFrames = pc_qol(PC_QOL_FAST_BLOCKS) ? 12 : attr()->m0A;
+        const s16 pushFrames = pc_qol(PC_QOL_FAST_BLOCKS) ? 12 : attr()->m04;
+        if (cLib_checkBit(mPPLabel, dBgW::PPLABEL_PULL)) {
+            m644 = pullFrames;
+            m630 = (f32)0x8000 / pullFrames;
+        } else {
+            m644 = pushFrames;
+            m630 = (f32)0x8000 / pushFrames;
+        }
+#else
         if (cLib_checkBit(mPPLabel, dBgW::PPLABEL_PULL)) {
             m644 = attr()->m0A;
             m630 = (f32)0x8000 / attr()->m0A;
@@ -1605,6 +1621,7 @@ void Act_c::mode_wait() {
             m644 = attr()->m04;
             m630 = (f32)0x8000 / attr()->m04;
         }
+#endif
     }
 }
 

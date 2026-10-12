@@ -17,6 +17,9 @@
 #include "d/d_meter.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include "d/actor/d_a_movie_player.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 #if VERSION == VERSION_PAL
     #define title_of_scene_class dScnTitle_c
@@ -70,7 +73,13 @@ static BOOL dScnTitle_Execute(title_of_scene_class* i_this) {
             return TRUE;
 
         if (fpcM_GetName(i_this) == fpcNm_ENDING_SCENE_e) {
+#if TARGET_PC
+            // QoL "Sin vídeos de título y final" (pc_qol.h; wwrando remove_title_and_ending_videos, which
+            // puts a blank video in their place): the epilogue counts as finished at once
+            if (pc_qol(PC_QOL_SKIP_VIDEOS) || movie->mpGetMovieRestFrame() == 0) {
+#else
             if (movie->mpGetMovieRestFrame() == 0) {
+#endif
 #if VERSION == VERSION_DEMO
                 fopScnM_ChangeReq(i_this, fpcNm_NAMEEX_SCENE_e, fpcNm_OVERLAP0_e, 5);
 #else
@@ -83,7 +92,13 @@ static BOOL dScnTitle_Execute(title_of_scene_class* i_this) {
                 movie->mpSetPercentMovieVol(0.0f);
             }
         } else {
+#if TARGET_PC
+            // QoL "Sin vídeos de título y final": the title video counts as finished at once
+            if (CPad_CHECK_TRIG_A(0) || CPad_CHECK_TRIG_B(0) || CPad_CHECK_TRIG_START(0) || pc_qol(PC_QOL_SKIP_VIDEOS) ||
+                movie->mpGetMovieRestFrame() == 0) {
+#else
             if (CPad_CHECK_TRIG_A(0) || CPad_CHECK_TRIG_B(0) || CPad_CHECK_TRIG_START(0) || movie->mpGetMovieRestFrame() == 0) {
+#endif
                 dComIfG_changeOpeningScene(i_this, fpcNm_OPENING_SCENE_e);
                 movie->mpSetPercentMovieVol(0.0f);
             }

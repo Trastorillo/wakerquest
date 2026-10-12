@@ -16,7 +16,14 @@
 
 /* 80132F34-80132F58       .text getLadderMoveAnmSpeed__9daPy_lk_cFv */
 f32 daPy_lk_c::getLadderMoveAnmSpeed() {
+#if TARGET_PC
+    // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): ladders and vines
+    // climbed at up to 1.6 instead of 1.2
+    return getAnmSpeedStickRate(m_HIO->mLadder.m.field_0x28,
+                                pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mLadder.m.field_0x24);
+#else
     return getAnmSpeedStickRate(m_HIO->mLadder.m.field_0x28, m_HIO->mLadder.m.field_0x24);
+#endif
 }
 
 /* 80132F58-80133058       .text setLadderFootSe__9daPy_lk_cFv */
@@ -90,7 +97,14 @@ int daPy_lk_c::setMoveBGLadderCorrect() {
 
 /* 801333A8-80133414       .text procLadderUpStart_init_sub__9daPy_lk_cFv */
 void daPy_lk_c::procLadderUpStart_init_sub() {
+#if TARGET_PC
+    // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): getting on a ladder at 1.6
+    // instead of 1.0
+    setSingleMoveAnime(ANM_LADDERUPST, pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mLadder.m.field_0x4, 0.0f, -1,
+                       m_HIO->mLadder.m.field_0x8);
+#else
     setSingleMoveAnime(ANM_LADDERUPST, m_HIO->mLadder.m.field_0x4, 0.0f, -1, m_HIO->mLadder.m.field_0x8);
+#endif
     mProcVar6.m3570 = 1;
     m34C2 = 4;
     dComIfGp_setPlayerStatus0(0, daPyStts0_UNK2000000_e);
@@ -172,7 +186,14 @@ BOOL daPy_lk_c::procLadderUpEnd_init(BOOL param_0) {
     } else {
         anm = ANM_LADDERUPEDR;
     }
+#if TARGET_PC
+    // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): getting off a
+    // ladder at 1.4 instead of 0.9
+    setSingleMoveAnime(anm, pc_qol(PC_QOL_FAST_CLIMB) ? 1.4f : m_HIO->mLadder.m.field_0xC, 0.0f, -1,
+                       m_HIO->mLadder.m.field_0x10);
+#else
     setSingleMoveAnime(anm, m_HIO->mLadder.m.field_0xC, 0.0f, -1, m_HIO->mLadder.m.field_0x10);
+#endif
     m34C2 = 7;
     gravity = 0.0f;
     speed.y = 0.0f;

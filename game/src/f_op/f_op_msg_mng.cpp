@@ -16,6 +16,9 @@
 #include "JSystem/JUtility/JUTFont.h"
 #include "SSystem/SComponent/c_malloc.h"
 #include "m_Do/m_Do_controller_pad.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 #include <stdio.h>
 #if VERSION <= VERSION_JPN
 #include "d/d_s_play.h"
@@ -1504,7 +1507,17 @@ mesg_data* fopMsgM_msgGet_c::getMesgData(mesg_header* i_head) {
 /* 8002E308-8002E378       .text getMesgEntry__16fopMsgM_msgGet_cFP11mesg_header */
 JMSMesgEntry_c fopMsgM_msgGet_c::getMesgEntry(mesg_header* i_head) {
     mesg_info* info = getMesgInfo(i_head);
+#if TARGET_PC
+    // QoL "Texto instantáneo" (pc_qol.h; wwrando make_all_text_instant: every message's initial
+    // draw type 1, instant)
+    JMSMesgEntry_c entry = info->mEntries[mMsgIdx];
+    if (pc_qol(PC_QOL_INSTANT_TEXT)) {
+        entry.mDrawType = 1;
+    }
+    return entry;
+#else
     return info->mEntries[mMsgIdx];
+#endif
 }
 
 /* 8002E378-8002E430       .text getMessage__16fopMsgM_msgGet_cFP11mesg_header */
@@ -1570,7 +1583,16 @@ mesg_data* fopMsgM_itemMsgGet_c::getMesgData(mesg_header* i_head) {
 /* 8002E4DC-8002E54C       .text getMesgEntry__20fopMsgM_itemMsgGet_cFP11mesg_header */
 JMSMesgEntry_c fopMsgM_itemMsgGet_c::getMesgEntry(mesg_header* i_head) {
     mesg_info* info = getMesgInfo(i_head);
+#if TARGET_PC
+    // QoL "Texto instantáneo": as fopMsgM_msgGet_c::getMesgEntry
+    JMSMesgEntry_c entry = info->mEntries[mMsgIdx];
+    if (pc_qol(PC_QOL_INSTANT_TEXT)) {
+        entry.mDrawType = 1;
+    }
+    return entry;
+#else
     return info->mEntries[mMsgIdx];
+#endif
 }
 
 /* 8002E54C-8002E5FC       .text getMessage__20fopMsgM_itemMsgGet_cFP11mesg_header */
@@ -3870,6 +3892,17 @@ void fopMsgM_msgDataProc_c::stringSet() {
             } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_UNK02) {
                 field_0x29A = 0;
                 count += bmgData[count + 1];
+#if TARGET_PC
+            } else if (
+                // QoL "Texto instantáneo" (pc_qol.h; wwrando make_all_text_instant removes these tags from
+                // every message): the waits UNK03 and WAIT, and UNK04 except in messages 7726 (Maggie's
+                // father's rupees) and 2488 (Orca after the Hurricane Spin), are skipped
+                pc_qol(PC_QOL_INSTANT_TEXT) && (u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 &&
+                ((u8)bmgData[count + 4] == MsgCtrlCode_UNK03 || (u8)bmgData[count + 4] == MsgCtrlCode_WAIT ||
+                 ((u8)bmgData[count + 4] == MsgCtrlCode_UNK04 && mesgEntry->mMsgNo != 7726 && mesgEntry->mMsgNo != 2488))
+            ) {
+                count += bmgData[count + 1];
+#endif
             } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_UNK03) {
                 waitTimer = (u8)bmgData[count + 5] << 8;
                 waitTimer |= (u8)bmgData[count + 6];

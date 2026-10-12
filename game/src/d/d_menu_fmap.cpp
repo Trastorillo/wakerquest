@@ -20,6 +20,13 @@
 #include "d/actor/d_a_ship.h"
 #include <dolphin/mtx/mtx.h>
 #include "stdio.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+// QoL "Carta náutica completa" (pc_qol.h; BetterWW reveal_sea_chart.asm, which sets every sector's
+// charted bit in a new game's save): while the option is on, this menu reads every sector as charted.
+// Nothing is written to the save; sectors reached are still recorded (dComIfGs_onSaveArriveGrid).
+#define dComIfGs_isSaveArriveGrid(i_no) (pc_qol(PC_QOL_REVEAL_CHART) || dComIfGs_isSaveArriveGrid(i_no))
+#endif
 
 dMf_HIO_c g_mfHIO;
 

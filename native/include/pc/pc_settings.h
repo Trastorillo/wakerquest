@@ -44,8 +44,9 @@ extern "C" {
 typedef enum PcSettingTab {
     PC_SETTING_TAB_GRAPHICS = 0,    /* "Gráficos" */
     PC_SETTING_TAB_PERFORMANCE = 1, /* "Rendimiento" */
-    PC_SETTING_TAB_DEBUG = 2,       /* "Depuración" */
-    PC_SETTING_TABS = 3
+    PC_SETTING_TAB_QOL = 2,         /* "Calidad de vida" (pc_qol.h) */
+    PC_SETTING_TAB_DEBUG = 3,       /* "Depuración" */
+    PC_SETTING_TABS = 4
 } PcSettingTab;
 
 typedef enum PcOperationMode {

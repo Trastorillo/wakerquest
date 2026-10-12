@@ -783,11 +783,31 @@ BOOL daPy_lk_c::procRopeSwing() {
         onNoResetFlg1(daPyFlg1_UNK8000000);
     } else if (mProcVar2.m34D4 == 0 && mProcVar3.m34D6 == 0) {
         procRopeHangWait_init(0);
-    } else if (f30_3 > 0.6f) {
+    }
+#if TARGET_PC
+    else {
+        // QoL "Girar al balancearse" (pc_qol.h; BetterWW swing_turn.asm, turn_while_swinging): the main
+        // stick's X turns the player 64 * x units a frame while swinging, none under a quarter of it
+        if (pc_qol(PC_QOL_SWING_TURN)) {
+            const int turn = (int)(64.0f * CPad_GET_STICK_POS_X(0));
+            if (turn >= 64 / 4 || turn <= -(64 / 4)) {
+                shape_angle.y -= turn;
+                current.angle.y = shape_angle.y;
+            }
+        }
+        if (f30_3 > 0.6f) {
+            if (cM_fcos(sp0C) > 0.77f) {
+                mDoAud_seStart(JA_SE_LK_ROPE_SWING_F, &mRopePos, 0, mReverb);
+            }
+        }
+    }
+#else
+    else if (f30_3 > 0.6f) {
         if (cM_fcos(sp0C) > 0.77f) {
             mDoAud_seStart(JA_SE_LK_ROPE_SWING_F, &mRopePos, 0, mReverb);
         }
     }
+#endif
 
     return true;
 }

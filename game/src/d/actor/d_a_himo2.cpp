@@ -13,6 +13,9 @@
 #include "d/actor/d_a_player.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_cc_d.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 #include "d/d_s_play.h"
 #include "res/Object/Link.h"
 #include "f_op/f_op_camera.h"
@@ -979,7 +982,13 @@ static void new_himo2_move(himo2_class* i_this) {
         if (fopAcM_GetParam(actor) == 1) {
             i_this->m2500 = 0.0f;
             i_this->m02E4 = 0.0f;
+#if TARGET_PC
+            // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): the first-person
+            // throw extends for 20 frames instead of 40
+            i_this->m0308 = REG0_S(2) + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 20 : 0x28);
+#else
             i_this->m0308 = REG0_S(2) + 0x28;
+#endif
             i_this->m029E = 0;
             i_this->m02A0 = REG0_S(9) + 10;
             i_this->m02A2 = 3;
@@ -1048,7 +1057,13 @@ static void new_himo2_move(himo2_class* i_this) {
                 i_this->m217C = r24;
                 i_this->m2180 = fopAcM_GetID(r24);
             } else {
+#if TARGET_PC
+                // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): the
+                // third-person throw extends for 10 frames instead of 20
+                i_this->m0308 = REG0_S(2) + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 10 : 20);
+#else
                 i_this->m0308 = REG0_S(2) + 20;
+#endif
                 i_this->m2180 = fpcM_ERROR_PROCESS_ID_e;
             }
             sp130 = i_this->m2524 - actor->current.pos;
@@ -1091,7 +1106,13 @@ static void new_himo2_move(himo2_class* i_this) {
             actor->current.angle.y = cM_atan2s(f31, f28_2);
             actor->current.angle.x = -cM_atan2s(f27_4, f27_2);
         }
+#if TARGET_PC
+        // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): thrown at 40
+        // instead of 20
+        actor->speedF = pc_qol(PC_QOL_FAST_GRAPPLE) ? 40.0f : 20.0f;
+#else
         actor->speedF = 20.0f;
+#endif
         cMtx_YrotS(*calc_mtx, actor->current.angle.y);
         cMtx_XrotM(*calc_mtx, actor->current.angle.x + r4);
         sp130.y = 0.0f;
@@ -1361,15 +1382,32 @@ static void new_himo2_move(himo2_class* i_this) {
     }
     case 2: {
         cLib_addCalc0(&i_this->m24B8, 1.0f, (REG0_F(7) + 3.0f));
+#if TARGET_PC
+        // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): it falls onto
+        // its target at 20 instead of 10
+        cLib_addCalc2(&i_this->m24B4, -144.0f, 1.0f, pc_qol(PC_QOL_FAST_GRAPPLE) ? 20.0f : 10.0f);
+#else
         cLib_addCalc2(&i_this->m24B4, -144.0f, 1.0f, 10.0f);
+#endif
         if (i_this->m24B4 > -145.0f) {
             if (i_this->m24BC < 400) {
+#if TARGET_PC
+                // QoL "Garfio más rápido": wraps around its target with 25 instead of 17
+                f32 f1 = 20.0f - (i_this->m217C->scale.y - 1.0f) * (pc_qol(PC_QOL_FAST_GRAPPLE) ? 25.0f : 17.0f);
+#else
                 f32 f1 = 20.0f - (i_this->m217C->scale.y - 1.0f) * 17.0f;
+#endif
                 if (f1 < 0.5f) {
                     f1 = 0.5f;
                 }
                 int r3 = (i_this->m24C4 / f1);
+#if TARGET_PC
+                // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): the wrap
+                // counter goes up by 6 a frame instead of 1
+                int r5 = r3 + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 6 : 1);
+#else
                 int r5 = r3 + 1;
+#endif
                 i_this->m24C0 = i_this->m24BC;
                 i_this->m24BC += r5;
                 i_this->m24C4 += 1.0f;

@@ -18,7 +18,7 @@
 #expect card-roundtrip sea 44
 #expect end 3300
 # frame buttons stickX stickY
-# Gráficos: down to "Resolución interna", right five times, left twice; R, R: Depuración; A on
+# Gráficos: down to "Resolución interna", right five times, left twice; L (the tabs wrap): Depuración; A on
 # "Viajar", down three times to Dragon Roost, A
 400 L+R+Z 0 0
 403 - 0 0
@@ -38,10 +38,8 @@
 432 - 0 0
 434 LEFT 0 0
 436 - 0 0
-440 R 0 0
+440 L 0 0
 442 - 0 0
-446 R 0 0
-448 - 0 0
 452 A 0 0
 454 - 0 0
 456 DOWN 0 0

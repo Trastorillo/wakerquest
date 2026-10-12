@@ -8,6 +8,7 @@
 #include "pc/pc_aspect.h"
 #include "pc/pc_harness.h"
 #include "pc/game_hooks.h"
+#include "pc/pc_qol.h"
 #endif
 #include "d/d_camera.h"
 #include "d/d_bg_s_gnd_chk.h"
@@ -4009,7 +4010,13 @@ bool dCamera_c::talktoCamera(s32 param_1) {
         talk->m378 = 'TALK';
         talk->m3BC = 0;
         talk->m3B0 = -1;
+#if TARGET_PC
+        // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): the talk
+        // camera gets to its place in 10 frames instead of 20
+        talk->m3C0 = pc_qol(PC_QOL_FAST_CLIMB) ? 10 : 20;
+#else
         talk->m3C0 = 20;
+#endif
         talk->m3B4 = 0;
         talk->m3B8 = -1;
         talk->m3D8 = 999.9f;
