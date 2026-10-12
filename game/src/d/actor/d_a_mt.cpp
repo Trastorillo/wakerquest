@@ -30,6 +30,9 @@
 #include "JSystem/J3DGraphAnimator/J3DJoint.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 static u8 mt_count;
 static daMt_HIO_c l_HIO;
@@ -1932,6 +1935,14 @@ void damage_check(mt_class* i_this) {
             atInfo.mpObj = i_this->mEyeSph.GetTgHitObj();
             atInfo.pParticlePos = i_this->mEyeSph.GetTgHitPosP();
             if (atInfo.mpObj->ChkAtType(AT_TYPE_LIGHT_ARROW)) {
+#if TARGET_PC
+                // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm,
+                // magtail_respawn_when_head_light_arrowed): a Light Arrow in the head lets a
+                // respawning Magtail come back, as one in the body does (m1CBC)
+                if (pc_qol(PC_QOL_FIX_BUGS)) {
+                    i_this->m1CBC = 1;
+                }
+#endif
                 i_this->mEnemyIce.mLightShrinkTimer = 1;
                 return;
             }

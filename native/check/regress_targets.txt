@@ -135,6 +135,18 @@ options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol.txt
 # the baton's metronome, drone and pulse loops have no actor position, so the scene change did not end them
 # and they sounded on at Windfall for good; the next PLAY scene now stops them (fails without the fix)
 options-menu 0 --preset sailing --input native/check/input/menu-warp-conducting.txt
+# Calidad de vida's "Experiencia BetterWW" (every QoL row to BetterWW's defaults, saved, still editable) and
+# "Valores originales" (every row off)
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol-preset.txt
+options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol-original.txt
+# QoL "Barco sin restricciones" (COS_QOL_FREE_BOAT): the sailing smoke before Dragon Roost's arrival (0x0902
+# cleared) crosses into room 18, which the boat's story path 0 forbids then (it fails with the option off), and
+# with neither 0x1980 nor 0x0A80 the boat still offers "get in" (the reboard fails with the option off)
+sailing 0 --preset sailing --env COS_BOOT_EVENTS_OFF=0902 --env COS_QOL_FREE_BOAT=1
+sailing 0 --preset sailing --env COS_BOOT_EVENTS_OFF=1980,0A80 --env COS_QOL_FREE_BOAT=1
+# QoL "Saltar la introducción" (COS_QOL_SKIP_INTRO): M14's real new-game flow without the prologue; the name
+# scene requests the PLAY scene itself, Outset's intro event plays and the player is controllable
+outset-real 0 --input native/check/input/new-game-skip-intro.txt --env COS_QOL_SKIP_INTRO=1
 static-init 2 --preset bogus
 # COS_SMOKE=sailing (lane sailing): the sailing preset's boot on the boat, off it with A and back on
 # with A after swimming to it (bug B17: the preset lacked event bits 0x0A80/0x1980), the wind turned north (the wind

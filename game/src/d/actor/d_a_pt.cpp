@@ -27,6 +27,9 @@
 #include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
 #include "res/Object/Pt.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 static bool hio_set;
 static daPt_HIO_c l_HIO;
@@ -1397,6 +1400,14 @@ static cPhs_State daPt_Create(fopAc_ac_c* a_this) {
         i_this->mEnemyIce.mCylHeight = REG0_F(5) + 30.0f;
         i_this->mEnemyIce.mParticleScale = REG0_F(8) + 0.6f;
         i_this->mEnemyIce.mYOffset = REG0_F(9) + 40.0f;
+#if TARGET_PC
+        // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm,
+        // miniblin_set_death_switch_when_light_arrowed): a Miniblin that does not come back sets its
+        // switch also when a Light Arrow kills it (enemy_ice sets mDeathSwitch; it was left 0)
+        if (pc_qol(PC_QOL_FIX_BUGS) && i_this->mBehaviorType != 0) {
+            i_this->mEnemyIce.mDeathSwitch = i_this->mDisableRespawnSwitch;
+        }
+#endif
         i_this->mEnemyFire.mpMcaMorf = i_this->mpMorf;
         i_this->mEnemyFire.mpActor = a_this;
         for (int i = 0; i < ARRAY_SIZE(i_this->mEnemyFire.mFlameJntIdxs); i++) {

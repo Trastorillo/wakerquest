@@ -484,7 +484,8 @@ const PcSettingChoice kHitch[] = {{"0", "Desactivadas", "Off"}, {"33", "Más de 
 // Calidad de vida > Vela (COS_QOL_SAIL, pc_qol.h)
 const PcSettingChoice kQolSail[] = {{"0", "Original", "Original"},
                                     {"swift", "Vela rápida (Swift Sail)", "Swift Sail"},
-                                    {"brisk", "Vela ligera (Brisk Sail)", "Brisk Sail"}};
+                                    {"brisk", "Vela ligera (Brisk Sail)", "Brisk Sail"},
+                                    {"wind", "Vela normal con viento a favor", "Normal sail, wind at your back"}};
 const PcSettingChoice kHdStats[] = {{"0", "Desactivadas", "Off"}, {"150", "Cada 150 cuadros", "Every 150 frames"},
                                     {"300", "Cada 300 cuadros", "Every 300 frames"},
                                     {"600", "Cada 600 cuadros", "Every 600 frames"}};
@@ -617,11 +618,11 @@ const PcSettingDesc kBuiltins[] = {
      "Faster Ballad of Gales",
      "The Ballad of Gales warp starts as soon as the cyclone appears, without the boat's rise "
      "(BetterWW)."},
-    {"COS_QOL_SKIP_VIDEOS", "Sin vídeos de título y final",
-     "Sin el vídeo que sale al esperar en el título ni el del epílogo del final (BetterWW).",
-     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 70,
-     "No title and ending videos",
-     "No video when waiting at the title screen and no epilogue video at the end (BetterWW)."},
+    {"COS_QOL_SKIP_INTRO", "Saltar la introducción",
+     "Una partida nueva empieza en Isla Initia, sin la leyenda del principio (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 75,
+     "Skip the intro",
+     "A new game starts on Outset Island, without the opening legend (BetterWW)."},
     {"COS_QOL_REVEAL_CHART", "Carta náutica completa",
      "La carta náutica muestra todo el mar. No cambia la partida guardada: al desactivarlo vuelve a "
      "mostrar lo explorado (BetterWW).",
@@ -636,11 +637,20 @@ const PcSettingDesc kBuiltins[] = {
      "Tingle chests appear with any bomb, and with the compass they show on the map (BetterWW)."},
     {"COS_QOL_SAIL", "Vela",
      "Rápida: el viento sopla siempre a favor y el barco va al doble, como en Wind Waker HD. Ligera: igual "
-     "y frena antes (BetterWW).",
+     "y frena antes. Vela normal con viento a favor: solo el viento (BetterWW).",
      PC_SETTING_TAB_QOL, 0, CHOICES(kQolSail), "0", applyQol, nullptr, 100,
      "Sail",
      "Swift: the wind always blows from behind and the boat goes twice as fast, as in Wind Waker HD. "
-     "Brisk: the same, and it stops sooner (BetterWW)."},
+     "Brisk: the same, and it stops sooner. Normal sail, wind at your back: only the wind (BetterWW)."},
+    {"COS_QOL_FREE_BOAT", "Barco sin restricciones",
+     "El Mascarón Rojo no te hace volver por no haber avanzado en la historia (solo en el borde del mar) y "
+     "deja subir aunque el viento no sople a favor. Puedes llegar antes de tiempo a sitios de la historia "
+     "(BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 105,
+     "Unrestricted boat",
+     "The King of Red Lions does not turn you back for not having got far enough in the story (only at "
+     "the edge of the sea) and lets you board whatever the wind. You can reach story places early "
+     "(BetterWW)."},
     {"COS_QOL_SWING_TURN", "Girar al balancearse",
      "El stick gira a Link mientras se balancea en una cuerda o con el garfio (BetterWW).",
      PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 110,
@@ -651,6 +661,16 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 120,
      "No song replays",
      "After a song is played with the baton, Link does not conduct it again (BetterWW)."},
+    {"COS_QOL_FIX_BUGS", "Arreglar fallos del juego original",
+     "Arregla fallos del juego original que BetterWW corrige: la abuela sin botella vacía, Beedle comprando "
+     "Jalea azul, la Cámara Plus en el botón, Morths fuera del mapa, enemigos muertos con flechas de luz "
+     "(Stalfos, Minimoblin, Poes de Jalhalla, Magtail) y el disparador de Ganon Fantasma.",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 130,
+     "Fix bugs of the original game",
+     "Fixes bugs of the original game that BetterWW fixes: the grandmother without an empty bottle, "
+     "Beedle buying Blue Chu Jelly, the Deluxe Picto Box on a button, Morths out of the map, enemies "
+     "killed with Light Arrows (Stalfos, Miniblins, Jalhalla's Poes, Magtails) and Phantom Ganon's "
+     "trigger."},
     // Depuración
     {"COS_PERF_EVERY", "Intervalo del registro perf",
      "Cada cuántos cuadros se escribe una línea [cos] perf en el registro (native/logs/).",
@@ -696,7 +716,7 @@ const PcSettingDesc kBuiltins[] = {
 
 // ---- menu state ----------------------------------------------------------------------------------
 
-enum class RowKind { EditMode, Setting, Warp, Sailing, Screenshot, Reload };
+enum class RowKind { EditMode, Setting, Warp, Sailing, Screenshot, Reload, QolBetterWW, QolOriginal };
 
 struct Row {
     RowKind kind;
@@ -744,6 +764,10 @@ std::vector<Row> rowsOf(int tab) {
     std::vector<Row> rows;
     if (tab == PC_SETTING_TAB_GRAPHICS) {
         rows.push_back({RowKind::EditMode});
+    }
+    if (tab == PC_SETTING_TAB_QOL) {
+        rows.push_back({RowKind::QolBetterWW});
+        rows.push_back({RowKind::QolOriginal});
     }
     if (tab == PC_SETTING_TAB_DEBUG) {
         rows.push_back({RowKind::Warp});
@@ -879,6 +903,40 @@ void doSailing() {
     dComIfGp_setNextStage(kSailingSpawn.stage, (s16)kSailingSpawn.point, (s8)kSailingSpawn.room, -1);
 }
 
+// Calidad de vida > "Experiencia BetterWW" / "Valores originales": every QoL row set at once, as if
+// changed by hand (saved to settings.ini, each row still editable after). BetterWW's own defaults
+// (wwr_ui/randomizer_window.ui at 4501481): everything on but the full sea chart and the unrestricted
+// boat; its "remove title and ending videos" also skips the intro and fixes the original's bugs (the
+// videos part is not an option here: the port plays no THP video yet, docs/QOL_PLAN.md).
+struct QolPresetValue {
+    PcQol which;
+    const char* betterww;
+};
+const QolPresetValue kQolPreset[] = {
+    {PC_QOL_INSTANT_TEXT, "1"}, {PC_QOL_FAST_ROLL, "1"},      {PC_QOL_FAST_BLOCKS, "1"},
+    {PC_QOL_FAST_GRAPPLE, "1"}, {PC_QOL_FAST_CLIMB, "1"},     {PC_QOL_FAST_BALLAD, "1"},
+    {PC_QOL_SKIP_INTRO, "1"},   {PC_QOL_REVEAL_CHART, "0"},
+    {PC_QOL_TINGLE_CHESTS, "1"}, {PC_QOL_SAIL, "swift"},      {PC_QOL_FREE_BOAT, "0"},
+    {PC_QOL_SWING_TURN, "1"},   {PC_QOL_NO_SONG_REPLAY, "1"}, {PC_QOL_FIX_BUGS, "1"},
+};
+static_assert(sizeof(kQolPreset) / sizeof(kQolPreset[0]) == PC_QOLS, "a QoL option without a preset value");
+
+void applyQolPreset(bool betterww) {
+    int locked = 0;
+    for (const QolPresetValue& p : kQolPreset) {
+        const char* key = pc_qol_key(p.which);
+        if (pc_settings_locked(key)) {
+            locked++;
+            continue;
+        }
+        pc_settings_set_mode(key, pc_settings_mode(), betterww ? p.betterww : "0");
+    }
+    writef(STDERR_FILENO, "[cos] menu: QoL preset %s applied (%d rows set by the environment kept)\n",
+           betterww ? "BetterWW" : "original", locked);
+    toast(betterww ? T("Calidad de vida: valores de BetterWW", "Quality of life: BetterWW's values")
+                   : T("Calidad de vida: juego original", "Quality of life: the original game"));
+}
+
 void activate(const Row& r, int dir) {
     switch (r.kind) {
     case RowKind::EditMode:
@@ -901,6 +959,12 @@ void activate(const Row& r, int dir) {
     case RowKind::Screenshot:
         if (dir == 0) {
             m.pendingShot = true;
+        }
+        break;
+    case RowKind::QolBetterWW:
+    case RowKind::QolOriginal:
+        if (dir == 0) {
+            applyQolPreset(r.kind == RowKind::QolBetterWW);
         }
         break;
     case RowKind::Reload:
@@ -1011,6 +1075,8 @@ std::string rowLabel(const Row& r) {
     case RowKind::Sailing: return T("Navegar (barco, vela y batuta)", "Sail (boat, sail and baton)");
     case RowKind::Screenshot: return T("Capturar pantalla", "Take a screenshot");
     case RowKind::Reload: return T("Recargar ajustes del archivo", "Reload settings from the file");
+    case RowKind::QolBetterWW: return T("Experiencia BetterWW", "BetterWW experience");
+    case RowKind::QolOriginal: return T("Valores originales", "Original values");
     case RowKind::Setting: break;
     }
     std::string s = settingLabel(r.desc);
@@ -1028,6 +1094,8 @@ std::string rowValue(const Row& r) {
     case RowKind::Sailing: return inPlay() ? T("A: zarpar", "A: set sail") : T("solo en partida", "in game only");
     case RowKind::Screenshot: return T("A: capturar", "A: capture");
     case RowKind::Reload: return T("A: recargar", "A: reload");
+    case RowKind::QolBetterWW:
+    case RowKind::QolOriginal: return T("A: aplicar", "A: apply");
     case RowKind::Setting: break;
     }
     return choiceLabel(r.desc, pc_settings_get_mode(r.desc->key, rowMode(r.desc)));
@@ -1077,6 +1145,16 @@ std::string rowHelp(const Row& r) {
                  "Saves the game's image (without the menu) as shot-<frame>.png in the game's folder.");
     case RowKind::Reload:
         return std::string(T("Vuelve a leer ", "Reads ")) + pc_settings_path() + T(".", " again.");
+    case RowKind::QolBetterWW:
+        return T("Pone las opciones de esta pestaña como las trae BetterWW (de WideBoner, basado en el "
+                 "randomizer wwrando de LagoLunatic): todo activado menos la carta náutica completa y el barco "
+                 "sin restricciones; vela rápida. Después se puede cambiar cada opción.",
+                 "Sets this tab's options to BetterWW's defaults (by WideBoner, based on LagoLunatic's wwrando "
+                 "randomizer): everything on but the full sea chart and the unrestricted boat; Swift Sail. "
+                 "Each option can be changed afterwards.");
+    case RowKind::QolOriginal:
+        return T("Desactiva todas las opciones de esta pestaña: el juego original.",
+                 "Turns every option of this tab off: the original game.");
     case RowKind::Setting: break;
     }
     const char* descHelp = settingHelp(r.desc);

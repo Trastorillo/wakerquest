@@ -136,6 +136,10 @@ void pc_play_stage_started(const char* stage, int room, int point, int layer);
    values, e.g. 2A80) the debug boot sets on its new file, so a stage boot can start later in the
    story. Returns how many of them were stored in out (at most max); exits 2 if malformed. */
 int pc_boot_event_bits(unsigned short* out, int max);
+/* COS_BOOT_EVENTS_OFF=<hex>[,<hex>...]: event bits the debug boot clears after COS_BOOT_EVENTS and
+   COS_BOOT_PRESET, so a check can start a preset earlier in the story (e.g. the sailing preset
+   before Dragon Roost: 0902,1980). Same format and return as pc_boot_event_bits. */
+int pc_boot_event_bits_off(unsigned short* out, int max);
 /* COS_BOOT_ITEMS=<hex>[,<hex>...] (with COS_BOOT_STAGE; bug B6): items (dItemNo_*, e.g. 20 for the
    telescope) the debug boot gives its new file with execItemGet; the first one is put on X.
    Returns how many were stored in out (at most max); exits 2 if malformed. */

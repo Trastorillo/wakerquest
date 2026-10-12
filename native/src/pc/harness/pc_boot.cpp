@@ -76,8 +76,8 @@ int parseHexList(const char* var, const char* what, unsigned long maxValue, cons
             pc_exit(PC_EXIT_USAGE);
         }
         out[n++] = (unsigned short)v;
-        writef(STDERR_FILENO, "[cos] boot-stage: %s 0x%04lX given to the new file (%s)\n", what, v,
-               var);
+        writef(STDERR_FILENO, "[cos] boot-stage: %s 0x%04lX %s the new file (%s)\n", what, v,
+               strcmp(var, "COS_BOOT_EVENTS_OFF") == 0 ? "cleared on" : "given to", var);
         if (*e == '\0') {
             return n;
         }
@@ -164,6 +164,10 @@ void pc_boot_stage_requested(const char* stage, int room, int point, int layer) 
 
 int pc_boot_event_bits(unsigned short* out, int max) {
     return parseHexList("COS_BOOT_EVENTS", "event bit", 0xFFFF, "2A80,0310", out, max);
+}
+
+int pc_boot_event_bits_off(unsigned short* out, int max) {
+    return parseHexList("COS_BOOT_EVENTS_OFF", "event bit", 0xFFFF, "0902,1980", out, max);
 }
 
 int pc_boot_items(unsigned short* out, int max) {

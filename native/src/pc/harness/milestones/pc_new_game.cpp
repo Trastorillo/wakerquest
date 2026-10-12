@@ -38,6 +38,7 @@
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 #include "m_Do/m_Do_controller_pad.h"
+#include "pc/pc_qol.h"
 
 #include <cmath>
 #include <cstring>
@@ -169,6 +170,22 @@ const char* newGameGap() {
 void openFrame(unsigned int frames) {
     base_process_class* proc = executing(fpcNm_OPEN_SCENE_e);
     if (sPhase == kWaitOpen) {
+        if (proc == nullptr && isTarget() && pc_qol(PC_QOL_SKIP_INTRO) && executing(fpcNm_PLAY_SCENE_e) != nullptr) {
+            // QoL "Saltar la introducción" (docs/QOL_PLAN.md): the name scene requests the PLAY scene
+            // itself; new-game is logged once it executes, with the same checks of the name scene.
+            writef(STDERR_FILENO, "[cos] new-game: no prologue (COS_QOL_SKIP_INTRO): PLAY scene executing at "
+                                  "frame %u; player name \"%s\"\n", frames, dComIfGs_getPlayerName());
+            if (const char* gap = newGameGap()) {
+                writef(STDERR_FILENO, "[cos] new-game: FAIL %s\n", gap);
+                if (isTarget()) {
+                    pc_exit(PC_EXIT_CHECK_FAILED);
+                }
+            }
+            pc_milestone("new-game");
+            sPhase = kWaitPlay;
+            sLastReason = nullptr;
+            return;
+        }
         if (proc == nullptr) {
             if (isTarget()) {
                 waiting("new-game", frames, "OPEN scene not executing");

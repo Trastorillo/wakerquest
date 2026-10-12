@@ -4,6 +4,7 @@
 //   [cos] qol-probe f=<frame> <stage>:<room> pos=(x,y,z) spd=<speedF> ang=<shape_angle.y>
 //     roll=<checkFrontRoll> ev=<event id> "<event name>" msg=<message number>:<status> eye=(x,y,z)
 //     ship=<boat speedF, -1 without boat>@(<boat position>) do=<the A button's action, dActStts_*> sw=<switch, -1>
+//     xyz=<the items on X, Y and Z (dComIfGp_getSelectItem)>
 //     [act=<name>:(x,y,z)]
 // Variables:
 //   COS_QOL_PROBE_FROM=<frame>, COS_QOL_PROBE_TO=<frame>   only the lines of those frames;
@@ -25,13 +26,26 @@
 //   COS_QOL_PROBE_SE=<n>   every n frames (also outside the PLAY scene) one line with what JAudio plays:
 //       "[cos] qol-probe se f=<frame> <pc_audio_state.cpp's line>" (the registered sound effects, the
 //       SE tracks still sounding, the BGM, the audio thread's counters).
+//   COS_QOL_PROBE_SAVE=<n>   n frames after the player first exists, the save data in memory
+//       (dSv_save_c: items, event bits, stage memories) as "[cos] qol-probe save <offset> <hex>" lines
+//       of 64 bytes (all-zero lines left out), to compare a run with an option off and on;
+//   COS_QOL_PROBE_ITEM=<frame>:<item>   gives that item (execItemGet, as a chest does) at that frame;
+//   COS_QOL_PROBE_LIGHT=<frame>   a Light Arrow's hit on the probed actor if it is a Miniblin (d_a_pt:
+//       its enemy_ice light timer started, as its damage check does), for the bug fixes' check;
+//   COS_QOL_PROBE_PATHS=1   once the boat exists, the paths daShip_c::checkOutRange keeps the boat in
+//       (its room's paths: index, points, XZ bounds), and daShip_c::checkOutRange at a few points
+//       of the sea (the boat put there for the call, then back): 1 = the boat would be turned back,
+//       for the unrestricted boat's check.
 #include "pc_internal.h"
 
 #include "d/actor/d_a_player.h"
 #include "d/actor/d_a_ship.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_event_data.h"
+#include "d/actor/d_a_pt.h"
 #include "d/d_event_manager.h"
+#include "d/d_item.h"
+#include "d/d_path.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_op/f_op_camera.h"
 #include "f_op/f_op_msg.h"
@@ -86,6 +100,13 @@ void seLine(unsigned int frames) {
     audioStateLine(line, sizeof(line));
     writef(STDERR_FILENO, "[cos] qol-probe se f=%u %s\n", frames, line);
 }
+int sSaveAfter = -1;
+unsigned int sItemFrame = 0;
+int sItem = -1;
+unsigned int sLightFrame = 0;
+bool sPaths = false;
+bool sPathsDone = false;
+unsigned int sFirstPlayerFrame = 0;
 
 void* isPlayScene(void* proc, void*) {
     return fpcM_GetName(proc) == fpcNm_PLAY_SCENE_e ? proc : nullptr;
@@ -190,16 +211,28 @@ void qolProbeFrame(unsigned int frames) {
         if (const char* v = getenv("COS_QOL_PROBE_SE"); v != nullptr) {
             sSeEvery = (unsigned int)strtoul(v, nullptr, 0);
         }
+        sPaths = getenv("COS_QOL_PROBE_PATHS") != nullptr;
+        if (const char* v = getenv("COS_QOL_PROBE_ITEM"); v != nullptr) {
+            char* end = nullptr;
+            sItemFrame = (unsigned int)strtoul(v, &end, 0);
+            sItem = end != nullptr && *end == ':' ? (int)strtol(end + 1, nullptr, 0) : -1;
+        }
+        if (const char* v = getenv("COS_QOL_PROBE_LIGHT"); v != nullptr) {
+            sLightFrame = (unsigned int)strtoul(v, nullptr, 0);
+        }
+        if (const char* v = getenv("COS_QOL_PROBE_SAVE"); v != nullptr) {
+            sSaveAfter = (int)strtol(v, nullptr, 0);
+        }
         if (const char* v = getenv("COS_QOL_PROBE_MSG"); v != nullptr) {
             char* end = nullptr;
             sMsgFrame = (unsigned int)strtoul(v, &end, 0);
             sMsgNo = end != nullptr && *end == ':' ? (unsigned int)strtoul(end + 1, nullptr, 0) : 0;
         }
     }
-    if (sOn == 0 || frames < sFrom || frames > sTo) {
+    if (sOn == 0) {
         return;
     }
-    if (sSeEvery != 0 && frames % sSeEvery == 0) {
+    if (sSeEvery != 0 && frames >= sFrom && frames <= sTo && frames % sSeEvery == 0) {
         seLine(frames);
     }
     if (fpcM_Search(isPlayScene, nullptr) == nullptr) {
@@ -207,6 +240,72 @@ void qolProbeFrame(unsigned int frames) {
     }
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
     if (player == nullptr || fopAcM_GetName(player) != fpcNm_PLAYER_e || fpcM_IsCreating(fopAcM_GetID(player))) {
+        return;
+    }
+    if (sFirstPlayerFrame == 0) {
+        sFirstPlayerFrame = frames;
+        writef(STDERR_FILENO, "[cos] qol-probe: the player first exists at frame %u (%s room %d)\n", frames,
+               dComIfGp_getStartStageName(), (int)fopAcM_GetRoomNo(player));
+    }
+    if (sSaveAfter >= 0 && frames == sFirstPlayerFrame + (unsigned int)sSaveAfter) {
+        const u8* save = (const u8*)&g_dComIfG_gameInfo.save.getSavedata();
+        const size_t size = sizeof(dSv_save_c);
+        writef(STDERR_FILENO, "[cos] qol-probe: save data at frame %u (%zu bytes)\n", frames, size);
+        for (size_t at = 0; at < size; at += 64) {
+            char hex[64 * 2 + 1];
+            bool any = false;
+            size_t n = size - at < 64 ? size - at : 64;
+            for (size_t i = 0; i < n; i++) {
+                snprintf(hex + i * 2, 3, "%02x", save[at + i]);
+                any = any || save[at + i] != 0;
+            }
+            if (any) {
+                writef(STDERR_FILENO, "[cos] qol-probe save %05zx %s\n", at, hex);
+            }
+        }
+    }
+    if (sPaths && !sPathsDone) {
+        if (daShip_c* boat = dComIfGp_getShipActor(); boat != nullptr && boat->m034B != 0xFF) {
+            sPathsDone = true;
+            int index = 0;
+            for (dPath* path = dPath_GetRoomPath(boat->m034B, -1); path != nullptr;
+                 path = dPath_GetNextRoomPath(path, -1), index++) {
+                float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+                for (int i = 0; i < path->m_num; i++) {
+                    const float x = path->m_points[i].m_position.x, z = path->m_points[i].m_position.z;
+                    x0 = x < x0 ? x : x0;
+                    x1 = x > x1 ? x : x1;
+                    z0 = z < z0 ? z : z0;
+                    z1 = z > z1 ? z : z1;
+                }
+                writef(STDERR_FILENO, "[cos] qol-probe: boat path %d (room %d): %d points, x %.0f..%.0f, z %.0f..%.0f\n",
+                       index, (int)boat->m034B, (int)path->m_num, x0, x1, z0, z1);
+            }
+            struct Point {
+                const char* name;
+                float x, z;
+            };
+            const Point points[] = {
+                {"Windfall's corner (the preset's start)", -22000.0f, -175000.0f},
+                {"the middle of the sea (outside path 0)", 0.0f, 0.0f},
+                {"the fortress corner (inside path 2)", -300000.0f, -300000.0f},
+                {"past the north edge (outside path 3)", 0.0f, -355000.0f},
+                {"past the west edge (outside path 3)", -355000.0f, 0.0f},
+            };
+            const cXyz saved = boat->current.pos;
+            const s16 savedAngle = boat->m038C;
+            for (const Point& p : points) {
+                boat->current.pos.x = p.x;
+                boat->current.pos.z = p.z;
+                const BOOL out = boat->checkOutRange();
+                writef(STDERR_FILENO, "[cos] qol-probe: checkOutRange at (%.0f, %.0f), %s: %d\n", p.x, p.z, p.name,
+                       (int)out);
+            }
+            boat->current.pos = saved;
+            boat->m038C = savedAngle;
+        }
+    }
+    if (frames < sFrom || frames > sTo) {
         return;
     }
 
@@ -268,6 +367,17 @@ void qolProbeFrame(unsigned int frames) {
             dComIfGp_setNextStage(w.stage, (s16)w.point, (s8)w.room, -1);
         }
     }
+    if (sItem >= 0 && frames == sItemFrame) {
+        execItemGet((u8)sItem);
+        writef(STDERR_FILENO, "[cos] qol-probe: item 0x%02X given at frame %u\n", sItem, frames);
+    }
+    if (sLightFrame != 0 && frames == sLightFrame && sActorName == fpcNm_PT_e) {
+        if (pt_class* pt = (pt_class*)fpcM_Search(isActorName, nullptr); pt != nullptr) {
+            // What d_a_pt's damage check does for a Light Arrow (AT_TYPE_LIGHT_ARROW).
+            pt->mEnemyIce.mLightShrinkTimer = 1;
+            writef(STDERR_FILENO, "[cos] qol-probe: Light Arrow hit on the Miniblin at frame %u\n", frames);
+        }
+    }
     if (sMsgNo != 0 && frames == sMsgFrame) {
         sMsgId = fopMsgM_messageSet(sMsgNo, &player->eyePos);
         writef(STDERR_FILENO, "[cos] qol-probe: message %u shown at frame %u (process %d)\n", sMsgNo, frames,
@@ -309,14 +419,16 @@ void qolProbeFrame(unsigned int frames) {
     }
     writef(STDERR_FILENO,
            "[cos] qol-probe f=%u %s:%d pos=(%.1f,%.1f,%.1f) spd=%.2f ang=%04x roll=%d ev=%d \"%s\" msg=%u:%u "
-           "eye=(%.1f,%.1f,%.1f) ship=%.2f@(%.0f,%.0f,%.0f) do=%u sw=%d%s\n",
+           "eye=(%.1f,%.1f,%.1f) ship=%.2f@(%.0f,%.0f,%.0f) do=%u sw=%d xyz=%02x,%02x,%02x%s\n",
            frames, dComIfGp_getStartStageName(), (int)fopAcM_GetRoomNo(player), player->current.pos.x,
            player->current.pos.y, player->current.pos.z, player->speedF, (unsigned)(u16)player->shape_angle.y,
            player->checkFrontRoll() ? 1 : 0, ev->mEventId, evName, msgNo, msgStatus, eye.x, eye.y,
            eye.z, ship != nullptr ? ship->speedF : -1.0f, ship != nullptr ? ship->current.pos.x : 0.0f,
            ship != nullptr ? ship->current.pos.y : 0.0f, ship != nullptr ? ship->current.pos.z : 0.0f,
            (unsigned)dComIfGp_getDoStatus(),
-           sSwitch >= 0 ? (int)dComIfGs_isSwitch(sSwitch, fopAcM_GetRoomNo(player)) : -1, act);
+           sSwitch >= 0 ? (int)dComIfGs_isSwitch(sSwitch, fopAcM_GetRoomNo(player)) : -1,
+           (unsigned)dComIfGp_getSelectItem(0), (unsigned)dComIfGp_getSelectItem(1), (unsigned)dComIfGp_getSelectItem(2),
+           act);
 }
 
 } // namespace pc

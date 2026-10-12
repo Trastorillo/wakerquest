@@ -20,11 +20,42 @@ build reads them from the player's own disc.
 | `native/tools/dksh_cache/dksh_cache.cpp`, `switch/deko/dksh_file.{h,cpp}`, `switch/deko/{dk.h,device.cpp,memory.cpp,descriptors.cpp,overlay.cpp,pattern.cpp}`, `switch/deko/shaders/{imgui,text}_{vsh,fsh}.glsl` | Adapted from [SwitchWakerHD](https://github.com/centollOS/SwitchWakerHD) at `df8fbde` (`tools/switch/dksh_cache/dksh_cache.cpp`, `runtime/src/gfx/deko/{shader_files.{h,cpp},dk.h,backend.cpp,memory.cpp,descriptors.cpp,overlay_dk.cpp}`, `runtime/src/gfx/deko/shaders/`) | MPL-2.0 (header in each file; [mozilla.org/MPL/2.0](https://mozilla.org/MPL/2.0/)) |
 | `switch/forwarder/nx-hbloader-forwarder.patch` | Patch to nx-hbloader | same as nx-hbloader (ISC) |
 
-The quality-of-life options (`docs/QOL_PLAN.md`, `native/src/pc/features/pc_qol.cpp` and the hunks in `game/`
-it lists) reimplement the behaviour of patches from [BetterWW](https://github.com/WideBoner/betterww)
+The quality-of-life options (`docs/QOL_PLAN.md`, `native/src/pc/features/pc_qol.cpp`, the options
+menu's "Calidad de vida" tab in `native/src/pc/features/pc_menu.cpp` and the hunks in `game/` the plan
+lists) are derived from the patches and tweaks of [BetterWW](https://github.com/WideBoner/betterww)
 (WideBoner, at `4501481`) and [wwrando](https://github.com/LagoLunatic/wwrando) (LagoLunatic, at
-`9775811`), both MIT (copyright 2018 LagoLunatic): their asm patches and tweaks were read to see what
-they change; no code, asset or text of theirs is in this repository.
+`9775811`). Their assembly patches cannot run here (the game is compiled from its decompilation), so
+each patch was rewritten in the decompiled function it changes, reproducing its behaviour and its
+constants (speeds, frame counts, message numbers, event bits) closely. No asset of theirs (textures,
+models, icons) is in this repository. BetterWW credits LagoLunatic (BetterWW modifies his code),
+brainfubar (his wwrando fork was used to make BetterWW), MelonSpeedruns (the original design of the
+Brisk Sail) and JarheadHME (releases); wwrando credits MelonSpeedruns (game and graphic design),
+Hypatia (textures), SageOfMirrors and LordNed (file format documentation) and CryZe (event flag
+documentation). Both projects are under this license:
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2018 LagoLunatic
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 Everything else is the project's own code under the MIT license (`LICENSE`), copyright Pulpparty
 and depende3000, and the SwitchWaker contributors.

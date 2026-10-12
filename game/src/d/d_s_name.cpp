@@ -36,6 +36,7 @@
 #include "JSystem/JKernel/JKRMemArchive.h"
 #if TARGET_PC
 #include "pc/pc_harness.h"
+#include "pc/pc_qol.h"
 #endif
 
 dSn_HIO_c g_snHIO;
@@ -1498,7 +1499,16 @@ void dScnName_c::changeGameScene() {
         return;
 
     dComIfGs_gameStart();
+#if TARGET_PC
+    // QoL "Saltar la introducción" (pc_qol.h; BetterWW skipintro.asm, which makes dScnOpen_c::execute
+    // change to the game scene at once): a new game goes straight to the PLAY scene, as a loaded
+    // game does. The opening scene (d_s_open.cpp, d_s_open_sub.cpp) only plays the legend and its
+    // music: it sets no event bit and writes nothing to the save.
+    const bool openingScene = field_0x55f && !pc_qol(PC_QOL_SKIP_INTRO);
+    if (fopScnM_ChangeReq(this, openingScene ? fpcNm_OPEN_SCENE_e : fpcNm_PLAY_SCENE_e, fpcNm_OVERLAP0_e, 5)) {
+#else
     if (fopScnM_ChangeReq(this, field_0x55f ? fpcNm_OPEN_SCENE_e : fpcNm_PLAY_SCENE_e, fpcNm_OVERLAP0_e, 5)) {
+#endif
 #if VERSION > VERSION_DEMO
         dComIfGs_resetDan();
 #endif

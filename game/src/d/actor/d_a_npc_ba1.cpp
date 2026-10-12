@@ -10,6 +10,9 @@
 #include "d/d_letter.h"
 #include "d/d_snap.h"
 #include "res/Object/Ba.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 class daNpc_Ba1_HIO_c : public mDoHIO_entry_c {
 public:
@@ -662,7 +665,14 @@ u16 daNpc_Ba1_c::next_msgStatus(u32* i_msg_no) {
             break;
         case 0x7F4:
         neverGotSoup: 
+#if TARGET_PC
+            // QoL "Arreglar fallos del juego original" (pc_qol.h; BetterWW fix_vanilla_bugs.asm):
+            // message 0x7F9 (2041), for no empty bottle, is not in the game's text (a crash on the
+            // GameCube; here a stand-in message): the bottle message 0x7F5 (2037) either way
+            if(dComIfGs_checkEmptyBottle() || pc_qol(PC_QOL_FIX_BUGS)) {
+#else
             if(dComIfGs_checkEmptyBottle()) {
+#endif
                 *i_msg_no = 0x7F5;
             } else {
                 *i_msg_no = 0x7F9;

@@ -12,6 +12,9 @@
 #include "d/actor/d_a_player_main.h"
 #include "d/actor/d_a_gm.h"
 #include "res/Object/Ks.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 static int KS_ALL_COUNT = 0;
 static int KUTTUKU_ALL_COUNT = 0;
@@ -126,7 +129,14 @@ void naraku_check(ks_class* i_this) {
     cXyz local_24;
     cXyz local_18;
 
+#if TARGET_PC
+    // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm): no ground under the
+    // Morth (it fell out of the map) counts as the void-out ground, so it is deleted too
+    if ((pc_qol(PC_QOL_FIX_BUGS) && i_this->mAcch.GetGroundH() == -G_CM3D_F_INF) ||
+        (i_this->mAcch.GetGroundH() != -G_CM3D_F_INF && dComIfG_Bgsp()->ChkPolySafe(i_this->mAcch.m_gnd) && dComIfG_Bgsp()->GetGroundCode(i_this->mAcch.m_gnd) == 4)) {
+#else
     if (i_this->mAcch.GetGroundH() != -G_CM3D_F_INF && dComIfG_Bgsp()->ChkPolySafe(i_this->mAcch.m_gnd) && dComIfG_Bgsp()->GetGroundCode(i_this->mAcch.m_gnd) == 4) {
+#endif
         i_this->m2D3++;
 
         if (actor->current.pos.y < -500.0f || i_this->m2D3 > 0x32) {

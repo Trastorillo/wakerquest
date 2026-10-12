@@ -18,6 +18,9 @@
 #include "res/Object/Fganon.h"
 #include "res/Object/Pgsw.h"
 #include "f_op/f_op_camera.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 fganon_class* master;
 #if TARGET_PC
@@ -1122,7 +1125,14 @@ void start(fganon_class* i_this) {
         case 0: {
             offset = player->current.pos - a_this->home.pos;
             float distXZ = std::sqrtf(offset.x * offset.x + offset.z * offset.z);
+#if TARGET_PC
+            // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm,
+            // phantom_ganon_check_link_within_y_diff): not while the player is 1000 or more above
+            // him (the trigger was an endless column over his spot)
+            if (distXZ < i_this->m2BD * 10.0f && !(pc_qol(PC_QOL_FIX_BUGS) && offset.y >= 1000.0f)) {
+#else
             if (distXZ < i_this->m2BD * 10.0f) {
+#endif
                 i_this->mB54 = 1;
                 i_this->mMode = 1;
                 anm_init(i_this, dRes_INDEX_FGANON_BCK_WAIT1_e, 0.0f, J3DFrameCtrl::EMode_LOOP, 1.0f, -1);

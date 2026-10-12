@@ -4189,6 +4189,12 @@ BOOL daNpc_Ji1_c::battleAction(void*) {
                 break;
         }
 
+#if TARGET_PC
+        // Fix of the original game (BetterWW fix_vanilla_bugs.asm), always on: with no sword
+        // equipped (only reachable with a debug travel or preset here) the counter's sword icon
+        // has no texture (dItem_data::getTexture(0xFF)) and the GameCube crashed: no counter then
+        if (dComIfGs_getSelectEquip(0) != dItemNo_NONE_e)
+#endif
         dTimer_createTimer(6, 1000, 2, icon, 221.0f, 439.0f, 32.0f, 419.0f);
         dComIfGp_setMiniGameRupee(0);
         field_0xC3C = 0;
