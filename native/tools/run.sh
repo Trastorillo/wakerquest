@@ -43,7 +43,8 @@
 #                    relative F is put in the run directory, e.g. --perf perf.csv
 #   --sound          play the audio on SDL's default device; without it SDL_AUDIO_DRIVER=dummy
 #                    (headless; an SDL_AUDIO_DRIVER already in the environment is kept)
-#   --disc PATH      COS_DISC, the GZLE01 revision 0 .iso: required (option or environment) for
+#   --disc PATH      COS_DISC, the GZLE01 revision 0 .iso (GZLP01 for a European build,
+#                    COS_VERSION=3: docs/PAL_DISC_PLAN.md): required (option or environment) for
 #                    every target that boots the game
 #   --input PATH     COS_INPUT, the controller script (step 6.3; a relative path is taken from the
 #                    current directory, else from the repository); pad-echo defaults to
@@ -190,10 +191,13 @@ if [ "${COS_ALLOW_CPU_ADAPTER:-0}" = 1 ] && [ -z "${timeout_given:-}" ]; then
 fi
 case "$stall_s" in ''|*[!0-9.]*) echo "run: --stall needs seconds" >&2; exit 2 ;; esac
 
+# The disc the build runs from (native/cmake/GameConfig.cmake: GZLE01, or GZLP01 for COS_VERSION=3).
+game_id="$(sed -n 's/^COS_GAME_ID:STRING=//p' "$build/CMakeCache.txt" 2>/dev/null)"
+game_id="${game_id:-GZLE01}"
 needs_disc=1
 case "$target" in static-init|crash-test|panic-test|stall-test|timeout-test) needs_disc=0 ;; esac
 if [ "$needs_disc" = 1 ] && [ -z "$disc" ]; then
-    echo "run: no disc image: pass --disc PATH or set COS_DISC (the GZLE01 revision 0 .iso)" >&2
+    echo "run: no disc image: pass --disc PATH or set COS_DISC (the $game_id revision 0 .iso)" >&2
     exit 14
 fi
 
@@ -209,7 +213,7 @@ mkdir -p "$runs"
 # Only when the target boots the game: a smoke test that runs before the disc check needs none.
 # A missing file is left to switchwaker, which exits 14 with its own message.
 if [ "$needs_disc" = 1 ] && [ -f "$disc" ]; then
-    python3 "$disc_manifest" --verify --quiet --disc "$disc" || exit 14
+    python3 "$disc_manifest" --verify --quiet --disc "$disc" --game "$game_id" || exit 14
 fi
 
 # --- environment ------------------------------------------------------------------------------
@@ -258,6 +262,9 @@ export COS_RUN_DIR="$run_dir"
 # start, so the user's build/native-mac/user/settings.ini never changes what a test does (an
 # explicit COS_SETTINGS in the environment is kept).
 export COS_SETTINGS="${COS_SETTINGS:-$run_dir/settings.ini}"
+# The European build's language (pc_language.cpp) follows the host's locale by default: tests run in
+# English unless COS_GAME_LANGUAGE is given (the USA build ignores it).
+[ "$game_id" = GZLP01 ] && export COS_GAME_LANGUAGE="${COS_GAME_LANGUAGE:-en}"
 [ -n "$frames" ] && export COS_FRAMES="$frames"
 if [ -n "$stage" ]; then export COS_BOOT_STAGE="$stage"; else unset COS_BOOT_STAGE; fi
 if [ -n "$preset" ]; then export COS_BOOT_PRESET="$preset"; else unset COS_BOOT_PRESET; fi

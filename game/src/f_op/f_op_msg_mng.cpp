@@ -6086,7 +6086,13 @@ void fopMsgM_msgDataProc_c::getRubyString(char* param_1, char* param_2, char* pa
 /* 80035D28-80035E40       .text tag_len_kaisen_game__21fopMsgM_msgDataProc_cFPiPfPiPiPi */
 void fopMsgM_msgDataProc_c::tag_len_kaisen_game(int* param_1, f32* param_2, int* param_3, int* param_4, int* param_5) {
     int i = 0;
+#if TARGET_PC && VERSION == VERSION_PAL
+    // PAL: "24 ca\361onazos" / "24 cannonate" and the NUL take 13 bytes; the GameCube code overflows
+    // buf into its stack frame, the host's fortified strcat aborts (as tag_len_num_input's below).
+    char buf[16];
+#else
     char buf[12];
+#endif
     fopMsgM_int_to_char(buf, dComIfGs_getEventReg(dSv_event_flag_c::UNK_BEFF), false);
 
 #if VERSION == VERSION_PAL
@@ -9492,7 +9498,12 @@ void fopMsgM_msgDataProc_c::tag_stock_kenshi() {
         nowCursorPos = field_0x108[lineCount] + field_0x14 + 0.5f;
     }
 
+#if TARGET_PC && VERSION == VERSION_PAL
+    // PAL German: " Ritterwappen" and the NUL take 14 bytes (the GameCube code overflows buf2).
+    char buf2[16];
+#else
     char buf2[12];
+#endif
 
 #if VERSION == VERSION_PAL
     if (dComIfGs_getPalLanguage() == 1) {

@@ -1478,6 +1478,17 @@ void dName_c::screenSet() {
     ((J2DTextBox*)namePane.pane)->setFont(nameIn.font);
 #if VERSION == VERSION_PAL
     for (i = 0; i < 8; i++) {}
+#if TARGET_PC
+    {
+        // The layout's "END" leaves a 4-byte string; the German "O.K." and Italian "FINE" strcpy'd into
+        // it later need 5 (a 1-byte heap overflow on the GameCube too). Give it 5 bytes, same text.
+        J2DTextBox* fin = (J2DTextBox*)finBtnPane.pane;
+        char label[8];
+        snprintf(label, sizeof(label), "%s", fin->getStringPtr());
+        fin->setString("FINE");
+        strcpy(fin->getStringPtr(), strlen(label) <= 4 ? label : "END");
+    }
+#endif
     field_0x2ae8 = ((J2DTextBox*)finBtnPane.pane)->getStringPtr();
 #endif
     ((J2DTextBox*)namePane.pane)->setCharSpace(0.0f);

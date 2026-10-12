@@ -15,7 +15,8 @@ console and read its logs. The Mac build comes first: the Switch build reuses it
   On macOS, Xcode's clang and `brew install cmake ninja libmtp`.
 - Docker Desktop or Podman. The scripts use the official devkitPro image, pinned by digest. It runs
   natively on Apple silicon (`linux/arm64`). Give it at least 8 GB of memory (Settings › Resources).
-- Your disc image of the game, GameCube USA (`GZLE01`, revision 0), as an uncompressed `.iso`.
+- Your disc image of the game, GameCube USA (`GZLE01`, revision 0), as an uncompressed `.iso`; or the
+  European disc (`GZLP01`, revision 0) for the European build (`--eur`, [PAL_DISC_PLAN.md](PAL_DISC_PLAN.md)).
 - A Switch you have already set up for homebrew (Atmosphère and the Homebrew Menu), a USB-C data
   cable, and the console's **USB file transfer** (Horizon's own, or haze/DBI).
 
@@ -34,7 +35,14 @@ plus Docker Desktop or Podman:
 
 ```sh
 scripts/switch/build_native.sh       # build/switch-native/switchwaker.nro and switchwaker.elf
+scripts/switch/build_native.sh --eur --runtime-assets   # build/switch-native-eur/switchwaker-eur.nro (GZLP01)
 ```
+
+`--eur` builds the European version (`COS_VERSION=3`): "SwitchWaker EUR" in the Homebrew Menu, which
+reads `GZLP01.iso`, with the game's language from the console's (English, German, French, Spanish or
+Italian; the options menu's *Idioma del juego* / *Game language* fixes one). `--build-dir DIR` builds in
+another directory (the container sees it where the CMake cache expects `build/switch-native`, so an
+APFS copy of an existing build directory, `cp -cR`, reuses its Dawn objects).
 
 - It builds `localhost/centollos-switch-native-build:2026-10-03` the first time
   (`scripts/switch/Containerfile.native`: the pinned devkitPro image of the translated port plus
@@ -71,8 +79,9 @@ scripts/switch/build_native.sh       # build/switch-native/switchwaker.nro and s
 ## Copy to the console
 
 ```sh
-scripts/switch/push.sh --disc /path/to/GZLE01.iso   # once: the disc image (skipped if already there)
+scripts/switch/push.sh --disc /path/to/GZLE01.iso   # once: the disc image, named after its ID (skipped if already there)
 scripts/switch/push.sh native                       # the NRO and the bundled pipeline cache, read back and checked by SHA-256
+scripts/switch/push.sh native-eur                   # the same for the European NRO
 scripts/switch/push.sh --pipeline-cache             # only the bundled pipeline cache (see "Pipeline precompile")
 ```
 
@@ -81,11 +90,12 @@ SD card layout:
 | Path on the SD card | Contents |
 |---|---|
 | `switch/switchwaker/switchwaker.nro` | the app (deko3d renderer): "SwitchWaker" in the Homebrew Menu |
-| `switch/switchwaker/GZLE01.iso` | your disc image |
+| `switch/switchwaker/switchwaker-eur.nro` | the European build (`--eur`): "SwitchWaker EUR"; logs `switchwaker-eur_<date>_<time>.log` |
+| `switch/switchwaker/GZLE01.iso` | your disc image (`GZLP01.iso`: the European disc, for `switchwaker-eur.nro`) |
 | `switch/switchwaker/initial_pipeline_cache.db` | the bundled pipeline list (`native/data/`, committed; `build_native.sh` puts a copy next to the NRO) |
 | `switch/switchwaker/initial_dksh_cache.bin` | the compiled shaders of those pipelines (about 6 MB; see "The deko3d renderer") |
 | `switch/switchwaker/native/logs/` | the session logs, `switchwaker_<date>_<time>.log`, the 10 most recent (the newest is this run) |
-| `switch/switchwaker/native/user/` | memory card (`USA/Card A`), Aurora's caches, `settings.ini` (the options menu's settings and the developer `[dev]` section, see below) |
+| `switch/switchwaker/native/user/` | memory card (`USA/Card A`; `EUR/Card A` for the European build), Aurora's caches, `settings.ini` (the options menu's settings and the developer `[dev]` section, see below) |
 
 ## The deko3d renderer
 

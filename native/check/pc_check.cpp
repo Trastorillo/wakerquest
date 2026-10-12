@@ -5,7 +5,7 @@
 #include "new.h"
 
 static_assert(TARGET_PC, "TARGET_PC must be defined");
-static_assert(VERSION == VERSION_USA, "GZLE01 build");
+static_assert(VERSION == VERSION_USA || VERSION == VERSION_PAL, "GZLE01 or GZLP01 build (docs/PAL_DISC_PLAN.md)");
 static_assert(sizeof(s8) == 1 && sizeof(u8) == 1, "8-bit types");
 static_assert(sizeof(s16) == 2 && sizeof(u16) == 2, "16-bit types");
 static_assert(sizeof(s32) == 4 && sizeof(u32) == 4, "32-bit types");

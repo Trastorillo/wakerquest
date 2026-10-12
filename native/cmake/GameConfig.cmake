@@ -3,9 +3,20 @@
 # library cos_game_headers; each module links it.
 include_guard(GLOBAL)
 
-# GZLE01 is VERSIONS.index("GZLE01") == 2 (VERSION_USA) in the decomp's configure.py.
+# GZLE01 is VERSIONS.index("GZLE01") == 2 (VERSION_USA) in the decomp's configure.py. The supported
+# builds: 2 (USA, the reference) and 3 (Europe, GZLP01: docs/PAL_DISC_PLAN.md).
 set(COS_VERSION 2 CACHE STRING "Game version: 0 D44J01, 1 GZLJ01, 2 GZLE01, 3 GZLP01")
-set(COS_GAME_ID GZLE01 CACHE STRING "Disc ID whose generated asset headers are used")
+set(_cos_game_ids D44J01 GZLJ01 GZLE01 GZLP01)
+if (NOT COS_VERSION MATCHES "^[0-3]$")
+    message(FATAL_ERROR "COS_VERSION=${COS_VERSION}: 0 D44J01, 1 GZLJ01, 2 GZLE01, 3 GZLP01")
+endif ()
+list(GET _cos_game_ids ${COS_VERSION} _cos_game_id)
+set(COS_GAME_ID ${_cos_game_id} CACHE STRING "Disc ID whose generated asset headers are used")
+if (NOT COS_GAME_ID STREQUAL _cos_game_id)
+    message(FATAL_ERROR "COS_GAME_ID=${COS_GAME_ID} but COS_VERSION=${COS_VERSION} is ${_cos_game_id}: "
+            "configure a separate build directory per version (or reconfigure with --fresh)")
+endif ()
+message(STATUS "cos_native: game version ${COS_VERSION} (${COS_GAME_ID})")
 
 # Generated asset headers ("assets/...", "res/Object/...") come from the player's disc and live
 # under the build directory, never in git (native/README.md, "Asset headers").
@@ -15,6 +26,8 @@ set(COS_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/${COS_GAME_ID}" CACHE PATH
 set(COS_GAME_COMPILE_DEFS
         TARGET_PC=1
         VERSION=${COS_VERSION}
+        # the disc this build runs from, for the harness's checks and messages ("GZLE01", "GZLP01")
+        COS_GAME_ID_STR="${COS_GAME_ID}"
         NDEBUG=1)
 
 # docs/RUNTIME_ASSETS.md: compile against the stub assets/ headers of `gen_assets.sh --stubs` (no
@@ -26,6 +39,14 @@ if (COS_RUNTIME_ASSETS)
     if (EXISTS "${COS_ASSETS_DIR}/include/assets" AND NOT EXISTS "${COS_ASSETS_DIR}/include/assets/cos_assets.h")
         message(FATAL_ERROR "COS_RUNTIME_ASSETS=ON but ${COS_ASSETS_DIR} holds the headers generated from "
                 "the disc: point COS_ASSETS_DIR at the output of native/tools/gen_assets.sh --stubs")
+    endif ()
+    if (EXISTS "${COS_ASSETS_DIR}/include/assets/cos_assets.h")
+        # stubs written before the version line (GZLE01 only) have none
+        file(STRINGS "${COS_ASSETS_DIR}/include/assets/cos_assets.h" _cos_stub_id REGEX "^#define COS_ASSETS_GAME_ID ")
+        if (_cos_stub_id AND NOT _cos_stub_id MATCHES "\"${COS_GAME_ID}\"")
+            message(FATAL_ERROR "${COS_ASSETS_DIR} holds stubs for another disc (${_cos_stub_id}), not "
+                    "${COS_GAME_ID}: native/tools/gen_assets.sh --stubs --version ${COS_GAME_ID}")
+        endif ()
     endif ()
     message(STATUS "cos_native: runtime assets (COS_RUNTIME_ASSETS): stub headers from ${COS_ASSETS_DIR}")
 elseif (EXISTS "${COS_ASSETS_DIR}/include/assets/cos_assets.h")

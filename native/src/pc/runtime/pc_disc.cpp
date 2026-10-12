@@ -1,11 +1,14 @@
 // Disc check of the run harness (docs/NATIVE_PORT_PHASE4_6.md, step 6.0, decision H9).
 //
-// COS_DISC must name a readable GameCube disc image (.iso) of GZLE01 revision 0: the disc header
+// COS_DISC must name a readable GameCube disc image (.iso) of the build's disc, revision 0 (GZLE01 for
+// the USA build, GZLP01 for the European one: pc_game_id.h, docs/PAL_DISC_PLAN.md): the disc header
 // (boot.bin) holds the game code and maker at 0x00, the version byte at 0x07 and the GameCube
 // magic 0xC2339F3D at 0x1C, all big-endian. Anything else exits 14 before the SDK starts.
 // Opening the disc for the game (aurora_dvd_open) is step 6.1; the SHA-1 check of the image on
 // first use is done by native/tools/run.sh (main.dol SHA-1 against the supported revision).
 #include "pc_internal.h"
+
+#include "pc/pc_game_id.h"
 
 #include <cerrno>
 #include <cstdarg>
@@ -37,11 +40,12 @@ void exitDisc() {
 #if defined(__SWITCH__)
     char text[1024];
     snprintf(text, sizeof text,
-             "SwitchWaker needs your own disc of The Wind Waker (USA, GZLE01, revision 0) as an uncompressed "
-             "image at sdmc:/switch/switchwaker/GZLE01.iso.\n\n%s\n\n"
-             "SwitchWaker necesita tu propio disco de The Wind Waker (EE. UU., GZLE01, revision 0) como "
-             "imagen sin comprimir en sdmc:/switch/switchwaker/GZLE01.iso.",
-             sDiscError);
+             "SwitchWaker needs your own disc of The Wind Waker (%s, %s, revision 0) as an uncompressed "
+             "image at sdmc:/switch/switchwaker/%s.\n\n%s\n\n"
+             "SwitchWaker necesita tu propio disco de The Wind Waker (%s, %s, revision 0) como "
+             "imagen sin comprimir en sdmc:/switch/switchwaker/%s.",
+             PC_GAME_REGION_EN, COS_GAME_ID_STR, PC_GAME_ISO_NAME, sDiscError, PC_GAME_REGION_ES,
+             COS_GAME_ID_STR, PC_GAME_ISO_NAME);
     cos_switch_show_error(text);
 #endif
     pc_exit(PC_EXIT_DISC);
@@ -51,7 +55,7 @@ void exitDisc() {
 int checkDisc() {
     const char* path = gConfig.disc;
     if (path == nullptr) {
-        discMessage("COS_DISC is not set (path of the GZLE01 .iso)");
+        discMessage("COS_DISC is not set (path of the " COS_GAME_ID_STR " .iso)");
         return PC_EXIT_DISC;
     }
     int fd = open(path, O_RDONLY | O_CLOEXEC);
@@ -91,11 +95,21 @@ int checkDisc() {
     }
     id[6] = '\0';
     const unsigned int version = header[7];
-    if (strcmp(id, "GZLE01") != 0 || version != 0) {
-        discMessage("%s is %s revision %u; the supported disc is GZLE01 revision 0", path, id, version);
+    if (strcmp(id, COS_GAME_ID_STR) != 0 || version != 0) {
+        // the other region's disc: name the build that runs it
+        const bool usa = strcmp(id, PC_GAME_ID_USA) == 0 && version == 0;
+        const bool eur = strcmp(id, PC_GAME_ID_EUR) == 0 && version == 0;
+        if (usa || eur) {
+            discMessage("%s is %s revision 0, the %s disc: it runs with the %s build (%s); this build is for %s",
+                        path, id, usa ? "USA" : "European", usa ? "USA" : "European",
+                        usa ? PC_GAME_NRO_USA : PC_GAME_NRO_EUR, COS_GAME_ID_STR);
+        } else {
+            discMessage("%s is %s revision %u; the supported disc is %s revision 0", path, id, version,
+                        COS_GAME_ID_STR);
+        }
         return PC_EXIT_DISC;
     }
-    writef(STDERR_FILENO, "[cos] disc: %s GZLE01 revision 0, %lld bytes\n", path,
+    writef(STDERR_FILENO, "[cos] disc: %s %s revision 0, %lld bytes\n", path, COS_GAME_ID_STR,
            (long long)st.st_size);
     return 0;
 }

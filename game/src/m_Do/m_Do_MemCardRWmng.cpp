@@ -18,6 +18,9 @@
 
 #include <string.h>
 #include <stdio.h>
+#if TARGET_PC && VERSION == VERSION_PAL
+#include "pc/game_hooks.h"
+#endif
 
 #if VERSION <= VERSION_JPN
 #define HEADER_TITLE   "ゼルダの伝説～風のタクト～"
@@ -172,6 +175,10 @@ s32 mDoMemCdRWm_Restore(CARDFileInfo* card, void* dst, u32 size) {
         // TODO: does save->save_count have the language index in it on PAL?
         g_mDoMemCd_control.field_0x165B = save->save_count;
     }
+#if TARGET_PC
+    // SwitchWaker: a language chosen in the options menu wins over the save's (pc_language.cpp)
+    g_mDoMemCd_control.field_0x165B = pc_card_pal_language(g_mDoMemCd_control.field_0x165B);
+#endif
 #endif
     mDoMemCd_setDataVersion(save->data_version);
     if (!invalid && mDoMemCd_getPictDataPtr() != NULL) {
@@ -202,6 +209,10 @@ s32 mDoMemCdRWm_Restore2(CARDFileInfo* card) {
         // TODO: does save->save_count have the language index in it on PAL?
         g_mDoMemCd_control.field_0x165B = save->save_count;
     }
+#if TARGET_PC
+    // SwitchWaker: a language chosen in the options menu wins over the save's (pc_language.cpp)
+    g_mDoMemCd_control.field_0x165B = pc_card_pal_language(g_mDoMemCd_control.field_0x165B);
+#endif
     
     return CARD_ERROR_READY;
 }

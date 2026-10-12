@@ -2,12 +2,12 @@
 """Check the runtime assets against the decompilation's extraction (docs/RUNTIME_ASSETS.md, step 3).
 
     native/tools/check_runtime_assets.py --stubs build/assets-stubs/GZLE01 \\
-        --run-dir RUN --decomp build/decomp
+        --run-dir RUN --decomp build/decomp [--version GZLE01|GZLP01]
 
 RUN/assets/ holds what COS_SMOKE=assets wrote: every array as the loader (pc_assets.cpp) filled it,
 read from the disc through Aurora's DVD layer, Yaz0 and RARC readers of its own and the DOL/REL
 section tables. The reference is independent: the decompilation's dtk split of the same disc
-(build/decomp/build/GZLE01/bin/assets/<header>.bin, gen_assets.sh), the input its header converters
+(build/decomp/build/<version>/bin/assets/<header>.bin, gen_assets.sh --version), the input its header converters
 read. Vec and cXy arrays are compared after swapping their big-endian floats, as the loader does
 and the converters did. Every byte must match. Reads disc-derived files only locally; writes nothing.
 """
@@ -23,9 +23,15 @@ def main():
     ap.add_argument("--stubs", required=True, type=Path, help="gen_assets.sh --stubs output")
     ap.add_argument("--run-dir", required=True, type=Path, help="COS_RUN_DIR of the assets smoke")
     ap.add_argument("--decomp", required=True, type=Path)
+    ap.add_argument("--version", default=None, choices=("GZLE01", "GZLP01"),
+                    help="the disc (default: the one the stubs were generated for)")
     args = ap.parse_args()
     index = json.loads((args.stubs / "include/assets/cos_asset_index.json").read_text())
-    bins = args.decomp / "build/GZLE01/bin/assets"
+    version = args.version
+    if version is None:  # cos_assets.h names it (stubs older than GZLP01 support: GZLE01)
+        text = (args.stubs / "include/assets/cos_assets.h").read_text()
+        version = "GZLP01" if '#define COS_ASSETS_GAME_ID "GZLP01"' in text else "GZLE01"
+    bins = args.decomp / f"build/{version}/bin/assets"
     bad = 0
     for row in index:
         got_path = args.run_dir / "assets" / f"{row['id']:03d}_{row['name']}.bin"

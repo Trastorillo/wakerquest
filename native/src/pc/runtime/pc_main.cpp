@@ -6,7 +6,7 @@
 //   called it before main); user and cache data under <directory of the executable>/user (for the
 //   build, build/native-mac/user, which git ignores); vsync off when COS_UNCAPPED.
 // - aurora_dvd_open(COS_DISC) before anything calls DVDInit, then DVDGetCurrentDiskID must be
-//   GZLE01 version 0 (pc_disc.cpp checked the image header already; this checks what the game
+//   GZLE01 (GZLP01 for the European build) version 0 (pc_disc.cpp checked the image header already; this checks what the game
 //   will read), else exit 14.
 // - cos_sdk thread hooks: a thread made by OSCreateThread starts with the current JKRHeap of the
 //   thread whose OSResumeThread started it. On the GameCube that resume is where the new thread is
@@ -23,6 +23,7 @@
 #include "pc_internal.h"
 #include "pc/pc_hd_textures.h"
 #include "pc/pc_aspect.h"
+#include "pc/pc_game_id.h"
 
 #include "JSystem/JKernel/JKRHeap.h"
 #include "m_Do/m_Do_audio.h"
@@ -277,9 +278,10 @@ void pc_aurora_init(int argc, char* argv[]) {
         exitDisc();
     }
     const DVDDiskID* id = DVDGetCurrentDiskID();
-    if (id == nullptr || memcmp(id->gameName, "GZLE", 4) != 0 || memcmp(id->company, "01", 2) != 0 ||
-        id->gameVersion != 0) {
-        discMessage("the disc is %.4s%.2s version %u (DVDGetCurrentDiskID); the supported disc is GZLE01 version 0",
+    if (id == nullptr || memcmp(id->gameName, COS_GAME_ID_STR, 4) != 0 ||
+        memcmp(id->company, COS_GAME_ID_STR + 4, 2) != 0 || id->gameVersion != 0) {
+        discMessage("the disc is %.4s%.2s version %u (DVDGetCurrentDiskID); the supported disc is " COS_GAME_ID_STR
+                    " version 0",
                     id != nullptr ? id->gameName : "????", id != nullptr ? id->company : "??",
                     id != nullptr ? (unsigned int)id->gameVersion : 0u);
         exitDisc();
@@ -291,6 +293,8 @@ void pc_aurora_init(int argc, char* argv[]) {
 
     // On the GameCube __start ran OSInit before main; here MEM1 (mem1Size) must be configured first.
     OSInit();
+    // the European build's language: the console's into the SRAM, the options menu's row
+    languageInit();
 
     COSSdkSetThreadLaunchHook(threadLaunchHook);
     COSSdkSetThreadStartHook(threadStartHook);

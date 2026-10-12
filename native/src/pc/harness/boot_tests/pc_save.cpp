@@ -373,7 +373,13 @@ void checkPackedFile(const u8* file) {
 
 // 4. A card_savedata block (copy 1 or 2) of the GCI.
 void checkSaveBlock(const char* which, const u8* block, u32 saveCount) {
+#if VERSION == VERSION_PAL
+    // the PAL game stores its language there, not a count (mDoMemCdRWm_Store)
+    (void)saveCount;
+    expect32(which, block, 0x0, dComIfGs_getPalLanguage()); // save_count
+#else
     expect32(which, block, 0x0, saveCount); // save_count
+#endif
     expect32(which, block, 0x4, 0);         // data_version
     u32 csum = be32At(block + kSaveDataCsum);
     if (csum != savedataChecksum(block)) {
@@ -426,8 +432,8 @@ void checkGci(u32 saveCount) {
         return;
     }
     // The directory entry (CARDDir): game, maker, file name, block count, comment address.
-    if (memcmp(sGci + 0x0, "GZLE", 4) != 0 || memcmp(sGci + 0x4, "01", 2) != 0) {
-        fail("GCI entry game/maker \"%.4s\"/\"%.2s\", want GZLE/01", (const char*)sGci, (const char*)sGci + 4);
+    if (memcmp(sGci + 0x0, COS_GAME_ID_STR, 4) != 0 || memcmp(sGci + 0x4, COS_GAME_ID_STR + 4, 2) != 0) {
+        fail("GCI entry game/maker \"%.4s\"/\"%.2s\", want " COS_GAME_ID_STR, (const char*)sGci, (const char*)sGci + 4);
     }
     if (strncmp((const char*)sGci + 0x8, kSaveFile, 32) != 0) {
         fail("GCI entry file name \"%.32s\", want %s", (const char*)sGci + 0x8, kSaveFile);
@@ -448,7 +454,15 @@ void checkGci(u32 saveCount) {
     if (!commentPrintable) {
         fail("header comment \"%.32s\"", comment);
     }
-    if (strstr((const char*)data + 0x1C20, " Save Data") == nullptr) {
+#if VERSION == VERSION_PAL
+    // mDoMemCdRWm_BuildHeader writes it in the game's language
+    static const char* const kInfo[] = {" Save Data", " Spielstand", "es de jeu ", "Datos guardados el ",
+                                        "Dati salvati: "};
+    const char* info = dComIfGs_getPalLanguage() < 5 ? kInfo[dComIfGs_getPalLanguage()] : kInfo[0];
+#else
+    const char* info = " Save Data";
+#endif
+    if (strstr((const char*)data + 0x1C20, info) == nullptr) {
         fail("header info \"%.32s\"", (const char*)data + 0x1C20);
     }
     // Blocks 1 and 2: the two copies of card_savedata.
@@ -478,7 +492,9 @@ void prepareRunCard(const char* who) {
     } else {
         snprintf(sCardBase, sizeof(sCardBase), "%s/card/", gConfig.runDir);
     }
-    snprintf(sGciPath, sizeof(sGciPath), "%sUSA/Card A/01-GZLE-%s.gci", sCardBase, kSaveFile);
+    // Aurora's card folder per region (lib/dolphin/card.cpp): USA, EUR for the European build
+    snprintf(sGciPath, sizeof(sGciPath), "%s%s/Card A/01-%.4s-%s.gci", sCardBase,
+             COS_GAME_ID_STR[3] == 'P' ? "EUR" : "USA", COS_GAME_ID_STR, kSaveFile);
     CARDSetBasePath(sCardBase, 0);
     writef(STDERR_FILENO, "[cos] %s: memory card A is the folder %s%s\n", who, sCardBase,
            cardDir != nullptr && cardDir[0] != '\0' ? " (COS_CARD_DIR)" : " (empty at start)");

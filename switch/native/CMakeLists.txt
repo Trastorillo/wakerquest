@@ -244,6 +244,9 @@ add_library(cos_switch_platform STATIC
         "${COS_REPO_ROOT}/switch/source/common/usb_log.c")
 target_include_directories(cos_switch_platform PUBLIC "${COS_SWITCH_DIR}/source"
         PRIVATE "${COS_REPO_ROOT}/switch/source/common")
+# the disc this build runs from (cos_switch.h's default disc path; native/include/pc/pc_game_id.h)
+target_include_directories(cos_switch_platform PUBLIC "${COS_REPO_ROOT}/native/include")
+target_compile_definitions(cos_switch_platform PUBLIC "COS_GAME_ID_STR=\"${COS_GAME_ID}\"")
 target_link_libraries(cos_switch_platform PUBLIC nx)
 # the debug server's "info" (cos_debug.cpp): the NRO's version (scripts/switch/build_native.sh: git describe)
 set_property(SOURCE "${COS_SWITCH_DIR}/source/cos_debug.cpp" APPEND PROPERTY COMPILE_DEFINITIONS
@@ -356,6 +359,11 @@ if (COS_DK_DEBUG_LIB)
     set(_nacp_name "SwitchWaker (deko3d debug)")
 else ()
     set(_nacp_name "SwitchWaker")
+endif ()
+# the European build (COS_VERSION=3, GZLP01: docs/PAL_DISC_PLAN.md), next to the USA one in the
+# Homebrew Menu
+if (COS_GAME_ID STREQUAL "GZLP01")
+    string(REPLACE "SwitchWaker" "SwitchWaker EUR" _nacp_name "${_nacp_name}")
 endif ()
 nx_generate_nacp(cos_native.nacp
         NAME "${_nacp_name}" AUTHOR "SwitchWaker contributors" VERSION "${COS_SWITCH_VERSION}")

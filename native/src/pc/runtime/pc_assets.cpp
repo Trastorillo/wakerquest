@@ -19,6 +19,8 @@
 // exits: native/tools/check_runtime_assets.py compares them with the decomp's extracted .bin files.
 #include "pc_internal.h"
 
+#include "pc/pc_game_id.h"
+
 #include "cos_sdk/host_alloc.h"
 
 #include <dolphin/dvd.h>
@@ -89,7 +91,7 @@ void discError(const char* fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(text, sizeof text, fmt, ap);
     va_end(ap);
-    pc::discMessage("%s (the game's data arrays come from the GZLE01 revision 0 disc)", text);
+    pc::discMessage("%s (the game's data arrays come from the " COS_GAME_ID_STR " revision 0 disc)", text);
     pc::exitDisc();
 }
 
@@ -312,7 +314,7 @@ void loadAssets() {
         const uint8_t* src;
         if (r.file[0] == '\0') {
             if (!dolChecked) {
-                if (!sha1Is(dol, (size_t)dolLen, r.sha1)) discError("main.dol is not GZLE01 revision 0's (SHA-1)");
+                if (!sha1Is(dol, (size_t)dolLen, r.sha1)) discError("main.dol is not " COS_GAME_ID_STR " revision 0's (SHA-1)");
                 dolChecked = true;
             }
             src = dolBytes(dol, (size_t)dolLen, r.offset, r.size);
@@ -328,7 +330,7 @@ void loadAssets() {
                     rel = container;
                 }
                 if (!sha1Is(rel.data(), rel.size(), r.sha1))
-                    discError("%s%s%s is not GZLE01 revision 0's (SHA-1)", r.file, r.arcFile[0] ? ":" : "", r.arcFile);
+                    discError("%s%s%s is not " COS_GAME_ID_STR " revision 0's (SHA-1)", r.file, r.arcFile[0] ? ":" : "", r.arcFile);
                 curFile = r.file;
                 curArc = r.arcFile;
             }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stub asset headers for COS_RUNTIME_ASSETS builds (docs/RUNTIME_ASSETS.md, "Proposal" step 1).
 
-    native/tools/gen_asset_stubs.py --decomp build/decomp --out DIR
+    native/tools/gen_asset_stubs.py --decomp build/decomp [--version GZLE01|GZLP01] --out DIR
 
 The game includes 163 "assets/*.h" headers that the decompilation's asset step cuts out of the
 player's main.dol and RELs (gen_assets.sh). This writes headers with the same names, declarations,
@@ -118,17 +118,37 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--decomp", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--version", default="GZLE01", choices=("GZLE01", "GZLP01"),
+                    help="the disc whose config.yml is read (GZLP01: docs/PAL_DISC_PLAN.md)")
     args = ap.parse_args()
     d = args.decomp
-    cfg = yaml.safe_load((d / "config/GZLE01/config.yml").read_text())
+    cfg = yaml.safe_load((d / f"config/{args.version}/config.yml").read_text())
 
-    modules = [{"object": cfg["object"], "hash": cfg["hash"], "symbols": cfg["symbols"],
-                "splits": cfg["splits"], "extract": cfg.get("extract") or []}]
-    modules += [m for m in cfg["modules"] if m.get("extract")]
+    # GZLP01's config.yml records no hashes; its build.sha1 (what the decomp's matching build checks
+    # its output against: the disc's main.dol and RELs) has them, by output name
+    sha1s = {}
+    build_sha1 = d / f"config/{args.version}/build.sha1"
+    if build_sha1.exists():
+        for line in build_sha1.read_text().splitlines():
+            if line.strip():
+                sha, path = line.split()
+                sha1s[Path(path).name] = sha
+    modules = [{"object": cfg["object"], "hash": cfg.get("hash") or sha1s.get("framework.dol"),
+                "symbols": cfg["symbols"], "splits": cfg["splits"], "extract": cfg.get("extract") or []}]
+    for m in cfg["modules"]:
+        if m.get("extract"):
+            m = dict(m)
+            m.setdefault("hash", sha1s.get(Path(m["object"].partition(":")[2] or m["object"]).stem + ".rel"))
+            modules.append(m)
+    for m in modules:
+        if not m.get("hash"):
+            sys.exit(f"gen_asset_stubs: no SHA-1 for {m['object']} in config.yml or build.sha1")
 
     out = args.out / "include" / "assets"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "cos_assets.h").write_text(COS_ASSETS_H)
+    # the disc these stubs are for: GameConfig.cmake checks it against COS_GAME_ID
+    (out / "cos_assets.h").write_text(COS_ASSETS_H.replace(
+        "#define COS_ASSETS_H\n", f'#define COS_ASSETS_H\n#define COS_ASSETS_GAME_ID "{args.version}"\n'))
     rows = []
     index = []  # cos_asset_index.json: id -> header, for native/tools/check_runtime_assets.py
     for mod in modules:

@@ -572,9 +572,17 @@ bool mDoMch_Create() {
     JFWSystem::setAramAudioBufSize(0xA00000); // 10240 KiB
     JFWSystem::setAramGraphBufSize(0x5CE000); // 5944 KiB
 #if VERSION == VERSION_PAL
+#if TARGET_PC
+    // SwitchWaker (docs/PAL_DISC_PLAN.md): always 60 Hz, as if the player had answered yes to the
+    // logo scene's EuRGB60 question (which d_s_logo.cpp never asks on the host): the EuRGB60 render
+    // mode (480 lines), never the 50 Hz PAL one (a 534-line XFB).
+    OSSetEuRgb60Mode(1);
+    mDoMch_render_c::setProgressiveMode();
+#else
     if (OSGetResetCode() - 0x80000000 == 0 && OSGetEuRgb60Mode() == 1) {
         mDoMch_render_c::setProgressiveMode();
     }
+#endif
 #endif
     JFWSystem::setRenderMode(mDoMch_render_c::getRenderModeObj());
     JFWSystem::init();

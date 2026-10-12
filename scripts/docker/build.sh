@@ -4,13 +4,16 @@
 #
 #   scripts/docker/build.sh [linux|switch|all] --disc /path/to/GZLE01.iso [options]
 #
+# The disc decides the version: GZLE01 (USA) or GZLP01 (Europe, docs/PAL_DISC_PLAN.md: asset headers in
+# build/assets/GZLP01, build/native-linux-eur, build/switch-native-eur/switchwaker-eur.nro).
+#
 #   linux    build/native-linux/switchwaker: the native Linux binary (Vulkan, OpenGL fallback),
 #            for the container's architecture (the host's: x86_64 or aarch64; see --platform)
 #   switch   build/switch-native/switchwaker.nro: the Switch homebrew (scripts/switch/build_native.sh)
 #   all      both (default)
 #
 # Options:
-#   --disc PATH       the GZLE01 revision 0 disc image (default: $COS_DISC). Bind-mounted read-only;
+#   --disc PATH       the GZLE01 or GZLP01 revision 0 disc image (default: $COS_DISC). Bind-mounted read-only;
 #                     it is never copied into an image, the repository or build/.
 #   --jobs N          parallel compile jobs (default: the number of CPUs the engine sees)
 #   --platform P      linux/amd64 or linux/arm64 for the Linux image and binary (default: the
@@ -69,7 +72,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z $disc ]]; then
-    echo "docker/build: no disc image: pass --disc PATH or set COS_DISC (GZLE01 revision 0 .iso)" >&2
+    echo "docker/build: no disc image: pass --disc PATH or set COS_DISC (GZLE01 or GZLP01 revision 0 .iso)" >&2
     exit 14
 fi
 if [[ ! -f $disc ]]; then
@@ -78,6 +81,13 @@ if [[ ! -f $disc ]]; then
 fi
 disc=$(cd "$(dirname "$disc")" && pwd)/$(basename "$disc")
 disc_name=$(basename "$disc")
+# the version follows the disc (its header's game ID)
+game_id=$(head -c 6 "$disc" 2>/dev/null || true)
+case $game_id in
+    GZLE01) version_args=() eur_suffix="" ;;
+    GZLP01) version_args=(-DCOS_VERSION=3) eur_suffix=-eur ;;
+    *) echo "docker/build: $disc_name is not GZLE01 or GZLP01 (game ID \"$game_id\")" >&2; exit 14 ;;
+esac
 
 if [[ -n $engine ]]; then
     export SWITCH_CONTAINER_ENGINE=$engine
@@ -127,11 +137,11 @@ run_linux() { # extra run options..., -- command
 }
 
 # --- 1. asset headers, 2. RecompCore -----------------------------------------------------------
-assets=$root/build/assets/GZLE01
+assets=$root/build/assets/$game_id
 if [[ ! -d $assets/include/assets ]]; then
-    echo "docker/build: generating the asset headers from $disc_name into build/assets/GZLE01"
-    run_linux -- "native/tools/gen_assets.sh --disc /disc/$disc_name --decomp /work/build/decomp-docker \
-        --out /work/build/assets/GZLE01"
+    echo "docker/build: generating the asset headers from $disc_name into build/assets/$game_id"
+    run_linux -- "native/tools/gen_assets.sh --version $game_id --disc /disc/$disc_name \
+        --decomp /work/build/decomp-docker --out /work/build/assets/$game_id"
 fi
 if [[ ! -f $root/ref/recompcore/Source/Core/Core/HW/DSPHLE/UCodes/UCodes.cpp ]]; then
     run_linux -- "native/tools/fetch_recompcore.sh /work/ref/recompcore"
@@ -139,12 +149,13 @@ fi
 
 # --- 3a. Linux --------------------------------------------------------------------------------------
 if [[ $what == linux || $what == all ]]; then
-    bdir=build/native-linux$arch_suffix
+    bdir=build/native-linux$eur_suffix$arch_suffix
     echo "docker/build: Linux build in $bdir ($image, $jobs jobs)"
     # The container fetches Aurora itself: a FETCHCONTENT_SOURCE_DIR_AURORA left in the cache by a
     # configure outside this script would name a path the container does not have.
     run_linux -- "cmake -S native -B $bdir -G Ninja -UFETCHCONTENT_SOURCE_DIR_AURORA \
-            -DCOS_ASSETS_DIR=/work/build/assets/GZLE01 -DCOS_RECOMPCORE_DIR=/work/ref/recompcore >/dev/null &&
+            -DCOS_ASSETS_DIR=/work/build/assets/$game_id ${version_args[*]-} \
+            -DCOS_RECOMPCORE_DIR=/work/ref/recompcore >/dev/null &&
         ninja -C $bdir -j $jobs switchwaker cos_sdk_smoke cos_pc_tests"
     file "$root/$bdir/switchwaker" 2>/dev/null || ls -l "$root/$bdir/switchwaker"
 
@@ -188,6 +199,8 @@ if [[ $what == switch || $what == all ]]; then
             git -c advice.detachedHead=false checkout -q --detach FETCH_HEAD"
     fi
     echo "docker/build: Switch build (scripts/switch/build_native.sh, $jobs jobs)"
-    "$root/scripts/switch/build_native.sh" --aurora "$aurora" --assets "$assets" \
+    eur_args=()
+    [[ $game_id == GZLP01 ]] && eur_args=(--eur)
+    "$root/scripts/switch/build_native.sh" ${eur_args[@]+"${eur_args[@]}"} --aurora "$aurora" --assets "$assets" \
         --recompcore "$root/ref/recompcore" --jobs "$jobs"
 fi

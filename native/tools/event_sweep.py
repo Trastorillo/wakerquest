@@ -45,7 +45,7 @@ Options:
   --run-timeout S  run.sh --timeout per run (default 3600)
   --heap-check N   run.sh --heap-check (default 30; 0 = off)
   --max-runs N     runs per stage at most (default 60)
-  --disc PATH      the GZLE01 .iso (default COS_DISC)
+  --disc PATH      the build's disc, GZLE01 (GZLP01 for a European build) .iso (default COS_DISC)
   --exe PATH       the executable (default build/native-mac/switchwaker)
   --out DIR        the sweep directory (default build/native-mac/runs/event-sweep-<timestamp>)
   --all-events     every event of every stage's list (default: see below)
@@ -75,7 +75,8 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-BUILD = os.path.join(REPO, "build", "native-mac")
+# COS_BUILD_DIR, as run.sh: another build directory (e.g. the European build, build/native-mac-eur)
+BUILD = os.path.join(REPO, os.environ.get("COS_BUILD_DIR") or os.path.join("build", "native-mac"))
 COS_RUN = os.path.join(SCRIPT_DIR, "run.sh")
 
 _spec = importlib.util.spec_from_file_location("boot_sweep", os.path.join(SCRIPT_DIR, "boot_sweep.py"))

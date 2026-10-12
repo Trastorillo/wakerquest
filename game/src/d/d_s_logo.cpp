@@ -106,6 +106,10 @@ void checkProgSelect(dScnLogo_c* i_this) {
         i_this->field_0x1ea = 0;
     }
 #else // VERSION_PAL
+#if TARGET_PC
+    // SwitchWaker (docs/PAL_DISC_PLAN.md): no 50/60 Hz question; mDoMch_Create chose 60 Hz.
+    i_this->field_0x1ea = 0;
+#else
     if (OSGetResetCode() == 0 || OSGetResetCode() == 1) {
         if (OSGetEuRgb60Mode() == 1 || CPad_CHECK_HOLD_B(0)) {
             i_this->field_0x1ea = 1;
@@ -114,6 +118,7 @@ void checkProgSelect(dScnLogo_c* i_this) {
     } else {
         i_this->field_0x1ea = 0;
     }
+#endif
 #endif
 }
 
@@ -711,6 +716,14 @@ cPhs_State phase_1(dScnLogo_c* i_this) {
         dComIfGs_setPalLanguage(language);
         g_mDoMemCd_control.field_0x165B = language;
     }
+#if TARGET_PC
+    // SwitchWaker: the options menu's COS_GAME_LANGUAGE may choose another one (pc_language.cpp).
+    {
+        const u8 lang = (u8)pc_logo_pal_language(dComIfGs_getPalLanguage(), rt == 1);
+        dComIfGs_setPalLanguage(lang);
+        g_mDoMemCd_control.field_0x165B = lang;
+    }
+#endif
 #endif
 
     ResTIMG * toonImage;

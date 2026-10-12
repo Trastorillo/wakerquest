@@ -382,6 +382,14 @@ public:
             field_0x3cd4[i] = arc[i];
         }
     }
+#if TARGET_PC
+    // zeldaret's names for the same fields, which its d_s_name.cpp (converged) calls
+    // (docs/PAL_DISC_PLAN.md; d_file_select.cpp is snrubrm's in the PAL build)
+    u8 getField_0x3cc6() { return field_0x3cc6; }
+    u8 getField_0x3cd3() { return field_0x3cd3; }
+    void setField_0x3cd3(u8 i_value) { field_0x3cd3 = i_value; }
+    void setField_0x3cd4(JKRArchive** i_archives) { setBmgArchive(i_archives); }
+#endif
 #endif
 };
 

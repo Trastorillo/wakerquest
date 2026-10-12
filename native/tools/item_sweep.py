@@ -28,7 +28,7 @@ Options:
   --timeout S     run.sh --timeout per run (default 7200: about 25 s an item)
   --uncapped      run.sh --uncapped (the fanfare still plays in real time)
   --max-runs N    stop after N runs (default 100)
-  --disc PATH     the GZLE01 .iso (default COS_DISC)
+  --disc PATH     the build's disc, GZLE01 (GZLP01 for a European build) .iso (default COS_DISC)
   --exe PATH      the executable (default build/native-mac/switchwaker)
   --out DIR       the sweep directory (default build/native-mac/runs/item-sweeps-<timestamp>)
   --rebuild DIR   write DIR/item_sweep.txt again from DIR's runs (no new run; the same --range)
@@ -48,7 +48,8 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-BUILD = os.path.join(REPO, "build", "native-mac")
+# COS_BUILD_DIR, as run.sh: another build directory (e.g. the European build, build/native-mac-eur)
+BUILD = os.path.join(REPO, os.environ.get("COS_BUILD_DIR") or os.path.join("build", "native-mac"))
 COS_RUN = os.path.join(SCRIPT_DIR, "run.sh")
 ITEM_DATA_H = os.path.join(REPO, "game", "include", "d", "d_item_data.h")
 

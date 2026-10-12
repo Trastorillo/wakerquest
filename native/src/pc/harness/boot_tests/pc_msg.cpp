@@ -2,7 +2,8 @@
 //
 // Runs from pc_heaps_created (main01, right after mDoMch_Create), then exits. It mounts the
 // archives the logo scene mounts for messages (/res/Msg/bmgres.arc, bmgresh.arc, fontres.arc and
-// rubyres.arc, MEM mounts in the archive heap) and hands them to dComIfGp as d_s_logo's phase_2
+// rubyres.arc, MEM mounts in the archive heap; the PAL build: each language's
+// /res/Msg/data<N>/bmgres.arc in turn, with the game's language set to it) and hands them to dComIfGp as d_s_logo's phase_2
 // does. Each BMG (zel_00.bmg, zel_01.bmg) is read independently first: plain big-endian loads at
 // the format's offsets, no game struct. Then, through the game's own code:
 // - JMessage, as dMesg_parse does: a TParse over both files into one TResourceContainer; each
@@ -38,6 +39,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <unistd.h>
 
@@ -189,10 +191,17 @@ bool walkText(const RawBmg& raw, const char* text, Walk& w) {
     return p < end;
 }
 
-// fopMsgM_messageGet's output, decoded independently (VERSION_USA): tag 0 is the player name, tag
-// 0x1E a 0x1A, other tags are dropped; a byte with high nibble 8 or 9 is copied with the next.
-// PAL language 1's possessive suffix is not modelled (the sweep requires language 0).
-bool decodeText(const RawBmg& raw, const char* text, const char* playerName, char* out, size_t cap) {
+// fopMsgM_messageGet's output, decoded independently: tag 0 is the player name, tag 0x1E a 0x1A,
+// other tags are dropped; a byte with high nibble 8 or 9 is copied with the next. In German (PAL
+// language 1) a few messages take the name's genitive: "s" appended, "'" after s, z or x.
+bool decodeText(const RawBmg& raw, const char* text, const char* playerName, char* out, size_t cap,
+                unsigned number) {
+#if VERSION == VERSION_PAL
+    const bool genitive = dComIfGs_getPalLanguage() == 1 && (number == 0xC8B || number == 0x1D21 || number == 0x31D7);
+#else
+    const bool genitive = false;
+    (void)number;
+#endif
     const uint8_t* end = raw.dat + raw.datSize;
     const uint8_t* p = (const uint8_t*)text;
     size_t n = 0;
@@ -213,6 +222,11 @@ bool decodeText(const RawBmg& raw, const char* text, const char* playerName, cha
             } else if (code == 0) {
                 for (const char* q = playerName; *q != '\0'; q++) {
                     put(*q);
+                }
+                const size_t len = strlen(playerName);
+                if (genitive && len > 0) {
+                    const char last = playerName[len - 1];
+                    put(strchr("sSzZxX", last) != nullptr ? '\'' : 's');
                 }
             }
             p += p[1];
@@ -393,7 +407,7 @@ void checkFopMsgM(const RawBmg& raw, mesg_header* header, bool secondFile, const
             }
             continue;
         }
-        if (!decodeText(raw, raw.text(i), playerName, want, sizeof(want))) {
+        if (!decodeText(raw, raw.text(i), playerName, want, sizeof(want), number)) {
             fail(raw.path, "message %u: malformed or longer than %zu bytes", number, sizeof(want));
             continue;
         }
@@ -475,15 +489,13 @@ void checkFont(JUTFont* font, JKRArchive* arc, const char* name, const char* pat
 
 [[noreturn]] void smokeMsgSweep() {
     uint64_t start = elapsedMs();
-    JKRArchive* msgArc = mountMem("/res/Msg/bmgres.arc");
     JKRArchive* msg2Arc = mountMem("/res/Msg/bmgresh.arc");
     JKRArchive* fontArc = mountMem("/res/Msg/fontres.arc");
     JKRArchive* rubyArc = mountMem("/res/Msg/rubyres.arc");
-    if (msgArc == nullptr || msg2Arc == nullptr || fontArc == nullptr || rubyArc == nullptr) {
+    if (msg2Arc == nullptr || fontArc == nullptr || rubyArc == nullptr) {
         pc_exit(PC_EXIT_CHECK_FAILED);
     }
     // As d_s_logo's phase_2 (the ruby archive is found by getGlbResource's search there too).
-    dComIfGp_setMsgDtArchive(msgArc);
     dComIfGp_setMsgDt2Archive(msg2Arc);
     dComIfGp_setFontArchive(fontArc);
 
@@ -495,33 +507,6 @@ void checkFont(JUTFont* font, JKRArchive* arc, const char* name, const char* pat
              dComIfGs_getPalLanguage(), dComIfGs_getClearCount());
     }
 
-    struct File {
-        JKRArchive* arc;
-        const char* name;
-        const char* path;
-        bool kingdom;
-    } files[] = {
-        {msgArc, "zel_00.bmg", "/res/Msg/bmgres.arc:zel_00.bmg", false},
-        {msg2Arc, "zel_01.bmg", "/res/Msg/bmgresh.arc:zel_01.bmg", true},
-    };
-    constexpr int kFiles = sizeof(files) / sizeof(files[0]);
-    RawBmg raw[kFiles];
-    bool ok[kFiles] = {};
-    JMessage::TResourceContainer* container = new JMessage::TResourceContainer();
-    JMessage::TParse* parse = new JMessage::TParse(container);
-    for (int k = 0; k < kFiles; k++) {
-        const uint8_t* res = (const uint8_t*)JKRGetResource('ROOT', files[k].name, files[k].arc);
-        if (res == nullptr) {
-            fail(files[k].path, "not in the archive");
-            continue;
-        }
-        ok[k] = parseRawBmg(files[k].path, res, files[k].arc->getResSize(res), raw[k]);
-        // dMesg_parse: parse(header, 0), whose result it ignores; the container must hold it.
-        if (!parse->parse(res, 0)) {
-            fail(files[k].path, "JMessage::TParse::parse failed");
-        }
-    }
-
     int fd = openRunFile("msg_sweep.txt");
     if (fd >= 0) {
         writef(fd, "# msg-sweep (COS_SMOKE=msg-sweep): what the game's message code read, in "
@@ -529,39 +514,91 @@ void checkFont(JUTFont* font, JKRArchive* arc, const char* name, const char* pat
     }
     uint32_t processed = 0;
     uint32_t total = 0, decoded = 0;
-    if (ok[0] && ok[1]) {
-        checkJMessage(*container, raw, kFiles, processed);
-    }
-    for (int k = 0; k < kFiles; k++) {
-        if (!ok[k]) {
-            continue;
+    bool allOk = true;
+#if VERSION == VERSION_PAL
+    // The PAL disc has one message archive per language, /res/Msg/data<N>/bmgres.arc (d_s_logo.cpp):
+    // each is checked with the game's language set to it; bmgresh.arc is shared.
+    constexpr int kLanguages = 5;
+#else
+    constexpr int kLanguages = 1;
+#endif
+    for (int lang = 0; lang < kLanguages; lang++) {
+        char bmgArc[40], bmgPath[64], bmcPath[64];
+#if VERSION == VERSION_PAL
+        snprintf(bmgArc, sizeof(bmgArc), "/res/Msg/data%d/bmgres.arc", lang);
+        dComIfGs_setPalLanguage((u8)lang);
+#else
+        snprintf(bmgArc, sizeof(bmgArc), "/res/Msg/bmgres.arc");
+#endif
+        snprintf(bmgPath, sizeof(bmgPath), "%s:zel_00.bmg", bmgArc);
+        snprintf(bmcPath, sizeof(bmcPath), "%s:color.bmc", bmgArc);
+        JKRArchive* msgArc = mountMem(bmgArc);
+        if (msgArc == nullptr) {
+            pc_exit(PC_EXIT_CHECK_FAILED);
         }
-        mesg_header* header = (mesg_header*)raw[k].base;
-        FopResult r;
-        checkFopMsgM(raw[k], header, files[k].kingdom, playerName, r);
-        total += r.messages;
-        decoded += r.decoded;
-        // The JMessage resource is the game's reading of the header and INF1; the counts and the
-        // digest are fopMsgM's reading of every entry.
-        JMessage::TResource* res = container->Get_groupID(raw[k].group);
-        if (fd >= 0 && res != nullptr) {
-            writef(fd, "BMG %s block_count=%u INF1=1 DAT1=1\n", raw[k].path,
-                   (unsigned)res->mHeader.get_blockNumber());
-            writef(fd, "INF1 %s 0 entries=%u entry_size=%u group=%u messages=%u distinct_ids=%u "
-                       "ids_fnv=%016llx\n",
-                   raw[k].path, (unsigned)res->getMessageEntryNumber(),
-                   (unsigned)res->getMessageEntrySize(), (unsigned)res->getGroupID(), r.messages,
-                   r.distinct, (unsigned long long)r.idsDigest);
-            writef(fd, "DAT1 %s 0 size=%u\n", raw[k].path,
-                   (unsigned)JMessage::data::TParse_TBlock(res->mMessageData - 8).get_size());
+        dComIfGp_setMsgDtArchive(msgArc);
+
+        struct File {
+            JKRArchive* arc;
+            const char* name;
+            const char* path;
+            bool kingdom;
+        } files[] = {
+            {msgArc, "zel_00.bmg", bmgPath, false},
+            {msg2Arc, "zel_01.bmg", "/res/Msg/bmgresh.arc:zel_01.bmg", true},
+        };
+        constexpr int kFiles = sizeof(files) / sizeof(files[0]);
+        RawBmg raw[kFiles];
+        bool ok[kFiles] = {};
+        JMessage::TResourceContainer* container = new JMessage::TResourceContainer();
+        JMessage::TParse* parse = new JMessage::TParse(container);
+        for (int k = 0; k < kFiles; k++) {
+            const uint8_t* res = (const uint8_t*)JKRGetResource('ROOT', files[k].name, files[k].arc);
+            if (res == nullptr) {
+                fail(files[k].path, "not in the archive");
+                continue;
+            }
+            ok[k] = parseRawBmg(files[k].path, res, files[k].arc->getResSize(res), raw[k]);
+            // dMesg_parse: parse(header, 0), whose result it ignores; the container must hold it.
+            if (!parse->parse(res, 0)) {
+                fail(files[k].path, "JMessage::TParse::parse failed");
+            }
         }
-        writef(STDERR_FILENO,
-               "[cos] msg-sweep: %s: group %u, %u entries, %u messages (%u numbers, %u repeated), "
-               "%u decoded by fopMsgM (%u bytes), %u routed to the other file\n",
-               raw[k].path, raw[k].group, raw[k].entries, r.messages, r.distinct, r.duplicates,
-               r.decoded, r.decodedBytes, r.elsewhere);
+        allOk = allOk && ok[0] && ok[1];
+        if (ok[0] && ok[1]) {
+            checkJMessage(*container, raw, kFiles, processed);
+        }
+        for (int k = 0; k < kFiles; k++) {
+            if (!ok[k]) {
+                continue;
+            }
+            mesg_header* header = (mesg_header*)raw[k].base;
+            FopResult r;
+            checkFopMsgM(raw[k], header, files[k].kingdom, playerName, r);
+            total += r.messages;
+            decoded += r.decoded;
+            // The JMessage resource is the game's reading of the header and INF1; the counts and the
+            // digest are fopMsgM's reading of every entry. The shared file is reported once.
+            JMessage::TResource* res = container->Get_groupID(raw[k].group);
+            if (fd >= 0 && res != nullptr && (k == 0 || lang == 0)) {
+                writef(fd, "BMG %s block_count=%u INF1=1 DAT1=1\n", raw[k].path,
+                       (unsigned)res->mHeader.get_blockNumber());
+                writef(fd, "INF1 %s 0 entries=%u entry_size=%u group=%u messages=%u distinct_ids=%u "
+                           "ids_fnv=%016llx\n",
+                       raw[k].path, (unsigned)res->getMessageEntryNumber(),
+                       (unsigned)res->getMessageEntrySize(), (unsigned)res->getGroupID(), r.messages,
+                       r.distinct, (unsigned long long)r.idsDigest);
+                writef(fd, "DAT1 %s 0 size=%u\n", raw[k].path,
+                       (unsigned)JMessage::data::TParse_TBlock(res->mMessageData - 8).get_size());
+            }
+            writef(STDERR_FILENO,
+                   "[cos] msg-sweep: %s: group %u, %u entries, %u messages (%u numbers, %u repeated), "
+                   "%u decoded by fopMsgM (%u bytes), %u routed to the other file\n",
+                   raw[k].path, raw[k].group, raw[k].entries, r.messages, r.distinct, r.duplicates,
+                   r.decoded, r.decodedBytes, r.elsewhere);
+        }
+        checkColors(msgArc, bmcPath, fd);
     }
-    checkColors(msgArc, "/res/Msg/bmgres.arc:color.bmc", fd);
     checkFont(mDoExt_getMesgFont(), fontArc, "rock_24_20_4i_usa.bfn",
               "/res/Msg/fontres.arc:rock_24_20_4i_usa.bfn", fd);
     checkFont(mDoExt_getRubyFont(), rubyArc, kRubyFont, kRubyFontPath, fd);
@@ -573,7 +610,7 @@ void checkFont(JUTFont* font, JKRArchive* arc, const char* name, const char* pat
            "processor, %llu ms; %d error(s)%s\n",
            total, decoded, processed, (unsigned long long)(elapsedMs() - start), sErrors,
            gConfig.runDir != nullptr ? " (report in msg_sweep.txt)" : "");
-    bool pass = sErrors == 0 && ok[0] && ok[1] && processed == total && decoded > 0;
+    bool pass = sErrors == 0 && allOk && processed == total && decoded > 0;
     pc_exit(pass ? PC_EXIT_REACHED : PC_EXIT_CHECK_FAILED);
 }
 

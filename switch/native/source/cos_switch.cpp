@@ -256,7 +256,8 @@ void startSessionLog() {
     std::vector<Log> logs;
     if (DIR* dir = opendir(kLogDir)) {
         while (dirent* e = readdir(dir)) {
-            if (strncmp(e->d_name, "switchwaker_", 12) != 0) {
+            // this NRO's own logs only (switchwaker-eur's are pruned by switchwaker-eur.nro)
+            if (strncmp(e->d_name, COS_SWITCH_NRO_NAME "_", sizeof(COS_SWITCH_NRO_NAME "_") - 1) != 0) {
                 continue;
             }
             const std::string path = std::string(kLogDir) + "/" + e->d_name;

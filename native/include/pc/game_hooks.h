@@ -70,6 +70,14 @@ bool pc_logo_dvd_synced(dScnLogo_c* i_this);
    not made yet. */
 void pc_logo_scene_created_hook();
 
+/* phase_1 (VERSION_PAL): the language the game starts in, 0-4 (native/src/pc/features/pc_language.cpp,
+   docs/PAL_DISC_PLAN.md). game: what the GameCube code chose (the memory card's language when
+   fromCard, else OSGetLanguage's, which is the console's); COS_GAME_LANGUAGE other than "auto" wins. */
+int pc_logo_pal_language(int game, bool fromCard);
+/* m_Do_MemCardRWmng.cpp (VERSION_PAL), the language a save on the card remembers (0-4): what the game
+   uses, COS_GAME_LANGUAGE's when it is not "auto". */
+unsigned char pc_card_pal_language(unsigned char saved);
+
 /* ---- Frame pacing (JFWDisplay.cpp), native/src/pc/game_hooks/pc_jfw_display.cpp -------------- */
 
 /* waitForTick: waits out p1 ticks (or p2 retraces when p1 is 0) with pc_frame_pace and makes the
