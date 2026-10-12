@@ -29,7 +29,14 @@
 #endif
 
 // Note: For VERSION_PAL the "TlogoE0" string literal is modified at runtime.
+#if TARGET_PC && VERSION == VERSION_PAL
+// String literals are read-only on the host (SIGBUS in create's sprintf): a buffer the language
+// digit is written into, as the GameCube wrote it into the literal (docs/PAL_DISC_PLAN.md).
+static char l_arcName[] = "TlogoE0";
+#define ARCNAME l_arcName
+#else
 #define ARCNAME VERSION_SELECT("Tlogo", "Tlogo", "TlogoE", "TlogoE0")
+#endif
 
 namespace {
     struct Attr_c {
