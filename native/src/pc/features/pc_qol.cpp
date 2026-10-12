@@ -20,6 +20,7 @@ Option sOptions[PC_QOLS] = {
     {"COS_QOL_FAST_GRAPPLE", -1},  {"COS_QOL_FAST_CLIMB", -1},    {"COS_QOL_FAST_BALLAD", -1},
     {"COS_QOL_SKIP_VIDEOS", -1},   {"COS_QOL_REVEAL_CHART", -1},  {"COS_QOL_TINGLE_CHESTS", -1},
     {"COS_QOL_SAIL", -1},          {"COS_QOL_SWING_TURN", -1},    {"COS_QOL_NO_SONG_REPLAY", -1},
+    {"COS_QOL_FREE_BOAT", -1},
 };
 
 int parse(int which, const char* v) {

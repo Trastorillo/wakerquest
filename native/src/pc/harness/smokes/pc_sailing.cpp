@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <unistd.h>
 #include <vector>
@@ -59,10 +60,11 @@ constexpr unsigned int kReboardFrames = 450; // off the boat, A must get the pla
 constexpr unsigned int kReboardPressFrames = 30;
 constexpr unsigned int kWindFrames = 150;    // the wind must have turned by then
 constexpr unsigned int kSailUpFrames = 45;   // after X, the sail must be up
-constexpr unsigned int kSailFrames = 1800;   // 60 s at 30 fps
+unsigned int kSailFrames = 1800;             // 60 s at 30 fps; COS_SAILING_FRAMES=<n> changes it
 constexpr unsigned int kRoomUpFrames = 90; // after the boundary, the new room must be up
 constexpr float kMinDistance = 20000.0f;     // units the boat must cover (the boundary is 25000 away)
-constexpr s16 kHeading = 0;                  // +z: north from Windfall's corner to room 18
+s16 kHeading = 0; // +z: north from Windfall's corner to room 18; COS_SAILING_HEADING=<angle> changes it
+                  // (e.g. 0xC000, west: the QoL check of the boat's limits, docs/QOL_PLAN.md)
 constexpr s16 kWindNorth = 0x4000;           // dKyw_wind_set: (cos y, 0, sin y) = +z
 
 enum State { kOff, kWaitPlayer, kSettle, kGetOff, kReboard, kResettle, kWind, kSailUp, kSail, kDone };
@@ -207,6 +209,12 @@ void sailingFrame(unsigned int frames) {
             writef(STDERR_FILENO, "[cos] sailing: needs COS_BOOT_PRESET=sailing and no other COS_BOOT_STAGE "
                                   "than %s\n", kSailingSpawn.spec);
             pc_exit(PC_EXIT_USAGE);
+        }
+        if (const char* v = getenv("COS_SAILING_HEADING"); v != nullptr) {
+            kHeading = (s16)strtol(v, nullptr, 0);
+        }
+        if (const char* v = getenv("COS_SAILING_FRAMES"); v != nullptr) {
+            kSailFrames = (unsigned int)strtoul(v, nullptr, 0);
         }
         setDrivenPad(true, 0, 0, 0);
         sState = kWaitPlayer;

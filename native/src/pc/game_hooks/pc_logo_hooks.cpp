@@ -174,6 +174,11 @@ static void pcBootStage(dScnLogo_c* i_this) {
     // COS_BOOT_PRESET (pc_preset.cpp): a story preset, e.g. sailing (the boat, its sail, the wind
     // baton and song).
     pc_boot_preset_apply();
+    // COS_BOOT_EVENTS_OFF: event bits cleared after the preset (a preset earlier in the story).
+    nbits = pc_boot_event_bits_off(bits, 16);
+    for (int i = 0; i < nbits; i++) {
+        dComIfGs_offEventBit(bits[i]);
+    }
     // COS_BOOT_TIME=<hour> (0-24, decimals allowed): the time of day of the new file (the game counts
     // 15 degrees an hour), e.g. 22 for a night with stars (60 fps step C: the sky's paint B).
     if (const char* t = getenv("COS_BOOT_TIME")) {

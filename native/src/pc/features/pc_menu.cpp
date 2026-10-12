@@ -638,6 +638,15 @@ const PcSettingDesc kBuiltins[] = {
      "Sail",
      "Swift: the wind always blows from behind and the boat goes twice as fast, as in Wind Waker HD. "
      "Brisk: the same, and it stops sooner (BetterWW)."},
+    {"COS_QOL_FREE_BOAT", "Barco sin restricciones",
+     "El Mascarón Rojo no te hace volver por no haber avanzado en la historia (solo en el borde del mar) y "
+     "deja subir aunque el viento no sople a favor. Puedes llegar antes de tiempo a sitios de la historia "
+     "(BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 105,
+     "Unrestricted boat",
+     "The King of Red Lions does not turn you back for not having got far enough in the story (only at "
+     "the edge of the sea) and lets you board whatever the wind. You can reach story places early "
+     "(BetterWW)."},
     {"COS_QOL_SWING_TURN", "Girar al balancearse",
      "El stick gira a Link mientras se balancea en una cuerda o con el garfio (BetterWW).",
      PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 110,
