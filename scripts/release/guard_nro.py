@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Refuse to publish a game binary that carries the disc's data arrays (docs/RUNTIME_ASSETS.md).
 
-    scripts/release/guard_nro.py BINARY... [--decomp build/decomp]
+    scripts/release/guard_nro.py BINARY... [--decomp build/decomp] [--version GZLE01|GZLP01]
 
-A binary built with COS_RUNTIME_ASSETS=ON holds none of the 163 arrays the decompilation cuts out of
-main.dol and the RELs; one built from gen_assets.sh's disc headers holds all of them. This looks for
-each array's bytes (from the local dtk split, build/decomp/build/GZLE01/bin/assets/*.bin, as stored:
+A binary built with COS_RUNTIME_ASSETS=ON holds none of the 163 arrays (167 for GZLP01, the European
+build) the decompilation cuts out of main.dol and the RELs; one built from gen_assets.sh's disc
+headers holds all of them. This looks for each array's bytes (from the local dtk split,
+build/decomp/build/<version>/bin/assets/*.bin, gen_assets.sh --version; as stored:
 big-endian, and with its 32-bit words swapped, as the Vec/cXy arrays are compiled) in each binary.
 Arrays shorter than 64 bytes, or of a single repeated byte, are skipped (too common to mean anything).
 Exits 1 if any array is found. Needs the local split, so it runs where the release is built, never in CI.
@@ -20,11 +21,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("binaries", nargs="+", type=Path)
     ap.add_argument("--decomp", type=Path, default=Path("build/decomp"))
+    ap.add_argument("--version", default="GZLE01", choices=("GZLE01", "GZLP01"),
+                    help="the disc the binaries are built for (GZLP01: the European build)")
     args = ap.parse_args()
-    bins = sorted((args.decomp / "build/GZLE01/bin/assets").glob("*.bin"))
-    if len(bins) != 163:
-        sys.exit(f"guard_nro: expected the 163 extracted arrays in {args.decomp}/build/GZLE01/bin/assets, "
-                 f"found {len(bins)} (run native/tools/gen_assets.sh with the disc first)")
+    want = {"GZLE01": 163, "GZLP01": 167}[args.version]
+    bins = sorted((args.decomp / f"build/{args.version}/bin/assets").glob("*.bin"))
+    if len(bins) != want:
+        sys.exit(f"guard_nro: expected the {want} extracted arrays in {args.decomp}/build/{args.version}/bin/assets, "
+                 f"found {len(bins)} (run native/tools/gen_assets.sh --version {args.version} with the disc first)")
     probes = []
     for b in bins:
         data = b.read_bytes()

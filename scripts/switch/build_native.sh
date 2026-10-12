@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Build the native port (native/: the decompiled game on Aurora) as a Switch NRO.
 #
-#   scripts/switch/build_native.sh [--dk-debug-lib] [--aurora DIR] [--assets DIR | --runtime-assets]
+#   scripts/switch/build_native.sh [--eur] [--dk-debug-lib] [--aurora DIR] [--assets DIR | --runtime-assets]
 #                                  [--recompcore DIR] [--dawn-src DIR] [--jobs N] [--target TARGET]
+#                                  [--build-dir DIR]
 #
 # Output (the deko3d renderer, the only one since the OpenGL ES NRO was removed on 2026-10-09):
 # build/switch-native/switchwaker.nro (+ .elf for addr2line), "SwitchWaker" in the Homebrew Menu, for
@@ -14,6 +15,14 @@
 # Everything is compiled in a container (Podman or Docker, see container.sh) from the pinned
 # devkitPro image plus clang 19 (Containerfile.native): devkitA64's GCC for Aurora, Dawn, the SDK
 # and libnx, clang for the game units (switch/native/clang-launcher.sh).
+#
+# --eur builds the European version (COS_VERSION=3, the GZLP01 disc; docs/PAL_DISC_PLAN.md):
+# build/switch-native-eur/switchwaker-eur.nro, "SwitchWaker EUR" in the Homebrew Menu, which reads
+# sdmc:/switch/switchwaker/GZLP01.iso. Without it: the USA version (GZLE01), as always.
+# --build-dir DIR   the build directory, relative to the checkout (default build/switch-native, or
+#                   build/switch-native-eur with --eur); it is mounted where the container's CMake
+#                   cache expects build/switch-native, so a copy of another build directory (cp -c on
+#                   APFS) reuses its objects.
 #
 # Inputs, outside git (defaults: this checkout's, else the main checkout's when this is a git
 # worktree such as build/lanes/<lane>):
@@ -51,9 +60,12 @@ source "$root/scripts/switch/container.sh"
 image=${COS_SWITCH_NATIVE_IMAGE:-localhost/centollos-switch-native-build:2026-10-03}
 
 aurora="" assets="" runtime_assets=0 recompcore="" dawn_src="" target=cos_nro dk_debug=OFF
+game_id=GZLE01 cos_version=2 build_dir=""
 jobs=${SWITCH_BUILD_JOBS:-4}
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --eur) game_id=GZLP01; cos_version=3; shift ;;
+        --build-dir) build_dir=$2; shift 2 ;;
         --dk-debug-lib) dk_debug=ON; shift ;;
         --aurora) aurora=$2; shift 2 ;;
         --assets) assets=$2; shift 2 ;;
@@ -67,7 +79,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-build_dir=build/switch-native nro_name=switchwaker
+nro_name=switchwaker
+[[ $game_id == GZLP01 ]] && nro_name=switchwaker-eur
+if [[ -z $build_dir ]]; then
+    build_dir=build/switch-native
+    [[ $game_id == GZLP01 ]] && build_dir=build/switch-native-eur
+fi
+mkdir -p "$root/$build_dir"
 
 # The main checkout, when this is a git worktree (its build/ and ref/ hold the shared inputs).
 main_root=$root
@@ -126,12 +144,12 @@ prepare_dawn_src() {
 
 aurora=${aurora:-$(first_existing "$root/build/aurora-3227d76" "$main_root/build/aurora-3227d76" || true)}
 if [[ $runtime_assets == 1 ]]; then
-    assets=$root/build/assets-stubs/GZLE01
+    assets=$root/build/assets-stubs/$game_id
     decomp=$(first_existing "$root/build/decomp" "$main_root/build/decomp" || echo "$root/build/decomp")
-    "$root/native/tools/gen_assets.sh" --stubs --decomp "$decomp" --out "$assets"
+    "$root/native/tools/gen_assets.sh" --stubs --version "$game_id" --decomp "$decomp" --out "$assets"
 fi
-assets=${assets:-$(first_existing "$root/build/native-mac/assets/GZLE01" \
-                                  "$main_root/build/native-mac/assets/GZLE01" || true)}
+assets=${assets:-$(first_existing "$root/build/native-mac/assets/$game_id" \
+                                  "$main_root/build/native-mac/assets/$game_id" || true)}
 recompcore=${recompcore:-$(first_existing "$root/ref/recompcore" "$main_root/ref/recompcore" || true)}
 if [[ -z $dawn_src ]]; then
     dawn_src=$(prepare_dawn_src)
@@ -166,6 +184,8 @@ if ! container_image_exists "$engine" "$image"; then
 fi
 
 mounts=(-v "$aurora:/inputs/aurora:ro" -v "$assets:/inputs/assets:ro" -v "$recompcore:/inputs/recompcore:ro")
+# the build directory where the CMake cache expects it (see --build-dir)
+[[ $build_dir == build/switch-native ]] || mounts+=(-v "$root/$build_dir:/work/build/switch-native")
 dawn_flag=""
 if [[ -n $dawn_src && -f $dawn_src/CMakeLists.txt ]]; then
     mounts+=(-v "$(cd "$dawn_src" && pwd):/inputs/dawn-src")
@@ -182,11 +202,12 @@ fi
 
 label=deko3d
 [[ $dk_debug == ON ]] && label="deko3d (libdeko3dd)"
-echo "build_native: renderer=$label version=$version aurora=$aurora assets=$assets recompcore=$recompcore dawn-src=${dawn_src:-fetch}"
+echo "build_native: game=$game_id renderer=$label version=$version build-dir=$build_dir aurora=$aurora assets=$assets recompcore=$recompcore dawn-src=${dawn_src:-fetch}"
 
 container_run "$engine" "$root" "${mounts[@]}" -e JOBS="$jobs" -e TARGET="$target" \
     -e DAWN_FLAG="$dawn_flag" -e RUNTIME_FLAG="$runtime_flag" -e VERSION="$version" \
-    -e NRO_NAME="$nro_name" -e DK_DEBUG="$dk_debug" "$image" bash -lc '
+    -e NRO_NAME="$nro_name" -e DK_DEBUG="$dk_debug" -e COS_VERSION="$cos_version" -e GAME_ID="$game_id" \
+    "$image" bash -lc '
 set -euo pipefail
 export PATH=/opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:$PATH
 cmake -S /work/switch/native -B /work/build/switch-native -G Ninja \
@@ -194,7 +215,8 @@ cmake -S /work/switch/native -B /work/build/switch-native -G Ninja \
     -DDKP_USE_DOUBLE_OBJECT_FILE_EXTENSIONS=ON \
     -DCOS_SWITCH_NRO_NAME="$NRO_NAME" -DCOS_DK_DEBUG_LIB="$DK_DEBUG" -DCOS_SWITCH_VERSION="$VERSION" \
     -DCOS_SWITCH_AURORA_SOURCE=/inputs/aurora -DCOS_ASSETS_DIR=/inputs/assets \
-    -DCOS_RECOMPCORE_DIR=/inputs/recompcore $DAWN_FLAG $RUNTIME_FLAG >/dev/null
+    -DCOS_RECOMPCORE_DIR=/inputs/recompcore -DCOS_VERSION="$COS_VERSION" -DCOS_GAME_ID="$GAME_ID" \
+    $DAWN_FLAG $RUNTIME_FLAG >/dev/null
 cmake --build /work/build/switch-native --target "$TARGET" --parallel "$JOBS"
 '
 

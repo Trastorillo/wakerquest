@@ -9,8 +9,8 @@
 # Files go to sdmc:/switch/switchwaker/, are read back, and must match
 # the local SHA-256. --build runs scripts/switch/build_native.sh first. (--logs is gone: the
 # session logs come from scripts/switch/switchwaker_debug.py lastlog.) --disc copies
-# the player's disc image as GZLE01.iso (all the native port reads; skipped if
-# already on the console with the same size). `native` is the native port's NRO
+# the player's disc image as GZLE01.iso, or GZLP01.iso for the European disc (all the native port
+# reads; skipped if already on the console with the same size). `native-eur`: the European NRO. `native` is the native port's NRO
 # (scripts/switch/build_native.sh, the deko3d renderer), switchwaker.nro, with its
 # initial_pipeline_cache.db and initial_dksh_cache.bin (the DKSH cache built next to it).
 # (Run options live in native/user/settings.ini, written by the in-game options menu; developer
@@ -43,8 +43,11 @@ if [[ ${1:-} == --disc ]]; then
     disc=${2:?usage: push.sh --disc DISC.iso}
     staging=$(mktemp -d)
     trap 'rm -rf "$staging"' EXIT
-    ln -s "$(cd "$(dirname "$disc")" && pwd)/$(basename "$disc")" "$staging/GZLE01.iso"
-    "$tool" push-many "$remote_dir" "$staging/GZLE01.iso"
+    # named by its game ID: the USA NRO reads GZLE01.iso, the European one GZLP01.iso
+    game_id=$(head -c 6 "$disc")
+    case $game_id in GZLE01|GZLP01) ;; *) echo "push: $disc is not GZLE01 or GZLP01" >&2; exit 1 ;; esac
+    ln -s "$(cd "$(dirname "$disc")" && pwd)/$(basename "$disc")" "$staging/$game_id.iso"
+    "$tool" push-many "$remote_dir" "$staging/$game_id.iso"
     exit 0
 fi
 
@@ -100,12 +103,15 @@ for target in "$@"; do
     case $target in
         native) script=build_native.sh nro=build/switch-native/switchwaker.nro
                 dksh=build/switch-native/initial_dksh_cache.bin ;;
+        native-eur) script="build_native.sh --eur" nro=build/switch-native-eur/switchwaker-eur.nro
+                dksh=build/switch-native-eur/initial_dksh_cache.bin ;;
         *.nro) script='' nro=$target ;;
         *) echo "push: unknown target $target" >&2; exit 2 ;;
     esac
     [[ $nro == /* ]] || nro="$root/$nro"
     if [[ $build -eq 1 && -n $script ]]; then
-        bash "$root/scripts/switch/$script"
+        # shellcheck disable=SC2086  # the script and its options
+        bash "$root/scripts/switch/"$script
     fi
     if [[ ! -s $nro ]]; then
         echo "push: $nro is missing; build it or pass --build" >&2

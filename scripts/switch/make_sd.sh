@@ -3,14 +3,18 @@
 #
 #   scripts/switch/make_sd.sh --disc /path/to/GZLE01.iso [--out DIR] [--no-disc] [--jobs N] [--engine E]
 #
+# The disc decides the version: USA (GZLE01: switchwaker.nro and GZLE01.iso) or Europe (GZLP01:
+# switchwaker-eur.nro and GZLP01.iso; docs/PAL_DISC_PLAN.md).
+#
 # No game files, code or keys come with this repository or its releases. This script does every step on
 # your computer, in containers (the host needs bash, git, Python 3 and Docker or Podman):
-#   1. checks the disc: GZLE01 revision 0, uncompressed .iso (native/tools/disc_manifest.py --verify);
+#   1. checks the disc: GZLE01 or GZLP01 revision 0, uncompressed .iso (native/tools/disc_manifest.py --verify);
 #   2. builds build/switch-native/switchwaker.nro (scripts/docker/build.sh switch: asset headers from
 #      the disc, RecompCore, Aurora, Dawn, the deko3d renderer and its shader cache; the first build
 #      takes an hour or more, later ones minutes);
-#   3. writes OUT/switch/switchwaker/ (default OUT: build/sd) with switchwaker.nro, the bundled
-#      initial_pipeline_cache.db and initial_dksh_cache.bin, and a copy of the disc as GZLE01.iso
+#   3. writes OUT/switch/switchwaker/ (default OUT: build/sd) with switchwaker.nro (switchwaker-eur.nro),
+#      the bundled initial_pipeline_cache.db and initial_dksh_cache.bin, and a copy of the disc as
+#      GZLE01.iso (GZLP01.iso)
 #      (--no-disc leaves the disc out, for an update when it is already on the card). Copy OUT's
 #      contents to the root of the SD card.
 #
@@ -43,26 +47,31 @@ command -v python3 >/dev/null || fail "Python 3 is needed"
 command -v docker >/dev/null || command -v podman >/dev/null ||
     fail "Docker or Podman is needed (Docker Desktop on macOS and Windows/WSL)"
 
-step 1 "checking the disc (GZLE01 revision 0, uncompressed .iso)"
+step 1 "checking the disc (GZLE01 or GZLP01 revision 0, uncompressed .iso)"
 if ! python3 -I "$root/native/tools/disc_manifest.py" --verify --disc "$disc"; then
-    fail "this is not the disc the port is built for: The Wind Waker (USA), GZLE01 revision 0, as an
-uncompressed .iso (not RVZ, GCZ, CISO or NKit; Dolphin can convert: right-click > Convert File)."
+    fail "this is not a disc the port is built for: The Wind Waker, USA (GZLE01) or Europe (GZLP01),
+revision 0, as an uncompressed .iso (not RVZ, GCZ, CISO or NKit; Dolphin can convert: right-click >
+Convert File)."
+fi
+game_id=$(head -c 6 "$disc")
+nro=switchwaker.nro built=$root/build/switch-native
+if [[ $game_id == GZLP01 ]]; then
+    nro=switchwaker-eur.nro built=$root/build/switch-native-eur
 fi
 
 step 2 "building the Switch homebrew (an hour or more the first time, minutes later)"
 "$root/scripts/docker/build.sh" switch --disc "$disc" ${build_args[@]+"${build_args[@]}"} || fail "the build failed (see above)"
-built=$root/build/switch-native
 
 step 3 "the SD card folder"
 dst=$out/switch/switchwaker
 mkdir -p "$dst"
-for f in switchwaker.nro initial_pipeline_cache.db initial_dksh_cache.bin; do
+for f in "$nro" initial_pipeline_cache.db initial_dksh_cache.bin; do
     [[ -f $built/$f ]] || fail "the build made no $built/$f"
     cp "$built/$f" "$dst/$f"
 done
 if [[ $copy_disc == 1 ]]; then
     echo "  copying the disc ($(du -h "$disc" | cut -f1))"
-    cp "$disc" "$dst/GZLE01.iso"
+    cp "$disc" "$dst/$game_id.iso"
 fi
 cat <<EOF
 
@@ -70,7 +79,8 @@ Done: $out
 
 Copy the contents of that folder to the root of the SD card (switch/switchwaker/ ends up at
 sdmc:/switch/switchwaker/). Saves and settings already on the card are kept. Then hold R while
-starting any installed game to open the Homebrew Menu in title mode and pick SwitchWaker. The
+starting any installed game to open the Homebrew Menu in title mode and pick SwitchWaker (SwitchWaker
+EUR for the European disc). The
 shaders come prebuilt (initial_dksh_cache.bin): there is no shader preparation at the first start.
 
 These files contain the game: they are for your own console only; do not share them.
