@@ -665,6 +665,16 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 120,
      "No song replays",
      "After a song is played with the baton, Link does not conduct it again (BetterWW)."},
+    {"COS_QOL_FIX_BUGS", "Arreglar fallos del juego original",
+     "Arregla fallos del juego original que BetterWW corrige: la abuela sin botella vacía, Beedle comprando "
+     "Jalea azul, la Cámara Plus en el botón, Morths fuera del mapa, enemigos muertos con flechas de luz "
+     "(Stalfos, Minimoblin, Poes de Jalhalla, Magtail) y el disparador de Ganon Fantasma.",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 130,
+     "Fix bugs of the original game",
+     "Fixes bugs of the original game that BetterWW fixes: the grandmother without an empty bottle, "
+     "Beedle buying Blue Chu Jelly, the Deluxe Picto Box on a button, Morths out of the map, enemies "
+     "killed with Light Arrows (Stalfos, Miniblins, Jalhalla's Poes, Magtails) and Phantom Ganon's "
+     "trigger."},
     // Depuración
     {"COS_PERF_EVERY", "Intervalo del registro perf",
      "Cada cuántos cuadros se escribe una línea [cos] perf en el registro (native/logs/).",

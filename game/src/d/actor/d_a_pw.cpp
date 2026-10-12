@@ -24,6 +24,9 @@
 #include "JSystem/J3DGraphAnimator/J3DJoint.h"
 #include "SSystem/SComponent/c_lib.h"
 #include "SSystem/SComponent/c_math.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 enum daPW__BehaviorType {
     VisibleFromStart = 0x0,
@@ -232,9 +235,18 @@ BOOL Big_pow_gattai_check(pw_class* i_this) {
 #if VERSION > VERSION_DEMO
 /* 000007CC-000008B0       .text Big_pow_down_check__FP8pw_class */
 BOOL Big_pow_down_check(pw_class* i_this) {
+#if TARGET_PC
+    // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm, poe_fix_light_arrows_bug):
+    // a Poe dying to a Light Arrow (its health is not 0) also counts for Jalhalla
+    const bool fixBugs = pc_qol(PC_QOL_FIX_BUGS) != 0;
+    if (i_this->health > 0 && !(fixBugs && i_this->mEnemyIce.mLightShrinkTimer > 0)) {
+        return FALSE;
+    }
+#else
     if (i_this->health > 0) {
         return FALSE;
     }
+#endif
     if (i_this->m345 != 0) {
         return FALSE;
     }
@@ -250,6 +262,12 @@ BOOL Big_pow_down_check(pw_class* i_this) {
                 i_this->m345 = 1;
             } else {
                 i_this->health = 4;
+#if TARGET_PC
+                // (the same fix) a Poe that rejoins Jalhalla stops dying to the Light Arrow
+                if (fixBugs) {
+                    i_this->mEnemyIce.mLightShrinkTimer = 0;
+                }
+#endif
                 return TRUE;
             }
         }

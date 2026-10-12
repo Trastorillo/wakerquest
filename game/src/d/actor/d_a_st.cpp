@@ -11,6 +11,9 @@
 #include "d/d_cc_d.h"
 #include "d/d_snap.h"
 #include "res/Object/St.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 enum BehaviorType {
     BEHAVIOR_NORMAL = 0,
@@ -2551,6 +2554,15 @@ static BOOL daSt_Execute(st_class* i_this) {
 #endif
     if (i_this->mUpperBodyEntityId != 0xFFF) {
         upperBody = (st_class*)fopAcM_SearchByID(i_this->mUpperBodyEntityId);
+#if TARGET_PC
+        // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm,
+        // stalfos_kill_lower_body_when_upper_body_light_arrowed): the upper body dying to a Light
+        // Arrow takes the lower body with it (it stayed, unkillable)
+        if (pc_qol(PC_QOL_FIX_BUGS) && upperBody != NULL && upperBody->mEnemyIce.mLightShrinkTimer != 0 &&
+            i_this->mEnemyIce.mLightShrinkTimer == 0) {
+            i_this->mEnemyIce.mLightShrinkTimer = 1;
+        }
+#endif
         if ((upperBody != NULL) && (upperBody->mCountdownToDeath != 0)) {
             fopAcM_delete(actor);
             for (s32 i = 0; i < 26; i++) {

@@ -8,6 +8,9 @@
 #include "dolphin/types.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_item_data.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 typedef void (ItemGetFunc)();
 typedef int (ItemGetCheckFunc)();
@@ -727,6 +730,18 @@ void item_func_rope() {
 void item_func_camera2() {
     dComIfGs_onGetItem(dInvSlot_CAMERA_e, 1);
     dComIfGs_setItem(dInvSlot_CAMERA_e, dItemNo_DELUXE_PICTO_BOX_e);
+#if TARGET_PC
+    // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm,
+    // deluxe_picto_box_item_func_fix_equipped_picto_box): an X/Y/Z button holding the Picto Box
+    // now holds the Deluxe Picto Box (it kept the old one until the item menu set it again)
+    if (pc_qol(PC_QOL_FIX_BUGS)) {
+        for (int i = 0; i < 3; i++) {
+            if (dComIfGp_getSelectItem(i) == dItemNo_PICTO_BOX_e) {
+                g_dComIfG_gameInfo.play.setSelectItem(i, dItemNo_DELUXE_PICTO_BOX_e);
+            }
+        }
+    }
+#endif
 }
 
 /* 800C3434-800C3484       .text item_func_bow__Fv */

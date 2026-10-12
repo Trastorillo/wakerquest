@@ -20,6 +20,9 @@
 #include "m_Do/m_Do_hostIO.h"
 #include "m_Do/m_Do_mtx.h"
 #include "m_Do/m_Do_controller_pad.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 class daNpc_Bs1_childHIO_c {
 public:
@@ -1000,6 +1003,15 @@ u32 daNpc_Bs1_c::getMsg() {
                         msgNo = 0xF8A;
                         break;
                     case dItemNo_BLUE_JELLY_e:
+#if TARGET_PC
+                        // QoL "Arreglar fallos del juego original" (BetterWW fix_vanilla_bugs.asm):
+                        // Beedle does not buy Blue Chu Jelly (selling it can leave too little for
+                        // Doctor Bandam's blue potion): the answer for an item he does not buy
+                        if (pc_qol(PC_QOL_FIX_BUGS)) {
+                            msgNo = 0xF75;
+                            break;
+                        }
+#endif
                         msgNo = 0xF8F;
                         break;
                     case dItemNo_JOY_PENDANT_e:

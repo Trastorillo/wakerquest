@@ -107,7 +107,17 @@ void daHookshot_rockLineCallback(fopAc_ac_c* hookshot_actor, dCcD_GObjInf* objIn
     f32 f1 = i_this->getObjSightCrossPos()->abs2(i_this->current.pos);
     if (f1 > f31) {
         i_this->setObjSightCrossPos(objInf->GetAtHitPosP());
+#if TARGET_PC
+        // Fix of the original game (BetterWW fix_vanilla_bugs.asm, hookshot_sight_failsafe_check),
+        // always on: the sight can hit a collider without an actor (the shards of Helmaroc King's
+        // mask); the GameCube read low memory there, the host faulted. No actor: no hook target.
+        if (collided_actor != NULL &&
 #if VERSION == VERSION_USA
+            fopAcM_CheckStatus(collided_actor, fopAcStts_UNK80000_e | fopAcStts_UNK200000_e | fopAcStts_UNK10000000_e))
+#else
+            fopAcM_CheckStatus(collided_actor, fopAcStts_UNK80000_e | fopAcStts_UNK200000_e))
+#endif
+#elif VERSION == VERSION_USA
         if (fopAcM_CheckStatus(collided_actor, fopAcStts_UNK80000_e | fopAcStts_UNK200000_e | fopAcStts_UNK10000000_e))
 #else
         if (fopAcM_CheckStatus(collided_actor, fopAcStts_UNK80000_e | fopAcStts_UNK200000_e))
