@@ -5,9 +5,8 @@ Opening it starts `sdmc:/switch/switchwaker/switchwaker.nro` as an application, 
 there is no need to open hbmenu by holding R over a game any more. The session log (`native/logs/`)
 should then show `application (title mode)`.
 
-It starts the USA program only. The European one (`sdmc:/switch/switchwaker-eur/switchwaker-eur.nro`,
-"SwitchWaker EUR") has no forwarder: start it from the Homebrew Menu in title mode (hold R while
-starting any installed game).
+It starts whichever version is installed: the European download installs its program at the same path,
+`sdmc:/switch/switchwaker/switchwaker.nro`.
 
 It is built with `scripts/switch/build_forwarder.sh` (keys from `~/.switch/prod.keys` by default;
 they are never copied into the repository). Title ID: `01FF43454E540000`.

@@ -180,8 +180,8 @@ build still compiles the headers generated from your disc.
 
 **Players do not need to build**: the release downloads hold the NRO (built without the disc) and its
 caches, one download per disc: `SwitchWaker-<version>-switch.zip` (USA, `switchwaker.nro`) and
-`SwitchWaker-<version>-switch-eur.zip` (Europe, `switchwaker-eur/switchwaker-eur.nro`); players add their
-own disc ([INSTALL.md](INSTALL.md)). To build it yourself,
+`SwitchWaker-<version>-switch-eur.zip` (Europe), both installing `switch/switchwaker/switchwaker.nro`
+(one version per SD card); players add their own disc ([INSTALL.md](INSTALL.md)). To build it yourself,
 `scripts/switch/make_sd.sh --disc /path/to/GZLE01.iso` checks the disc, builds the NRO in containers and
 lays out `build/sd/switch/` (NRO, caches, a copy of the disc) for the SD card.
 
@@ -208,7 +208,8 @@ scripts/switch/switchwaker_debug.py press A                                  # a
 ```
 
 `deploy` restarts the game, so start it from the HOME-screen icon (forwarder). `deploy --eur` uploads the
-European NRO to `sdmc:/switch/switchwaker-eur/` and does not restart (it runs from the Homebrew Menu). Every command and the
+European NRO as `switchwaker.nro` too; `deploy` refuses to replace the running game with the other region's
+build unless `--force`. Every command and the
 protocol: [docs/DEBUG_SERVER.md](docs/DEBUG_SERVER.md). It is the same server as SwitchWakerHD's.
 
 ## Install on the Switch
@@ -218,8 +219,9 @@ protocol: [docs/DEBUG_SERVER.md](docs/DEBUG_SERVER.md). It is the same server as
 - A Switch running custom firmware (Atmosphère) with the Homebrew Menu.
 - The release download for your disc (`SwitchWaker-<version>-switch.zip` for USA: `switchwaker.nro`,
   `initial_pipeline_cache.db`, `initial_dksh_cache.bin`; `SwitchWaker-<version>-switch-eur.zip` for
-  Europe: `switchwaker-eur.nro` and the same two caches), or the same files from your own build
-  (`build/switch-native/`, `build/switch-native-eur/`).
+  Europe: the European `switchwaker.nro` and the same two caches), or the same files from your own build
+  (`build/switch-native/`, or `build/switch-native-eur/` whose `switchwaker-eur.nro` goes on the card as
+  `switchwaker.nro`).
 - Your disc as an **uncompressed** `.iso` (not RVZ, GCZ, CISO or NKit), renamed to `GZLE01.iso` (USA) or
   `GZLP01.iso` (Europe).
 - About 1.6 GB free on the SD card (the disc is 1.4 GB; the shader caches grow to a few dozen MB).
@@ -230,24 +232,20 @@ The SD card must end up like this (folder and file names exactly as shown):
 
 ```
 sdmc:/switch/switchwaker/
-├── switchwaker.nro                the game, USA disc
+├── switchwaker.nro                the game, the USA or the European version (one per card)
 ├── GZLE01.iso                     your disc (GZLP01.iso: the European one)
 ├── initial_pipeline_cache.db      the list of graphics pipelines the game uses
 ├── initial_dksh_cache.bin         their shaders, compiled for the Switch's GPU
 └── native/                        created by the game: logs, saves, settings, caches
-sdmc:/switch/switchwaker-eur/
-└── switchwaker-eur.nro            the game, European disc (its own folder: the Homebrew Menu shows
-                                   one program per folder; it reads the rest from switchwaker/)
 ```
 
 Either way works:
 
 - **By hand**: put the SD card in the computer (or mount it over USB with hekate's
-  *Tools → USB Tools → SD Card* or similar) and copy the four files into `switch/switchwaker/`
-  (the European NRO into `switch/switchwaker-eur/`).
+  *Tools → USB Tools → SD Card* or similar) and copy the four files into `switch/switchwaker/`.
 - **Over USB (MTP)**, from the repository: `scripts/switch/push.sh --disc /path/to/GZLE01.iso`
   once (named after the disc's ID), then `scripts/switch/push.sh native` (the NRO and its caches;
-  `native-eur` for the European build, to `switch/switchwaker-eur/`) after every build.
+  `native-eur` for the European build, pushed as `switchwaker.nro`) after every build.
   Every file is read back and checked. Needs `brew install libmtp` and USB file transfer enabled on
   the console (DBI, haze or similar). Details: [docs/SWITCH_BUILD.md](docs/SWITCH_BUILD.md).
 
@@ -257,12 +255,12 @@ the first time it is needed (its draws skipped meanwhile), and the first hours s
 ### Start the game
 
 - Open the Homebrew Menu **in title mode**: hold **R** while starting any installed game, then pick
-  **SwitchWaker** (**SwitchWaker EUR** for the European disc). Opened from the album (applet mode)
+  **SwitchWaker** (**SwitchWaker EUR**: the European version). Opened from the album (applet mode)
   the game has far too little memory and will not run properly.
 - Or install the HOME-screen icon (forwarder), which always starts it in title mode:
   build it with `scripts/switch/build_forwarder.sh` and install `switchwaker_forwarder.nsp` with
-  DBI ([switch/forwarder/INSTALL.md](switch/forwarder/INSTALL.md)). It starts `switchwaker.nro`, the USA
-  build, only: start SwitchWaker EUR from the Homebrew Menu (known limitation).
+  DBI ([switch/forwarder/INSTALL.md](switch/forwarder/INSTALL.md)). It starts `switchwaker.nro`, whichever
+  version it is.
 
 ### The first start: shaders
 

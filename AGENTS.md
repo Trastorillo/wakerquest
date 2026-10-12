@@ -22,9 +22,10 @@ scripts/switch/build_native.sh && scripts/switch/switchwaker_debug.py deploy
 `initial_pipeline_cache.db` and `initial_dksh_cache.bin` built next to it, checks each CRC32, restarts the game
 and waits until it answers. The restart (`reload`) needs the game started from the HOME-menu forwarder; from hbmenu,
 `deploy --no-reload`, then ask the user to start it again. The European NRO: `build_native.sh --eur`, then
-`deploy --eur` (to `/switch/switchwaker-eur/switchwaker-eur.nro`, its own folder, as hbmenu lists one NRO per
-folder; the caches still go to `/switch/switchwaker/`); it runs from hbmenu, so it is never reloaded: ask the
-user to start "SwitchWaker EUR" again. `info`'s `game` line says which NRO is running. Building:
+`deploy --eur`: it goes in as `switchwaker.nro` too (one region per SD card; the forwarder starts either, so
+`reload` works). `info`'s `game` line says which region is running, and `deploy` refuses to replace it with
+the other region's NRO (the console's disc would not match) unless `--force`: check the console's region
+before deploying. Building:
 [docs/SWITCH_BUILD.md](docs/SWITCH_BUILD.md).
 
 ## Debug
