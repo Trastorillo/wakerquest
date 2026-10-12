@@ -602,7 +602,13 @@ BOOL daPy_lk_c::procTactPlay() {
         }
 
         msg_class* msg_p = fopMsgM_SearchByID(mGameOverId);
+#if TARGET_PC
+        // QoL "Canciones sin repetición" (pc_qol.h; BetterWW song_no_replay.asm): no wait for the
+        // "You conducted..." box to close
+        if (pc_qol(PC_QOL_NO_SONG_REPLAY) || msg_p == NULL || msg_p->mStatus == fopMsgStts_BOX_CLOSED_e) {
+#else
         if (msg_p == NULL || msg_p->mStatus == fopMsgStts_BOX_CLOSED_e) {
+#endif
             fopAc_ac_c* tactZevPartner = NULL;
             dComIfGp_setMetronomeOff();
 
@@ -663,7 +669,12 @@ BOOL daPy_lk_c::procTactPlay() {
                 m3624 = 0x14A9;
             }
         }
+#if TARGET_PC
+    // QoL "Canciones sin repetición" (song_no_replay.asm): no wait for the conducting animation to end
+    } else if (pc_qol(PC_QOL_NO_SONG_REPLAY) || mFrameCtrlUnder[UNDER_MOVE0_e].getRate() < 0.01f) {
+#else
     } else if (mFrameCtrlUnder[UNDER_MOVE0_e].getRate() < 0.01f) {
+#endif
         seStartSystem(JA_SE_TAKT_MATCHED);
         fopMsgM_messageSendOn();
         mProcVar0.m34D0 = 1;
