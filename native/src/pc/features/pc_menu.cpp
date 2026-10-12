@@ -615,13 +615,6 @@ const PcSettingDesc kBuiltins[] = {
      "Faster Ballad of Gales",
      "The Ballad of Gales warp starts as soon as the cyclone appears, without the boat's rise "
      "(BetterWW)."},
-    {"COS_QOL_SKIP_VIDEOS", "Sin vídeos de título y final",
-     "Sin el vídeo que sale al esperar en el título ni el del epílogo del final (BetterWW). La leyenda "
-     "del principio es la opción Saltar la introducción.",
-     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 70,
-     "No title and ending videos",
-     "No video when waiting at the title screen and no epilogue video at the end (BetterWW). The opening "
-     "legend is the Skip the intro option."},
     {"COS_QOL_SKIP_INTRO", "Saltar la introducción",
      "Una partida nueva empieza en Isla Initia, sin la leyenda del principio (BetterWW).",
      PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 75,
@@ -878,7 +871,8 @@ void doSailing() {
 // Calidad de vida > "Experiencia BetterWW" / "Valores originales": every QoL row set at once, as if
 // changed by hand (saved to settings.ini, each row still editable after). BetterWW's own defaults
 // (wwr_ui/randomizer_window.ui at 4501481): everything on but the full sea chart and the unrestricted
-// boat; its "remove title and ending videos" also skips the intro and fixes the original's bugs.
+// boat; its "remove title and ending videos" also skips the intro and fixes the original's bugs (the
+// videos part is not an option here: the port plays no THP video yet, docs/QOL_PLAN.md).
 struct QolPresetValue {
     PcQol which;
     const char* betterww;
@@ -886,7 +880,7 @@ struct QolPresetValue {
 const QolPresetValue kQolPreset[] = {
     {PC_QOL_INSTANT_TEXT, "1"}, {PC_QOL_FAST_ROLL, "1"},      {PC_QOL_FAST_BLOCKS, "1"},
     {PC_QOL_FAST_GRAPPLE, "1"}, {PC_QOL_FAST_CLIMB, "1"},     {PC_QOL_FAST_BALLAD, "1"},
-    {PC_QOL_SKIP_VIDEOS, "1"},  {PC_QOL_SKIP_INTRO, "1"},     {PC_QOL_REVEAL_CHART, "0"},
+    {PC_QOL_SKIP_INTRO, "1"},   {PC_QOL_REVEAL_CHART, "0"},
     {PC_QOL_TINGLE_CHESTS, "1"}, {PC_QOL_SAIL, "swift"},      {PC_QOL_FREE_BOAT, "0"},
     {PC_QOL_SWING_TURN, "1"},   {PC_QOL_NO_SONG_REPLAY, "1"}, {PC_QOL_FIX_BUGS, "1"},
 };

@@ -8,7 +8,6 @@
  * COS_QOL_FAST_GRAPPLE=1     faster grappling hook
  * COS_QOL_FAST_CLIMB=1       faster crawling, climbing, sidling and talk camera
  * COS_QOL_FAST_BALLAD=1      the Ballad of Gales warps without the boat's rise into the cyclone
- * COS_QOL_SKIP_VIDEOS=1      no title and ending videos
  * COS_QOL_REVEAL_CHART=1     the sea chart shows every sector (the save is not written)
  * COS_QOL_TINGLE_CHESTS=1    Tingle chests appear with any bomb, no Tingle Tuner
  * COS_QOL_SAIL=swift|brisk|wind  the sail behaves like HD's Swift Sail (or BetterWW's Brisk Sail);
@@ -39,7 +38,6 @@ typedef enum PcQol {
     PC_QOL_FAST_GRAPPLE,
     PC_QOL_FAST_CLIMB,
     PC_QOL_FAST_BALLAD,
-    PC_QOL_SKIP_VIDEOS,
     PC_QOL_REVEAL_CHART,
     PC_QOL_TINGLE_CHESTS,
     PC_QOL_SAIL,

@@ -9,7 +9,6 @@
 #expect setting COS_QOL_FAST_GRAPPLE 1
 #expect setting COS_QOL_FAST_CLIMB 1
 #expect setting COS_QOL_FAST_BALLAD 1
-#expect setting COS_QOL_SKIP_VIDEOS 1
 #expect setting COS_QOL_SKIP_INTRO 1
 #expect setting COS_QOL_REVEAL_CHART 0
 #expect setting COS_QOL_TINGLE_CHESTS 1
