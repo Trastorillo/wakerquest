@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Disc oracle: a manifest of the GZLE01 disc (docs/NATIVE_PORT_PHASE4_6.md, step 4.0d).
+"""Disc oracle: a manifest of the GZLE01 disc (docs/NATIVE_PORT_PHASE4_6.md, step 4.0d), or of the
+GZLP01 disc for the European build (docs/PAL_DISC_PLAN.md).
 
 The phase 4 format steps check what the native game reads against an independent reading of the
 same disc. This script is that reading, in pure Python (standard library only): the GameCube FST,
@@ -139,11 +140,18 @@ DEFAULT_DISC = os.environ.get("COS_DISC") or None
 DEFAULT_OUT = os.path.join(BUILD, "disc_manifest.json")
 DISC_CHECK_CACHE = os.path.join(BUILD, "runs", "disc_check.txt")
 
-# The supported disc (decision H9): GZLE01 revision 0 as a plain .iso. These hashes are the only
-# disc-derived values in the repository. The main.dol hash is the one the upstream recompilation project's scripts/prepare.py and
-# native/tools/run.sh have always checked; the image hash was taken from that same disc.
-EXPECTED_ISO_SHA1 = "0289e70f470dc758c73be9b8bcd8c865fb82d8ae"
-EXPECTED_DOL_SHA1 = "8d28bab68bb5078c38e43f29206f0bd01f7e7a67"
+# The supported discs (decision H9): GZLE01 revision 0 as a plain .iso, and for the European build
+# GZLP01 revision 0 (docs/PAL_DISC_PLAN.md). These hashes are the only disc-derived values in the
+# repository. GZLE01's main.dol hash is the one the upstream recompilation project's
+# scripts/prepare.py and native/tools/run.sh have always checked; the image hash was taken from
+# that same disc. GZLP01's main.dol hash is the decompilation's (config/GZLP01/build.sha1), its
+# image hash the Redump-verified image's.
+SUPPORTED = {
+    # disc ID: (image SHA-1, main.dol SHA-1)
+    "GZLE01": ("0289e70f470dc758c73be9b8bcd8c865fb82d8ae", "8d28bab68bb5078c38e43f29206f0bd01f7e7a67"),
+    "GZLP01": ("98f0a19d9a3b2ca3352621c77f47a547c97a27f1", "9395f87830261193a3872db4b69f580303f7c4d6"),
+}
+EXPECTED_ISO_SHA1, EXPECTED_DOL_SHA1 = SUPPORTED["GZLE01"]
 GC_MAGIC = b"\xC2\x33\x9F\x3D"
 
 # 2: "size" is always the stored size (a format's own size field moved to header_size).
@@ -239,17 +247,39 @@ def image_sha1(f):
     return h.hexdigest()
 
 
-def verify_disc(path, quiet=False):
-    """Checks main.dol's and the image's SHA-1 on first use; returns (ok, iso_sha1, dol_sha1)."""
+def disc_id(path):
+    """The disc header's game ID and revision ("GZLE01", 0), or (None, None)."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+    except OSError:
+        return None, None
+    if len(head) < 8:
+        return None, None
+    return head[:6].decode("latin-1"), head[7]
+
+
+def verify_disc(path, quiet=False, game=None):
+    """Checks main.dol's and the image's SHA-1 on first use; returns (ok, iso_sha1, dol_sha1).
+    game: the disc ID the caller's build needs (None: any supported disc)."""
     if not os.path.isfile(path):
         print("disc_manifest: %s: no such file" % path, file=sys.stderr)
         return False, None, None
+    gid, _ = disc_id(path)
+    if game is not None and gid != game:
+        print("disc_manifest: %s is %s, the build needs %s" % (path, gid, game), file=sys.stderr)
+        return False, None, None
+    if gid not in SUPPORTED:
+        print("disc_manifest: %s is %s; the supported discs are %s revision 0"
+              % (path, gid, " and ".join(SUPPORTED)), file=sys.stderr)
+        return False, None, None
+    expected_iso, expected_dol = SUPPORTED[gid]
     stamp = file_stamp(path)
-    line = "ok\t%s\t%s\t%s" % (path, stamp, EXPECTED_ISO_SHA1)
+    line = "ok\t%s\t%s\t%s" % (path, stamp, expected_iso)
     try:
         with open(DISC_CHECK_CACHE, encoding="utf-8") as c:
             if line in c.read().splitlines():
-                return True, EXPECTED_ISO_SHA1, EXPECTED_DOL_SHA1
+                return True, expected_iso, expected_dol
     except OSError:
         pass
     if not quiet:
@@ -261,14 +291,14 @@ def verify_disc(path, quiet=False):
         except ParseError as e:
             print("disc_manifest: %s: %s" % (path, e), file=sys.stderr)
             return False, None, None
-        if dsha != EXPECTED_DOL_SHA1:
-            print("disc_manifest: %s: main.dol SHA-1 %s, expected %s (GZLE01 revision 0)"
-                  % (path, dsha, EXPECTED_DOL_SHA1), file=sys.stderr)
+        if dsha != expected_dol:
+            print("disc_manifest: %s: main.dol SHA-1 %s, expected %s (%s revision 0)"
+                  % (path, dsha, expected_dol, gid), file=sys.stderr)
             return False, None, dsha
         isha = image_sha1(f)
-    if isha != EXPECTED_ISO_SHA1:
-        print("disc_manifest: %s: image SHA-1 %s, expected %s (the plain GZLE01 revision 0 .iso, "
-              "decision H9)" % (path, isha, EXPECTED_ISO_SHA1), file=sys.stderr)
+    if isha != expected_iso:
+        print("disc_manifest: %s: image SHA-1 %s, expected %s (the plain %s revision 0 .iso, "
+              "decision H9)" % (path, isha, expected_iso, gid), file=sys.stderr)
         return False, isha, dsha
     os.makedirs(os.path.dirname(DISC_CHECK_CACHE), exist_ok=True)
     with open(DISC_CHECK_CACHE, "a", encoding="utf-8") as c:
@@ -2466,7 +2496,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--disc", default=DEFAULT_DISC,
-                    help="the GZLE01 revision 0 .iso (default: $COS_DISC)")
+                    help="the GZLE01 (or GZLP01) revision 0 .iso (default: $COS_DISC)")
+    ap.add_argument("--game", choices=sorted(SUPPORTED),
+                    help="the disc ID the build needs (default: any supported disc)")
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--verify", action="store_true", help="only check the SHA-1 of the disc")
     ap.add_argument("--check-ls", metavar="LS", help="compare a disc-ls listing with the manifest")
@@ -2526,14 +2558,14 @@ def main():
 
     if not args.disc:
         print("disc_manifest: no disc image: pass --disc PATH or set COS_DISC "
-              "(the GZLE01 revision 0 .iso)", file=sys.stderr)
+              "(the GZLE01 or GZLP01 revision 0 .iso)", file=sys.stderr)
         return EXIT_DISC
-    ok, iso_sha, dsha = verify_disc(args.disc, args.quiet)
+    ok, iso_sha, dsha = verify_disc(args.disc, args.quiet, args.game)
     if not ok:
         return EXIT_DISC
     if args.verify:
         if not args.quiet:
-            print("disc_manifest: %s is GZLE01 revision 0 (SHA-1 %s)" % (args.disc, iso_sha))
+            print("disc_manifest: %s is %s revision 0 (SHA-1 %s)" % (args.disc, disc_id(args.disc)[0], iso_sha))
         return EXIT_OK
 
     m = build_manifest(args.disc, iso_sha, dsha, progress=not args.quiet)

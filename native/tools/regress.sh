@@ -87,13 +87,17 @@ check phase4_inventory python3 "$script_dir/phase4_inventory.py" --check \
     "$repo/native/check/phase4_baseline.txt"
 
 # The disc manifest is written once here, so parallel runs never race to create it.
+# The disc the build runs from (native/cmake/GameConfig.cmake: GZLE01, or GZLP01 for COS_VERSION=3,
+# docs/PAL_DISC_PLAN.md).
+game_id="$(sed -n 's/^COS_GAME_ID:STRING=//p' "$build/CMakeCache.txt" 2>/dev/null)"
+game_id="${game_id:-GZLE01}"
 disc="${COS_DISC:-}"
 if [ -z "$disc" ]; then
-    echo "regress: no disc image: set COS_DISC (the GZLE01 revision 0 .iso)" >&2
+    echo "regress: no disc image: set COS_DISC (the $game_id revision 0 .iso)" >&2
     exit 14
 fi
 export COS_DISC="$disc"
-python3 "$script_dir/disc_manifest.py" --verify --quiet --disc "$disc" > "$out/disc.log" 2>&1 ||
+python3 "$script_dir/disc_manifest.py" --verify --quiet --disc "$disc" --game "$game_id" > "$out/disc.log" 2>&1 ||
     report disc_verify FAIL "$out/disc.log"
 manifest_version="$(sed -n 's/^MANIFEST_VERSION = \([0-9]*\)$/\1/p' "$script_dir/disc_manifest.py")"
 if [ ! -f "$build/disc_manifest.json" ] ||
