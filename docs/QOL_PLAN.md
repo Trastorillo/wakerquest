@@ -89,7 +89,42 @@ instruction, matched to the source line below.
 ## Verification (Mac)
 
 Per item, a targeted run with the option off and on (`--env COS_QOL_...=1`), measured from the log
-(`COS_TRACE=qol`: `native/src/pc/harness/smokes/pc_qol_probe.cpp` prints the player's procedure,
-position and speed, the boat's speed, the message box status and the talk camera's timer) or shots;
-the regression (`native/tools/regress.sh`) at checkpoints and at the end with every option off and
-with every option on; the Switch NRO built. Console tests are left to the user.
+(`COS_TRACE=qol`: `native/src/pc/harness/smokes/pc_qol_probe.cpp`, one line per frame with the
+player's position, speed and angle, the event, the message process's number and status, the camera
+eye, the boat's speed, the A button's action, a switch and a chosen actor; it can also spawn actors,
+show a message, grab a rope and order the Ballad of Gales warp) or shots; the regression
+(`native/tools/regress.sh`) with every option off and with every option on; the Switch NRO built.
+
+| # | Mac check | Off | On |
+|---|---|---|---|
+| 1 | event-sweep LinkRM (A presses): message 186's typing frames; event Ba1_Get_Itm | 654; 615 frames | 14; 395 frames |
+| 1 | B held through the grandmother's talks (d_mesg: her tunic event; d_msg: talking to her after it) | both stop at the first wait | the event ends; the talk closes in 17 frames |
+| 2 | roll from speedF 3.62 (A two frames into a run, Windfall) | 5.93 | 21.28 |
+| 3 | push a spawned black box with R | a step every 24 frames | every 16 |
+| 4 | grappling hook thrown into the air (tool sweep case) | ~19 units/frame, turns back at 486 | ~38, at 466 |
+| 5 | crawl (R + stick); talk camera to the grandmother | ~5 units/frame; settles in 20 frames | ~10; 10 frames |
+| 6 | Ballad of Gales warp ordered at frame 600 (sailing preset) | new PLAY scene at 885 | at 631 |
+| 7 | title attract video | ends after 61 frames (no THP playback in the port yet) | the same |
+| 8 | sea chart (D-pad up, sailing preset) | 3 sectors drawn | all 49 |
+| 9 | a spawned Tingle trigger (type T, switch 0x20) and a normal bomb | switch stays off | set 2 frames after the bomb |
+| 10 | sailing smoke; A held at full speed | 54.84 units/frame; -1/frame | 109.71 (swift, brisk); -2 (swift), -3 (brisk) |
+| 11 | rope swing (Asoko), stick forward-right | angle stays 0x0000 | turns ~45 units/frame |
+| 12 | Wind's Requiem played (C stick, 30 frames a beat) | message 1453 up 814-960, wind window at 962 | message closed at 815, window at 816 |
+
+Live: `native/check/input/menu-qol.txt` (a regression target) turns Voltereta más rápida on from the
+menu; the next roll, from speedF 3.45, starts at 21.22.
+
+Regression: `native/tools/regress.sh` passes with every option off (the default). With every option on
+(`COS_QOL_*` in the environment, `COS_QOL_SAIL=swift`) all targets pass but two that the instant text
+breaks by design: `msg-sweep` compares `getMesgEntry` with the file (the draw type is now 1), and
+`telescope-demo`'s input script is timed to the original text speed. Both pass with the instant text
+off and the other options on.
+
+## Left for the console
+
+- Every option once on the Switch (the menu tab's layout at 720p, a live switch of each row).
+- Not reached by a Mac run: ladders, vines, ledges and sidling (item 5); the grappling hook wrapping
+  around a target (item 4); the ending's epilogue (item 7, and the title video once THP plays);
+  Tingle chests on the dungeon map and minimap with the compass (item 9); a Tingle statue chest in a
+  real dungeon with a normal bomb (item 9); Forsaken Fortress's big door with item 3 on (it keeps the
+  original door push, so no softlock is expected); the Brisk Sail's idle stop (item 10).
