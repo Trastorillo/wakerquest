@@ -45,6 +45,8 @@ not in git).
 | `stick L\|R x y [ms]` | stick override, -1..1, y up; `stick L 0 0` lets go |
 | `warps`, `warp N`, `warp STAGE [ROOM] [POINT] [LAYER]` | the options menu's travel list, by number or by name; LAYER forces the stage's actor layer (default: the game's choice; e.g. `warp Pjavdou 0 1 8` = Jabun's cave with Jabun, on the boat); applied once a file is being played |
 | `event NAME` | orders an event of the current stage's event list (as the Mac's event sweep: the player orders it, every frame until an event runs, 240 frames at most; the log says `event NAME running` or `did not start`). Jabun's cutscene (issue #3): Navegar in the menu, `warp Pjavdou 0 1 8`, then `event getperl_jab` |
+| `give ITEM [ITEM ...]` | items through the game's own item-get functions (`execItemGet`, as a chest or a shop gives them: inventory slot, "got it" bit, song bits, bomb count), applied once a file is being played, so the save stays consistent and the game's save screen keeps them. Names: `grapple` (Grappling Hook, 0x25: what "Garfio más rápido" changes), `hookshot` (the Hookshot, 0x2F, a different item), `baton` (Wind Waker), `ballad` (Ballad of Gales), `requiem` (Wind's Requiem), `bombs` (the bomb bag: 30 bombs, room for 30; with bombs already, 30 more instead of setting a bigger bag back to 30), `sail`, `telescope`, `bow`, `map`, `compass` (the current dungeon's), or an item number (`0x25`, `37`). One unknown name refuses the whole command. The log says what the game's own check reports for each item. A new item still has to be put on a button in the item menu |
+| `audio` | what the game's audio plays, as one line (`native/src/pc/features/pc_audio_state.cpp`): the registered sound effects (`id:state`), the SE tracks still sounding (`t<n>=<id>/<active><command>`; `ORPHAN` with active 1 would be a track with nothing left to stop it), the BGM ids, the takt mute factors, and two counters: `dac-repeat` climbs if the audio thread stalls (the same audio block replayed), `dsp-sync` stops then. For a sound that does not stop: run it twice a few seconds apart and keep the output |
 | `get`, `put`, `ls`, `rm`, `mkdir` | SD card files; paths are relative to `sdmc:/switch/switchwaker` unless they start with `/` |
 | `logs`, `lastlog [LOCAL]` | the session logs in `native/logs/`; download the newest one. The running session's file cannot be opened while the game writes it, so `lastlog` then takes the text the console keeps in memory (`logtext`, the last 2 MiB, from the first line) |
 | `crashes [--fetch DIR]` | Atmosphère's crash reports (`/atmosphere/crash_reports`) |
@@ -54,6 +56,24 @@ not in git).
 Button names: `A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT LS RS`. The presses go into the gamepad shim
 (`switch/aurora/sdl3_shim/sdl3_shim_gamepad.c`), as if they came from the controller, so they reach the
 options menu too: `press MINUS` opens it.
+
+### Testing the QoL options on your own save
+
+The items the "Calidad de vida" options need, without playing to them (`give` uses the game's item-get, so
+saving in the game keeps them):
+
+- Garfio más rápido (the Grappling Hook): `give grapple`, put it on a button, then
+  `warp M_NewD2 15 18` (Dragon Roost Cavern, room 15): a grapple post (`Kui`) about 850 units straight ahead,
+  400 up. Throw at it with the option off and on.
+- Balada del vendaval rápida: `give baton ballad`, the baton on a button, on the boat at sea (your own boat, or
+  Depuración > "Navegar" in the menu: on the boat at Windfall), then conduct the Ballad of Gales and pick a
+  destination. With the option on the warp starts at once (no rise into the cyclone, no warp music).
+- Cofres de Tingle sin Tingle Tuner: `give bombs`, then `warp M_NewD2 15 18` again: the Tingle statue mark of
+  that room's Tingle Statue chest (switch 0x6f) is on the floor about 1,480 units straight ahead (100 lower).
+  A normal bomb on it with the option on starts the chest's appear cutscene (checked on the Mac:
+  `DEFAULT_TREASURE_APPEAR`, the chest next to the mark); off, nothing happens. The other four Tingle Statue
+  chests: `warp kindan 14 0` (Forbidden Woods, the mark ~1,270 units from the spawn), `M_Dai` room 9, `Siren`
+  room 6, `kaze` room 3 (marks at the `agbTBOX` actors of those rooms).
 
 A typical loop:
 
@@ -90,8 +110,8 @@ each with its own thread.
 - `switch/native/source/debug_server.{h,cpp}`: the server. It knows nothing about the game, and it is the
   same file as SwitchWakerHD's (`runtime/src/platform/`): keep the two copies the same. Its stand-in for
   testing on the Mac is `scripts/switch/debug_server_host_test.cpp`.
-- `switch/native/source/cos_debug.cpp`: this port's commands (`info`, `warps`, `warp`, `shot`, `reload`,
-  `quit`), the start from the settings file (`cos_switch_debug_start`, called by `cos_switch_start` after
+- `switch/native/source/cos_debug.cpp`: this port's commands (`info`, `warps`, `warp`, `event`, `give`,
+  `audio`, `shot`, `reload`, `quit`, `crash`), the start from the settings file (`cos_switch_debug_start`, called by `cos_switch_start` after
   `pc_settings_load_early`), and the input
   bridge.
 - The hooks:
@@ -99,7 +119,9 @@ each with its own thread.
     when the server is off).
   - `sdl3_shim_gamepad.c`: the presses and sticks.
   - `native/src/pc/harness/pc_shot.cpp` (`pc_debug_shot_*`): the screenshot at the next frame end.
-  - `native/src/pc/features/pc_menu.cpp` (`pc_debug_warp*`, `pc_debug_status`): the warp and the game's
-    state, both on the game thread.
+  - `native/src/pc/features/pc_menu.cpp` (`pc_debug_warp*`, `pc_debug_event`, `pc_debug_give`,
+    `pc_debug_audio_*`, `pc_debug_status`): the warp, the event, the items, the audio line and the game's
+    state, all on the game thread. On the Mac, `COS_TRACE=qol` with `COS_QOL_PROBE_GIVE=<frame>:<name>,...`
+    (`pc_qol_probe.cpp`) runs the same `give` queue.
 - `scripts/switch/switchwaker_debug.py`: the client, the same as SwitchWakerHD's `tools/switch/wwhd_debug.py`
-  except for its configuration block.
+  except for its configuration block and this port's game commands (`event`, `give`, `audio`, `crash`).

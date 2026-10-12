@@ -6,6 +6,9 @@
 //
 //   info               build, frame, stage, memory, applet type, address
 //   warps, warp ...    the options menu's travel list (pc_menu.cpp), applied by the game thread once a file is played
+//   event NAME         an event of the stage's event list (pc_menu.cpp)
+//   give NAME|ITEM ... items through the game's own item-get functions (pc_menu.cpp), once a file is played
+//   audio              what JAudio plays (pc_audio_state.cpp): registered sound effects, SE tracks, BGM, counters
 //   shot [game]        PNG of the next frame (pc_shot.cpp): with the FPS panel and the menu, or the game alone
 //   reload             restart: the forwarder loads the NRO again (cos_switch_restart)
 //   quit               end the process (cos_switch_exit)
@@ -34,6 +37,9 @@
 extern "C" int pc_debug_warp_list(char* out, size_t size);                                         // pc_menu.cpp
 extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, int layer, char* done, size_t size);
 extern "C" int pc_debug_event(const char* name);                                                    // pc_menu.cpp
+extern "C" int pc_debug_give(const char* const* names, int count, char* done, size_t size);         // pc_menu.cpp
+extern "C" unsigned int pc_debug_audio_request(void);
+extern "C" int pc_debug_audio_done(unsigned int ticket, char* out, size_t size);
 extern "C" int pc_debug_status(char* out, size_t size);
 extern "C" unsigned int pc_debug_shot_request(const char* path, int overlay);                     // pc_shot.cpp
 extern "C" unsigned int pc_debug_shot_done(int* ok);
@@ -105,6 +111,39 @@ debugsrv::Reply event(const debugsrv::Args& a) {
     return debugsrv::ok("event " + a[0] + " requested (the log says whether it started)");
 }
 
+// "give NAME|ITEM ...": queued for the game thread, which runs the game's item-get function of each (the log
+// says what the game's own check reports after)
+debugsrv::Reply give(const debugsrv::Args& a) {
+    if (a.empty() || a.size() > 16) {
+        return debugsrv::err("usage: give <name or item number> ... (up to 16): grapple, hookshot, baton, ballad, "
+                             "requiem, bombs, sail, telescope, bow, map, compass, or 0x25, 37, ...");
+    }
+    const char* names[16];
+    for (size_t i = 0; i < a.size(); i++) {
+        names[i] = a[i].c_str();
+    }
+    char done[512];
+    if (!pc_debug_give(names, (int)a.size(), done, sizeof(done))) {
+        return debugsrv::err(std::string("unknown item ") + done + " (a name from 'give' without arguments, or a number 0-254)");
+    }
+    fprintf(stderr, "[cos] debug server: give %s requested\n", done);
+    return debugsrv::ok(std::string("give ") + done +
+                        " requested (given once a file is being played; the log says what the game's check reports)");
+}
+
+// "audio": a line the game thread writes at its next frame end
+debugsrv::Reply audio(const debugsrv::Args&) {
+    const unsigned int ticket = pc_debug_audio_request();
+    char line[1536];
+    for (int i = 0; i < 40; i++) { // 2 s
+        if (pc_debug_audio_done(ticket, line, sizeof(line))) {
+            return debugsrv::ok(std::string(line) + "\n");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return debugsrv::err("the game thread did not answer within 2 s (is it running?)");
+}
+
 // "shot [game]": the next frame end writes the PNG (pc_shot.cpp); sent, then deleted
 debugsrv::Reply shot(const debugsrv::Args& a) {
     const bool game = !a.empty() && a[0] == "game";
@@ -170,6 +209,8 @@ extern "C" void cos_switch_debug_start(void) {
     debugsrv::add_command("warps", "warps                  the travel destinations, numbered", warps);
     debugsrv::add_command("warp", "warp <n> | warp <stage> [room] [point] [layer]", warp);
     debugsrv::add_command("event", "event <name>           order an event of the stage's event list", event);
+    debugsrv::add_command("give", "give <name|item> ...   items through the game's item-get (grapple, baton, ballad, bombs, ...)", give);
+    debugsrv::add_command("audio", "audio                  what JAudio plays: sound effects, SE tracks, BGM, audio thread", audio);
     debugsrv::add_command("shot", "shot [game]            PNG of the next frame (game: without the panel and menu)", shot);
     debugsrv::add_command("reload", "reload                 restart: the forwarder loads the NRO again (put it first)", reload);
     debugsrv::add_command("quit", "quit                   end the program", quit);

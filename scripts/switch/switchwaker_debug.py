@@ -15,6 +15,8 @@ log says '[switch] debug server listening on <ip>:6543'. The console's address: 
   switchwaker_debug.py press A [B ...] [ms]      also hold, release, stick L|R x y [ms]
   switchwaker_debug.py warps | warp N | warp STAGE [ROOM] [POINT] [LAYER]
   switchwaker_debug.py event NAME                an event of the stage's event list (e.g. getperl_jab)
+  switchwaker_debug.py give ITEM [ITEM ...]      items through the game's item-get (grapple baton ballad bombs, 0x25)
+  switchwaker_debug.py audio                     what the game's audio plays (sound effects, SE tracks, BGM)
   switchwaker_debug.py get REMOTE [LOCAL] | put LOCAL REMOTE | ls [REMOTE] | rm REMOTE | mkdir REMOTE
   switchwaker_debug.py logs | lastlog [LOCAL]    session logs (native/logs/); the newest one (also while it runs)
   switchwaker_debug.py crashes [--fetch DIR]     Atmosphere's crash reports
@@ -128,7 +130,7 @@ def connect(args, timeout=10.0):
 
 
 # Commands that change the console's files or the running game.
-CHANGING_COMMANDS = ("deploy", "put", "rm", "mkdir", "reload", "quit", "crash", "warp", "event", "press", "hold",
+CHANGING_COMMANDS = ("deploy", "put", "rm", "mkdir", "reload", "quit", "crash", "warp", "event", "give", "press", "hold",
                      "release", "stick", "raw")
 
 
@@ -336,9 +338,9 @@ def main():
     p.add_argument("--port", type=int, default=int(os.environ.get(ENV_PORT, DEFAULT_PORT)))
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    for name in ("info", "ping", "help", "warps", "quit", "reload", "crash"):
+    for name in ("info", "ping", "help", "warps", "quit", "reload", "crash", "audio"):
         sub.add_parser(name)
-    for name in ("press", "hold", "release", "warp", "stick", "event"):
+    for name in ("press", "hold", "release", "warp", "stick", "event", "give"):
         sp = sub.add_parser(name)
         sp.add_argument("rest", nargs="*")
     sp = sub.add_parser("raw")
@@ -378,9 +380,9 @@ def main():
     try:
         if args.cmd in CHANGING_COMMANDS:
             check_game(args)
-        if args.cmd in ("info", "ping", "help", "warps", "quit", "reload", "crash"):
+        if args.cmd in ("info", "ping", "help", "warps", "quit", "reload", "crash", "audio"):
             simple(args, args.cmd)
-        elif args.cmd in ("press", "hold", "release", "warp", "stick", "event"):
+        elif args.cmd in ("press", "hold", "release", "warp", "stick", "event", "give"):
             simple(args, args.cmd, *args.rest, timeout=120.0)
         elif args.cmd == "raw":
             simple(args, *args.rest, timeout=120.0)

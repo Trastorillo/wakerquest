@@ -40,6 +40,7 @@
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
 #include "d/d_save.h"
+#include "d/d_item.h"
 #include "d/d_item_data.h"
 #include "d/actor/d_a_player.h"
 #include "m_Do/m_Do_MemCard.h"
@@ -62,6 +63,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <strings.h>
 #include <unistd.h>
 #include <vector>
 
@@ -1614,12 +1616,56 @@ struct DebugEvent {
     char name[32] = {};
     unsigned int frames = 0;
 } sDebugEvent;
+// "give NAME|ITEM ...": items through the game's own item-get functions (execItemGet, d_item.cpp: the
+// inventory slot, the "got it" bit, the song bits, the bomb count), applied by the game thread once a file
+// is played and the player exists, as a chest or a shop would. For testing the QoL options on the player's
+// own save (docs/DEBUG_SERVER.md).
+struct DebugGive {
+    int count = 0;
+    u8 items[16] = {};
+} sDebugGive;
+// "audio": a pc_audio_state.cpp line taken by the game thread at its next frame end (ticket = the request
+// count, done = the last request answered).
+struct DebugAudio {
+    unsigned int requested = 0;
+    unsigned int done = 0;
+    char line[1536] = {};
+} sDebugAudio;
 struct DebugStatus {
     unsigned int frame = 0;
     bool play = false;
     char stage[8] = {};
     int room = -1;
 } sDebugStatus;
+
+// The names "give" takes (item numbers: d_item_data.h). The Grappling Hook (0x25, d_a_himo2: what
+// "Garfio más rápido" changes) is not the Hookshot (0x2F).
+struct DebugItemName {
+    const char* name;
+    u8 item;
+};
+const DebugItemName kDebugItemNames[] = {
+    {"grapple", dItemNo_GRAPPLING_HOOK_e},   {"grappling", dItemNo_GRAPPLING_HOOK_e},
+    {"garfio", dItemNo_GRAPPLING_HOOK_e},    {"hookshot", dItemNo_HOOKSHOT_e},
+    {"gancho", dItemNo_HOOKSHOT_e},          {"baton", dItemNo_WIND_WAKER_e},
+    {"windwaker", dItemNo_WIND_WAKER_e},     {"batuta", dItemNo_WIND_WAKER_e},
+    {"requiem", dItemNo_WINDS_REQUIEM_e},    {"ballad", dItemNo_BALLAD_OF_GALES_e},
+    {"balada", dItemNo_BALLAD_OF_GALES_e},   {"bombs", dItemNo_BOMB_BAG_e},
+    {"bombas", dItemNo_BOMB_BAG_e},          {"sail", dItemNo_SAIL_e},
+    {"vela", dItemNo_SAIL_e},                {"telescope", dItemNo_TELESCOPE_e},
+    {"bow", dItemNo_BOW_e},                  {"arco", dItemNo_BOW_e},
+    {"map", dItemNo_MAP_e},                  {"mapa", dItemNo_MAP_e},
+    {"compass", dItemNo_COMPASS_e},          {"brujula", dItemNo_COMPASS_e},
+};
+
+const char* debugItemName(u8 item) {
+    for (const DebugItemName& n : kDebugItemNames) {
+        if (n.item == item) {
+            return n.name;
+        }
+    }
+    return "by number";
+}
 
 void debugFrameEnd(unsigned int frame) {
     const bool play = inPlay();
@@ -1636,6 +1682,25 @@ void debugFrameEnd(unsigned int frame) {
         writef(STDERR_FILENO, "[cos] debug server: warp to %s room %d point %d layer %d\n", sDebugWarp.stage,
                sDebugWarp.room, sDebugWarp.point, sDebugWarp.layer);
         dComIfGp_setNextStage(sDebugWarp.stage, (s16)sDebugWarp.point, (s8)sDebugWarp.room, (s8)sDebugWarp.layer);
+    }
+    if (sDebugGive.count > 0 && play && !dComIfGp_isEnableNextStage() && dComIfGp_getPlayer(0) != nullptr) {
+        for (int i = 0; i < sDebugGive.count; i++) {
+            u8 item = sDebugGive.items[i];
+            if (item == dItemNo_BOMB_BAG_e && dComIfGs_getItem(dInvSlot_BOMB_e) != dItemNo_NONE_e) {
+                item = dItemNo_BOMB_30_e; // the bag would set a bigger bag back to 30
+            }
+            execItemGet(item);
+            // the game's own "does the player have it" check for that item (-1: none for this item)
+            writef(STDERR_FILENO, "[cos] debug server: gave item 0x%02X (%s); the game's check says %d; bombs %u/%u\n",
+                   item, debugItemName(item), (int)checkItemGet(item, -1), (unsigned)dComIfGs_getBombNum(),
+                   (unsigned)dComIfGs_getBombMax());
+        }
+        sDebugGive.count = 0;
+    }
+    if (sDebugAudio.requested != sDebugAudio.done) {
+        audioStateLine(sDebugAudio.line, sizeof(sDebugAudio.line));
+        sDebugAudio.done = sDebugAudio.requested;
+        writef(STDERR_FILENO, "[cos] debug server: audio %s\n", sDebugAudio.line);
     }
     if (sDebugEvent.pending && play && !dComIfGp_isEnableNextStage() && dComIfGp_getPlayer(0) != nullptr) {
         if (sDebugEvent.frames > 0 && dComIfGp_event_runCheck()) {
@@ -1725,6 +1790,59 @@ extern "C" int pc_debug_event(const char* name) {
     snprintf(pc::sDebugEvent.name, sizeof(pc::sDebugEvent.name), "%s", name);
     pc::sDebugEvent.frames = 0;
     pc::sDebugEvent.pending = true;
+    return 1;
+}
+
+// "give": names or item numbers (decimal or 0x..), queued for the game thread (see sDebugGive). Writes
+// what was queued (or the first unknown name) to `done`; 0: an unknown name or too many items.
+// "bombs" is the bomb bag (30 bombs, room for 30); with bombs already, 30 more bombs instead (the bag
+// would set the room back to 30).
+extern "C" int pc_debug_give(const char* const* names, int count, char* done, size_t size) {
+    u8 items[16];
+    int n = 0;
+    size_t len = 0;
+    done[0] = '\0';
+    for (int i = 0; i < count; i++) {
+        int item = -1;
+        for (const pc::DebugItemName& d : pc::kDebugItemNames) {
+            if (strcasecmp(names[i], d.name) == 0) {
+                item = d.item;
+            }
+        }
+        if (item < 0) {
+            char* end = nullptr;
+            const long v = strtol(names[i], &end, 0);
+            if (end != names[i] && *end == '\0' && v >= 0 && v < dItemNo_NONE_e) {
+                item = (int)v;
+            }
+        }
+        if (item < 0 || n >= (int)sizeof(items)) {
+            snprintf(done, size, "%s", names[i]);
+            return 0;
+        }
+        items[n++] = (u8)item;
+        len += (size_t)snprintf(done + len, len < size ? size - len : 0, "%s%s=0x%02X", i > 0 ? " " : "", names[i], item);
+    }
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    for (int i = 0; i < n && pc::sDebugGive.count < (int)sizeof(pc::sDebugGive.items); i++) {
+        pc::sDebugGive.items[pc::sDebugGive.count++] = items[i];
+    }
+    return 1;
+}
+
+// "audio": asks the game thread for a pc_audio_state.cpp line; returns its ticket (pc_debug_audio_done).
+extern "C" unsigned int pc_debug_audio_request(void) {
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    return ++pc::sDebugAudio.requested;
+}
+
+// The line once the game thread answered `ticket` (1), else 0.
+extern "C" int pc_debug_audio_done(unsigned int ticket, char* out, size_t size) {
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    if (pc::sDebugAudio.done < ticket) {
+        return 0;
+    }
+    snprintf(out, size, "%s", pc::sDebugAudio.line);
     return 1;
 }
 

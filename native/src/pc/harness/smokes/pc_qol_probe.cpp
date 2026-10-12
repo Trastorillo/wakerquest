@@ -20,6 +20,8 @@
 //       daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat;
 //   COS_QOL_PROBE_WARP=<frame>:<stage>:<room>:<point>   the options menu's travel at that frame
 //       (pc_menu.cpp doWarp: dComIfGp_setNextStage with the game's own layer);
+//   COS_QOL_PROBE_GIVE=<frame>:<name>[,<name>...]   the debug server's "give" at that frame (pc_debug_give,
+//       pc_menu.cpp: the same queue, run by the game thread at the frame's end);
 //   COS_QOL_PROBE_SE=<n>   every n frames (also outside the PLAY scene) one line with what JAudio plays:
 //       "[cos] qol-probe se f=<frame> <pc_audio_state.cpp's line>" (the registered sound effects, the
 //       SE tracks still sounding, the BGM, the audio thread's counters).
@@ -71,6 +73,8 @@ char sWarpStage[8] = {};
 int sWarpRoom = 0;
 int sWarpPoint = 0;
 unsigned int sSeEvery = 0;
+unsigned int sGiveFrame = 0;
+char sGive[256] = {};
 
 // What JAudio plays (pc_audio_state.cpp).
 void seLine(unsigned int frames) {
@@ -110,6 +114,7 @@ void* isMessage(void* proc, void*) {
 } // namespace pc
 
 extern "C" int pc_debug_grab_rope(fopAc_ac_c* rope, const cXyz* at); // pc_rope.cpp
+extern "C" int pc_debug_give(const char* const* names, int count, char* done, size_t size); // pc_menu.cpp
 
 namespace pc {
 
@@ -164,6 +169,13 @@ void qolProbeFrame(unsigned int frames) {
             if (sscanf(v, "%u:%7[^:]:%d:%d", &f, stage, &sWarpRoom, &sWarpPoint) == 4) {
                 sWarpFrame = f;
                 snprintf(sWarpStage, sizeof(sWarpStage), "%s", stage);
+            }
+        }
+        if (const char* v = getenv("COS_QOL_PROBE_GIVE"); v != nullptr) {
+            char* end = nullptr;
+            sGiveFrame = (unsigned int)strtoul(v, &end, 0);
+            if (end != nullptr && *end == ':') {
+                snprintf(sGive, sizeof(sGive), "%s", end + 1);
             }
         }
         if (const char* v = getenv("COS_QOL_PROBE_SE"); v != nullptr) {
@@ -226,6 +238,18 @@ void qolProbeFrame(unsigned int frames) {
             boat->setTactWarp();
             writef(STDERR_FILENO, "[cos] qol-probe: Ballad of Gales warp %d ordered at frame %u\n", sBalladTo, frames);
         }
+    }
+    if (sGiveFrame != 0 && frames == sGiveFrame && sGive[0] != '\0') {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "%s", sGive);
+        const char* names[16];
+        int count = 0;
+        for (char* t = strtok(buf, ","); t != nullptr && count < 16; t = strtok(nullptr, ",")) {
+            names[count++] = t;
+        }
+        char done[512];
+        const int ok = pc_debug_give(names, count, done, sizeof(done));
+        writef(STDERR_FILENO, "[cos] qol-probe: give %s at frame %u: %s\n", sGive, frames, ok ? done : "unknown item");
     }
     if (sWarpFrame != 0 && frames == sWarpFrame) {
         writef(STDERR_FILENO, "[cos] qol-probe: warp to %s room %d point %d at frame %u\n", sWarpStage, sWarpRoom,
