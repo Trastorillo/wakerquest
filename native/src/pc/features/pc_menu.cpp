@@ -38,6 +38,8 @@
 #include "pc/pc_qol.h"
 
 #include "d/d_com_inf_game.h"
+#include "d/d_kankyo.h"
+#include <math.h>
 #include "d/d_s_play.h"
 #include "d/d_save.h"
 #include "d/d_item.h"
@@ -1707,6 +1709,7 @@ struct DebugGive {
 struct DebugTime {
     float hour = -1.0f;
     unsigned take = 0;
+    bool clear = false; // "weather clear": the sea's dice weather back to sunny
 } sDebugTime;
 // "audio": a pc_audio_state.cpp line taken by the game thread at its next frame end (ticket = the request
 // count, done = the last request answered).
@@ -1786,6 +1789,17 @@ void debugFrameEnd(unsigned int frame) {
         dComIfGs_setTime(sDebugTime.hour * 15.0f);
         writef(STDERR_FILENO, "[cos] debug server: time set to %.2f h\n", sDebugTime.hour);
         sDebugTime.hour = -1.0f;
+    }
+    if (sDebugTime.clear && play) {
+        // the sea's dice weather (d_kankyo.cpp dKy_wether_dice: every pattern starts cloudy or rainy, and a
+        // jump in time starts one): sunny, the pattern ended, the next roll 179 degrees (about 12 h) away
+        dScnKy_env_light_c& env = dKy_getEnvlight();
+        env.mDiceWeatherMode = DICE_MODE_SUNNY_e;
+        env.mDiceWeatherState = DICE_STATE_RESET_e;
+        env.mDiceWeatherChangeTime = fmodf(dComIfGs_getTime() + 179.0f, 360.0f);
+        writef(STDERR_FILENO, "[cos] debug server: weather clear (next roll at %.1f h)\n",
+               env.mDiceWeatherChangeTime / 15.0f);
+        sDebugTime.clear = false;
     }
     if (sDebugTime.take != 0 && play) {
         if (sDebugTime.take & 1) {
@@ -1940,6 +1954,12 @@ extern "C" int pc_debug_time(float hour) {
     std::lock_guard<std::mutex> lk(pc::sDebugMu);
     pc::sDebugTime.hour = hour;
     return 1;
+}
+
+// "weather clear": the sea's weather back to sunny, applied once a file is being played.
+extern "C" void pc_debug_weather_clear(void) {
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    pc::sDebugTime.clear = true;
 }
 
 // "take": the current stage's dungeon map and/or compass (the save bits "give map"/"give compass" set),
