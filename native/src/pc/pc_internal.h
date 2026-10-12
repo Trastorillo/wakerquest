@@ -336,6 +336,8 @@ void windScreenFrame(unsigned int frames);
 void kyProcsFrame(unsigned int frames);
 // COS_SMOKE=chest (pc_chest.cpp): the chest after Niko's rope lesson.
 void chestFrame(unsigned int frames);
+// COS_SMOKE=dmap (pc_dmap.cpp, issue #6): the dungeon map screen draws its rooms.
+void dmapFrame(unsigned int frames);
 // COS_SMOKE=item-sweep (pc_item_sweep.cpp): every item through a chest's item-get demo.
 void itemSweepFrame(unsigned int frames);
 // Save/load sweep (pc_save_sweep.cpp): COS_SMOKE=save-sweep saves through the save screen's steps,
