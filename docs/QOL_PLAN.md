@@ -81,7 +81,10 @@ instruction, matched to the source line below.
   as in both patches; the floors above and below still hide Tingle chests.
 - Item 10 doubles every use of the two pooled constants, as the REL patch does (the tornado pull,
   the turn rate's and the effects' speed scale, a demo's target speed), so the boat handles as with
-  BetterWW.
+  BetterWW. One use is left out: `setWaveAngle`'s `static cXyz local_left(80.0f, ...)`, initialised
+  once on first use (a live option cannot change it) and paired with `local_right(-80.0f, ...)`, a
+  different constant the patch leaves at -80: doubling only one side there is a side effect of the
+  patch, not a sail behaviour.
 
 ## Verification (Mac)
 

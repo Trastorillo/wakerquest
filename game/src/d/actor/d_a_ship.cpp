@@ -24,6 +24,14 @@
 #include "res/Object/Ship.h"
 #if TARGET_PC
 #include "pc/pc_qol.h"
+
+// QoL "Vela" (pc_qol.h; wwrando swift_sail.asm / BetterWW brisk_sail.asm and their tweaks): the swift
+// and brisk sails double the REL's pooled 55.0 and 80.0 (its sailing and initial speed, so every use
+// of them: turn rate, effects, a demo's speed, the cyclone's pull); daShip_qolSail gives a use of
+// either constant its value for the current option.
+static inline f32 daShip_qolSail(f32 v) {
+    return pc_qol(PC_QOL_SAIL) ? v * 2.0f : v;
+}
 #endif
 
 static char l_arcName[] = "Ship";
@@ -945,7 +953,12 @@ void daShip_c::setYPos() {
         }
     }
     else {
+#if TARGET_PC
+        // QoL "Vela" (daShip_qolSail)
+        f32 f1 = daShip_qolSail(55.0f);
+#else
         f32 f1 = 55.0f;
+#endif
         fVar2 = std::fabsf(speedF) / f1;
         if (fVar2 > 1.0f) {
             fVar2 = 1.0f;
@@ -1123,12 +1136,25 @@ BOOL daShip_c::checkOutRange() {
 
 /* 00002CC4-00002CFC       .text decrementShipSpeed__8daShip_cFf */
 void daShip_c::decrementShipSpeed(float decrementSpeed) {
+#if TARGET_PC
+    // QoL "Vela": steps of 0.2 / 0.03 instead of 0.1 / 0.015 (swift_sail.asm)
+    if (pc_qol(PC_QOL_SAIL)) {
+        cLib_addCalc(&speedF, decrementSpeed, 0.05f, 0.2f, 0.03f);
+        return;
+    }
+#endif
     cLib_addCalc(&speedF, decrementSpeed, 0.05f, 0.1f, 0.015f);
 }
 
 /* 00002CFC-00002D5C       .text firstDecrementShipSpeed__8daShip_cFf */
 void daShip_c::firstDecrementShipSpeed(float decrementSpeed) {
+#if TARGET_PC
+    // QoL "Vela": steps of 10.0 / 2.0 instead of 5.0 / 1.0 (swift_sail.asm)
+    if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, pc_qol(PC_QOL_SAIL) ? 10.0f : 5.0f,
+                     pc_qol(PC_QOL_SAIL) ? 2.0f : 1.0f) < 3.0f) {
+#else
     if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, 5.0f, 1.0f) < 3.0f) {
+#endif
         m03E0 = 10000.0f;
     }
 }
@@ -1148,7 +1174,12 @@ s16 daShip_c::getAimControllAngle(short referenceAngle) {
 void daShip_c::setMoveAngle(short moveAngle) {
     if (!checkForceMove()) {
         s16 initialAngle = shape_angle.y;
+#if TARGET_PC
+        // QoL "Vela" (daShip_qolSail)
+        f32 turnRate = 4.0f - std::fabsf(speedF) / daShip_qolSail(55.0f) * 3.0f;
+#else
         f32 turnRate = 4.0f - std::fabsf(speedF) / 55.0f * 3.0f;
+#endif
         if (turnRate > 3.6f) {
             turnRate = 3.6f;
         }
@@ -1415,10 +1446,24 @@ void daShip_c::setSelfMove(int param_1) {
             }
             else {
                 if (dComIfGp_getDoStatus() == dActStts_STOP_e && (CPad_CHECK_HOLD_A(0))) {
+#if TARGET_PC
+                    // QoL "Vela": A stops the boat with steps of 2.0 / 0.2 (brisk 3.0 / 0.2) instead of
+                    // 1.0 / 0.1 (slow_down_ship_when_stopping)
+                    const int sail = pc_qol(PC_QOL_SAIL);
+                    fVar6 = cLib_addCalc(&speedF, 0.0f, 0.1f,
+                                         sail == PC_QOL_SAIL_BRISK ? 3.0f : sail != 0 ? 2.0f : 1.0f,
+                                         sail != 0 ? 0.2f : 0.1f);
+#else
                     fVar6 = cLib_addCalc(&speedF, 0.0f, 0.1f, 1.0f, 0.1f);
+#endif
                 }
                 else {
+#if TARGET_PC
+                    // QoL "Vela": R cruises at up to 30 instead of 10
+                    fVar6 = CPad_GET_ANALOG_R(0) * (pc_qol(PC_QOL_SAIL) ? 30.0f : 10.0f);
+#else
                     fVar6 = CPad_GET_ANALOG_R(0) * 10.0f;
+#endif
                     bVar1 = FALSE;
                     if (mAcch.ChkWallHit()) {
                         for (int i = 0; i < m03CC; i++) {
@@ -1452,7 +1497,15 @@ BOOL daShip_c::procWait_init() {
 
 /* 00003AA0-00003B94       .text procWait__8daShip_cFv */
 BOOL daShip_c::procWait() {  
+#if TARGET_PC
+    // QoL "Vela": without the player the boat stops with steps of 2.0 / 0.1 (brisk 4.0 / 0.2) instead
+    // of 1.0 / 0.05 (slow_down_ship_when_idle)
+    const int sail = pc_qol(PC_QOL_SAIL);
+    cLib_addCalc(&speedF, 0.0f, 0.1f, sail == PC_QOL_SAIL_BRISK ? 4.0f : sail != 0 ? 2.0f : 1.0f,
+                 sail == PC_QOL_SAIL_BRISK ? 0.2f : sail != 0 ? 0.1f : 0.05f);
+#else
     cLib_addCalc(&speedF, 0.0f, 0.1f, 1.0f, 0.05f);
+#endif
     
     if (mpBodyAnm->getFrame() >= 7.0f) {
         mPart = PART_WAIT_e;
@@ -1657,12 +1710,23 @@ BOOL daShip_c::procSteerMove() {
         if (windPower > 1.0f) {
             windPower = 1.0f;
         }
+#if TARGET_PC
+        // QoL "Vela" (daShip_qolSail)
+        windPower *= windFactor * daShip_qolSail(55.0f);
+#else
         windPower *= windFactor * 55.0f;
+#endif
         
         if (mpBodyAnm->checkFrame(7.0f)) {
             float targetSpeed = windPower * 2.0f;
+#if TARGET_PC
+            // QoL "Vela" (daShip_qolSail)
+            if (targetSpeed > daShip_qolSail(80.0f)) {
+                targetSpeed = daShip_qolSail(80.0f);
+#else
             if (targetSpeed > 80.0f) {
                 targetSpeed = 80.0f;
+#endif
             }
             if (speedF < targetSpeed) {
                 speedF = targetSpeed;
@@ -2274,7 +2338,12 @@ BOOL daShip_c::procZevDemo() {
                         fVar3 = *speedP;
                     }
                     else {
+#if TARGET_PC
+                        // QoL "Vela" (daShip_qolSail)
+                        fVar3 = daShip_qolSail(55.0f);
+#else
                         fVar3 = 55.0f;
+#endif
                     }
                     if (speedF > fVar3) {
                         speedF = fVar3;
@@ -2605,7 +2674,12 @@ BOOL daShip_c::procTurn() {
         current.angle.y = shape_angle.y;
         setControllAngle(getAimControllAngle(sVar4));
         if (abs((s16)(shape_angle.y - m038C)) < 0x200) {
+#if TARGET_PC
+            // QoL "Vela" (daShip_qolSail)
+            cLib_addCalc(&speedF, daShip_qolSail(55.0f), 0.1, 5.0f, 1.0f);
+#else
             cLib_addCalc(&speedF, 55.0f, 0.1, 5.0f, 1.0f);
+#endif
         }
         if (abs((s16)(m038C - shape_angle.y)) < 0x100 && !checkOutRange()) {
             if (m037A <= 0) {
@@ -2646,9 +2720,19 @@ BOOL daShip_c::procTornadoUp_init() {
 BOOL daShip_c::procTornadoUp() {
     daTornado_c* tornado = mTornadoActor;
     
+#if TARGET_PC
+    // QoL "Vela" (daShip_qolSail)
+    cLib_addCalc(&current.pos.x, tornado->getJointXPos(m037A), 0.5f, daShip_qolSail(80.0f), 20.0f);
+#else
     cLib_addCalc(&current.pos.x, tornado->getJointXPos(m037A), 0.5f, 80.0f, 20.0f);
+#endif
     
+#if TARGET_PC
+    // QoL "Vela" (daShip_qolSail)
+    cLib_addCalc(&current.pos.z, tornado->getJointZPos(m037A), 0.5f, daShip_qolSail(80.0f), 20.0f);
+#else
     cLib_addCalc(&current.pos.z, tornado->getJointZPos(m037A), 0.5f, 80.0f, 20.0f);
+#endif
 
     current.pos.y += speed.y;
     speed.y += 2.0f;
@@ -3822,7 +3906,12 @@ BOOL daShip_c::execute() {
                 if (checkStateFlg(daSFLG_UNK2000000_e)) {
                     cLib_chaseF(&speed.y, 20.0f, 1.0f - gravity);
                     speedF = prev_speedF;
+#if TARGET_PC
+                    // QoL "Vela" (daShip_qolSail)
+                    cLib_chaseF(&speedF, daShip_qolSail(55.0f), 3.0f);
+#else
                     cLib_chaseF(&speedF, 55.0f, 3.0f);
+#endif
                     offStateFlg(daSFLG_UNK2000000_e);
                 }
 
@@ -4115,7 +4204,12 @@ BOOL daShip_c::execute() {
     }
 
     if (!checkStateFlg(daSFLG_FLY_e)) {
+#if TARGET_PC
+        // QoL "Vela" (daShip_qolSail)
+        f32 shipCruiseSpeed = std::fabsf(speedF) / daShip_qolSail(55.0f);
+#else
         f32 shipCruiseSpeed = std::fabsf(speedF) / 55.0f;
+#endif
         if (shipCruiseSpeed > 1.0f){
             shipCruiseSpeed = 1.0f;
         }
@@ -4289,7 +4383,12 @@ BOOL daShip_c::execute() {
 
     mTillerAngleRate = m0366 * (1.0f / 0x2000);
 
+#if TARGET_PC
+    // QoL "Vela" (daShip_qolSail)
+    prev_speedF = (speedF * 0.1f) / daShip_qolSail(55.0f);
+#else
     prev_speedF = (speedF * 0.1f) / 55.0f;
+#endif
 
     if (prev_speedF > 0.05f) { 
         prev_speedF = 0.05f;
@@ -4368,6 +4467,13 @@ BOOL daShip_c::execute() {
     if (mPart == PART_STEER_e) {
         dComIfGp_setPlayerStatus1(0, daPyStts1_SAIL_e);
         mDoAud_setShipSailState(1);
+#if TARGET_PC
+        // QoL "Vela" (set_wind_dir_to_ship_dir): while sailing, the wind blows the way the boat
+        // faces, rounded to 45 degrees, as the Wind's Requiem sets it
+        if (pc_qol(PC_QOL_SAIL)) {
+            dKyw_tact_wind_set(0, (s16)((-(int)current.angle.y + 0x4000 + 0x1000) & ~0x1FFF));
+        }
+#endif
     }
     else {
         dComIfGp_clearPlayerStatus1(0, daPyStts1_SAIL_e);
