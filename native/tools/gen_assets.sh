@@ -2,11 +2,13 @@
 # Generate the asset headers the game units include ("assets/...", "res/Object/...") from the
 # player's disc, the way the decompilation's own build does (native/README.md, "Asset headers").
 #
-#   native/tools/gen_assets.sh [--disc PATH] [--decomp DIR] [--out DIR] [--res-only | --stubs]
+#   native/tools/gen_assets.sh [--version ID] [--disc PATH] [--decomp DIR] [--out DIR] [--res-only | --stubs]
 #
-#   --disc PATH    the GZLE01 revision 0 disc image (default: $COS_DISC)
+#   --version ID   the disc: GZLE01 (USA, the default) or GZLP01 (Europe, a COS_VERSION=3 build;
+#                  docs/PAL_DISC_PLAN.md)
+#   --disc PATH    that disc's revision 0 image (default: $COS_DISC)
 #   --decomp DIR   where the decompilation is checked out and run (default: build/decomp)
-#   --out DIR      where the headers go (default: build/native-mac/assets/GZLE01, the default
+#   --out DIR      where the headers go (default: build/native-mac/assets/<ID>, the default
 #                  COS_ASSETS_DIR of native/cmake/GameConfig.cmake)
 #   --res-only     no disc: only the decomp's resource index enums (res/), which hold no game data.
 #                  Enough for the units that do not include assets/ headers (cos_sdk, the run
@@ -16,12 +18,12 @@
 #                  arrays from the disc at start-up. Needs PyYAML
 #
 # Steps: a shallow checkout of the decompilation game/ was imported from, at the commit it was
-# imported from (both read from game/UPSTREAM), the disc linked into its orig/GZLE01/, `python configure.py`, then only the
+# imported from (both read from game/UPSTREAM), the disc linked into its orig/<ID>/, `python configure.py`, then only the
 # ninja targets that write headers: the `dtk dol split` of main.dol and the RELs (which also
 # checks main.dol's SHA-1) and the converters that turn the extracted model data into headers.
 # The Metrowerks compilers are not downloaded and nothing is compiled. The decomp's tracked
-# assets/GZLE01/res (resource index enums, no game data) and the generated
-# build/GZLE01/include/assets are then copied to --out. Needs the network the first time (the
+# assets/<ID>/res (resource index enums, no game data) and the generated
+# build/<ID>/include/assets are then copied to --out. Needs the network the first time (the
 # decomp checkout and its dtk binary) and Python 3.10 or newer. Everything stays under build/,
 # which git ignores: the generated headers are derived from the disc and must never be committed.
 set -euo pipefail
@@ -38,7 +40,7 @@ disc="${COS_DISC:-}"
 res_only=0
 stubs=0
 decomp="$repo/build/decomp"
-out="$repo/build/native-mac/assets/$version"
+out=""
 
 usage() {
     sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
@@ -46,6 +48,7 @@ usage() {
 }
 while [ $# -gt 0 ]; do
     case "$1" in
+        --version) version="$2"; shift 2 ;;
         --disc) disc="$2"; shift 2 ;;
         --decomp) decomp="$2"; shift 2 ;;
         --out) out="$2"; shift 2 ;;
@@ -55,11 +58,16 @@ while [ $# -gt 0 ]; do
         *) echo "gen_assets: unknown option $1" >&2; usage ;;
     esac
 done
+case "$version" in
+    GZLE01|GZLP01) ;;
+    *) echo "gen_assets: --version $version: GZLE01 or GZLP01" >&2; exit 2 ;;
+esac
+[ -n "$out" ] || out="$repo/build/native-mac/assets/$version"
 
 if [ "$res_only" = 1 ]; then
     : # no disc needed
 elif [ -z "$disc" ]; then
-    echo "gen_assets: no disc image: pass --disc PATH or set COS_DISC (the GZLE01 revision 0 .iso)" >&2
+    echo "gen_assets: no disc image: pass --disc PATH or set COS_DISC (the $version revision 0 .iso)" >&2
     exit 14
 fi
 if [ "$res_only" = 0 ]; then
@@ -101,7 +109,7 @@ if [ "$res_only" = 1 ]; then
     mkdir -p "$out"
     cp -R "$decomp/assets/$version/res" "$out/"
     if [ "$stubs" = 1 ]; then
-        "$python" "$script_dir/gen_asset_stubs.py" --decomp "$decomp" --out "$out"
+        "$python" "$script_dir/gen_asset_stubs.py" --decomp "$decomp" --version "$version" --out "$out"
         echo "gen_assets: resource index headers and stub assets/ headers in $out (--stubs, no disc)"
         exit 0
     fi
@@ -110,14 +118,14 @@ if [ "$res_only" = 1 ]; then
 fi
 
 # --- the disc, split, headers -------------------------------------------------------------------
-# dtk finds the disc image in orig/GZLE01/ (any of the formats it reads, by extension).
+# dtk finds the disc image in orig/<ID>/ (any of the formats it reads, by extension).
 orig="$decomp/orig/$version"
 find "$orig" -maxdepth 1 -type l -delete
 ln -s "$disc" "$orig/$(basename "$disc")"
 
 cd "$decomp"
 "$python" configure.py --version "$version" >/dev/null
-# The split writes build/GZLE01/config.json; build.ninja then regenerates with the header rules.
+# The split writes build/<ID>/config.json; build.ninja then regenerates with the header rules.
 ninja "build/$version/config.json"
 headers=()
 while IFS= read -r t; do headers+=("$t"); done < <(ninja -t targets all |
