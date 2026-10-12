@@ -418,6 +418,13 @@ void setFrameBufferScale(float scale);
 // settings (after aurora_initialize); menuFrame runs in pc_frame_end before the FPS overlay, inside
 // the frame's ImGui frame. menuOpen: the menu is open (the game is paused and gets no pad input).
 void menuInit();
+// pc_language.cpp (docs/PAL_DISC_PLAN.md): the European build's COS_GAME_LANGUAGE row and the
+// console's language in the SDK's SRAM (OSGetLanguage); pc_main.cpp, after OSInit. Nothing in the
+// USA build.
+void languageInit();
+// pc_language.cpp: once per frame (pc_frame_end), logs a change of the game's language (the PAL file
+// select can change it).
+void languageFrame();
 // pc_menu.cpp: the options-menu smoke script asked for its own memory card ("#card run"); pc_main
 // then calls prepareRunCard before the game's CARDInit.
 bool menuSmokeWantsRunCard();

@@ -293,6 +293,8 @@ void pc_aurora_init(int argc, char* argv[]) {
 
     // On the GameCube __start ran OSInit before main; here MEM1 (mem1Size) must be configured first.
     OSInit();
+    // the European build's language: the console's into the SRAM, the options menu's row
+    languageInit();
 
     COSSdkSetThreadLaunchHook(threadLaunchHook);
     COSSdkSetThreadStartHook(threadStartHook);

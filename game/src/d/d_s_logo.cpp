@@ -716,6 +716,14 @@ cPhs_State phase_1(dScnLogo_c* i_this) {
         dComIfGs_setPalLanguage(language);
         g_mDoMemCd_control.field_0x165B = language;
     }
+#if TARGET_PC
+    // SwitchWaker: the options menu's COS_GAME_LANGUAGE may choose another one (pc_language.cpp).
+    {
+        const u8 lang = (u8)pc_logo_pal_language(dComIfGs_getPalLanguage(), rt == 1);
+        dComIfGs_setPalLanguage(lang);
+        g_mDoMemCd_control.field_0x165B = lang;
+    }
+#endif
 #endif
 
     ResTIMG * toonImage;
