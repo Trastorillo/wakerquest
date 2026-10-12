@@ -17,6 +17,7 @@
  * COS_QOL_NO_SONG_REPLAY=1   no conducting replay after a song
  * COS_QOL_FREE_BOAT=1        the boat does not turn back at the story's limits (only the sea's edge)
  *                            and can be boarded whatever the wind
+ * COS_QOL_SKIP_INTRO=1       a new game starts on Outset without the opening legend
  *
  * All off by default (0: the original game). Each value is read from the environment (the settings
  * file's value, pc_settings.h) the first time the game asks; the menu's apply function sets it
@@ -43,6 +44,7 @@ typedef enum PcQol {
     PC_QOL_SWING_TURN,
     PC_QOL_NO_SONG_REPLAY,
     PC_QOL_FREE_BOAT,
+    PC_QOL_SKIP_INTRO,
     PC_QOLS
 } PcQol;
 

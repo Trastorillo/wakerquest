@@ -136,6 +136,9 @@ options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol.txt
 # with neither 0x1980 nor 0x0A80 the boat still offers "get in" (the reboard fails with the option off)
 sailing 0 --preset sailing --env COS_BOOT_EVENTS_OFF=0902 --env COS_QOL_FREE_BOAT=1
 sailing 0 --preset sailing --env COS_BOOT_EVENTS_OFF=1980,0A80 --env COS_QOL_FREE_BOAT=1
+# QoL "Saltar la introducción" (COS_QOL_SKIP_INTRO): M14's real new-game flow without the prologue; the name
+# scene requests the PLAY scene itself, Outset's intro event plays and the player is controllable
+outset-real 0 --input native/check/input/new-game-skip-intro.txt --env COS_QOL_SKIP_INTRO=1
 static-init 2 --preset bogus
 # COS_SMOKE=sailing (lane sailing): the sailing preset's boot on the boat, off it with A and back on
 # with A after swimming to it (bug B17: the preset lacked event bits 0x0A80/0x1980), the wind turned north (the wind

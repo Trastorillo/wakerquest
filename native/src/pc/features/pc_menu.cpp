@@ -616,10 +616,17 @@ const PcSettingDesc kBuiltins[] = {
      "The Ballad of Gales warp starts as soon as the cyclone appears, without the boat's rise "
      "(BetterWW)."},
     {"COS_QOL_SKIP_VIDEOS", "Sin vídeos de título y final",
-     "Sin el vídeo que sale al esperar en el título ni el del epílogo del final (BetterWW).",
+     "Sin el vídeo que sale al esperar en el título ni el del epílogo del final (BetterWW). La leyenda "
+     "del principio es la opción Saltar la introducción.",
      PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 70,
      "No title and ending videos",
-     "No video when waiting at the title screen and no epilogue video at the end (BetterWW)."},
+     "No video when waiting at the title screen and no epilogue video at the end (BetterWW). The opening "
+     "legend is the Skip the intro option."},
+    {"COS_QOL_SKIP_INTRO", "Saltar la introducción",
+     "Una partida nueva empieza en Isla Initia, sin la leyenda del principio (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 75,
+     "Skip the intro",
+     "A new game starts on Outset Island, without the opening legend (BetterWW)."},
     {"COS_QOL_REVEAL_CHART", "Carta náutica completa",
      "La carta náutica muestra todo el mar. No cambia la partida guardada: al desactivarlo vuelve a "
      "mostrar lo explorado (BetterWW).",
