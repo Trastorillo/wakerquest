@@ -34,6 +34,7 @@
 #include "m_Do/m_Do_lib.h"
 #if TARGET_PC
 #include "helpers/endian.h"
+#include "pc/pc_qol.h"
 #endif
 #include "d/d_material.h"
 #include "JSystem/J3DGraphLoader/J3DAnmLoader.h"
@@ -6834,14 +6835,26 @@ BOOL daPy_lk_c::procSlideBackLand() {
 BOOL daPy_lk_c::procFrontRoll_init(f32 i_start) {
     commonProcInit(daPyProc_FRONT_ROLL_e);
     setSingleMoveAnime(ANM_ROLLF, m_HIO->mRoll.m.field_0x8, i_start, m_HIO->mRoll.m.field_0x0, m_HIO->mRoll.m.field_0x14);
+#if TARGET_PC
+    // QoL "Voltereta más rápida" (pc_qol.h; wwrando increase_player_movement_speeds): the roll's speed
+    // is speedF * 6/17 + 20 (20 to 26) instead of speedF * 1.5 + 0.5 (0.5 to 26)
+    const f32 rollRate = pc_qol(PC_QOL_FAST_ROLL) ? 6.0f / 17.0f : m_HIO->mRoll.m.field_0x18;
+    const f32 rollBase = pc_qol(PC_QOL_FAST_ROLL) ? 20.0f : m_HIO->mRoll.m.field_0x1C;
+    mNormalSpeed = speedF * rollRate + rollBase;
+#else
     mNormalSpeed = speedF * m_HIO->mRoll.m.field_0x18 + m_HIO->mRoll.m.field_0x1C;
+#endif
     if (checkHeavyStateOn()) {
         mNormalSpeed *= m_HIO->mMove.m.field_0x80;
     }
     if (mNormalSpeed < m_HIO->mRoll.m.field_0x20) {
         mNormalSpeed = m_HIO->mRoll.m.field_0x20;
     } else {
+#if TARGET_PC
+        f32 maxSpeed = rollBase + m_HIO->mMove.m.field_0x18 * rollRate;
+#else
         f32 maxSpeed = m_HIO->mRoll.m.field_0x1C + m_HIO->mMove.m.field_0x18 * m_HIO->mRoll.m.field_0x18;
+#endif
         if (checkHeavyStateOn()) {
             maxSpeed *= m_HIO->mMove.m.field_0x80;
         }
