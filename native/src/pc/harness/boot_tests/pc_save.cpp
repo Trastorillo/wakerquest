@@ -373,7 +373,13 @@ void checkPackedFile(const u8* file) {
 
 // 4. A card_savedata block (copy 1 or 2) of the GCI.
 void checkSaveBlock(const char* which, const u8* block, u32 saveCount) {
+#if VERSION == VERSION_PAL
+    // the PAL game stores its language there, not a count (mDoMemCdRWm_Store)
+    (void)saveCount;
+    expect32(which, block, 0x0, dComIfGs_getPalLanguage()); // save_count
+#else
     expect32(which, block, 0x0, saveCount); // save_count
+#endif
     expect32(which, block, 0x4, 0);         // data_version
     u32 csum = be32At(block + kSaveDataCsum);
     if (csum != savedataChecksum(block)) {
@@ -448,7 +454,15 @@ void checkGci(u32 saveCount) {
     if (!commentPrintable) {
         fail("header comment \"%.32s\"", comment);
     }
-    if (strstr((const char*)data + 0x1C20, " Save Data") == nullptr) {
+#if VERSION == VERSION_PAL
+    // mDoMemCdRWm_BuildHeader writes it in the game's language
+    static const char* const kInfo[] = {" Save Data", " Spielstand", "es de jeu ", "Datos guardados el ",
+                                        "Dati salvati: "};
+    const char* info = dComIfGs_getPalLanguage() < 5 ? kInfo[dComIfGs_getPalLanguage()] : kInfo[0];
+#else
+    const char* info = " Save Data";
+#endif
+    if (strstr((const char*)data + 0x1C20, info) == nullptr) {
         fail("header info \"%.32s\"", (const char*)data + 0x1C20);
     }
     // Blocks 1 and 2: the two copies of card_savedata.

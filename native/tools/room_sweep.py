@@ -33,7 +33,7 @@ Options:
   --rerun N       run each failing spec up to N more times (default 1); a spec that passes on a
                   rerun is reported "flaky" with its first signature
   --list          print the chosen specs and exit (no runs)
-  --disc PATH     the GZLE01 .iso (default COS_DISC)
+  --disc PATH     the build's disc, GZLE01 (GZLP01 for a European build) .iso (default COS_DISC)
   --exe PATH      the executable (default build/native-mac/switchwaker)
   --out DIR       the sweep directory (default build/room-sweep/<timestamp>)
 

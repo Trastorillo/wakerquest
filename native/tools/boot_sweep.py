@@ -35,7 +35,7 @@ Options:
   --target NAME   the run.sh target (default run; e.g. fx-sweep, a smoke test that ends the run)
   --env NAME=VAL  an environment variable for every run (repeatable), e.g. COS_FX_SWEEP=scene
   --list          print the chosen starts and exit (no runs)
-  --disc PATH     the GZLE01 .iso (default COS_DISC)
+  --disc PATH     the build's disc, GZLE01 (GZLP01 for a European build) .iso (default COS_DISC)
   --exe PATH      the executable (default build/native-mac/switchwaker)
   --out DIR       the sweep directory (default build/native-mac/runs/boot-sweep-<timestamp>)
 
@@ -72,7 +72,8 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-BUILD = os.path.join(REPO, "build", "native-mac")
+# COS_BUILD_DIR, as run.sh: another build directory (e.g. the European build, build/native-mac-eur)
+BUILD = os.path.join(REPO, os.environ.get("COS_BUILD_DIR") or os.path.join("build", "native-mac"))
 COS_RUN = os.path.join(SCRIPT_DIR, "run.sh")
 DISC_MANIFEST = os.path.join(SCRIPT_DIR, "disc_manifest.py")
 MANIFEST = os.path.join(BUILD, "disc_manifest.json")

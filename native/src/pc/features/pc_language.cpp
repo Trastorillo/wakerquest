@@ -52,7 +52,7 @@ const PcSettingDesc kSetting = {
     "Idioma de los textos del juego. Automático: el de la partida guardada, si no el del sistema. "
     "Requiere reiniciar.",
     PC_SETTING_TAB_GRAPHICS, PC_SETTING_RESTART, kChoices, (int)(sizeof(kChoices) / sizeof(kChoices[0])),
-    "auto", nullptr, nullptr, 5,
+    "auto", nullptr, nullptr, 99, // the last row of the tab: the menu scripts count rows from the top
     "Game language",
     "Language of the game's text. Automatic: the saved game's, else the system's. Needs a restart."};
 

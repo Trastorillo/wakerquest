@@ -262,6 +262,9 @@ export COS_RUN_DIR="$run_dir"
 # start, so the user's build/native-mac/user/settings.ini never changes what a test does (an
 # explicit COS_SETTINGS in the environment is kept).
 export COS_SETTINGS="${COS_SETTINGS:-$run_dir/settings.ini}"
+# The European build's language (pc_language.cpp) follows the host's locale by default: tests run in
+# English unless COS_GAME_LANGUAGE is given (the USA build ignores it).
+[ "$game_id" = GZLP01 ] && export COS_GAME_LANGUAGE="${COS_GAME_LANGUAGE:-en}"
 [ -n "$frames" ] && export COS_FRAMES="$frames"
 if [ -n "$stage" ]; then export COS_BOOT_STAGE="$stage"; else unset COS_BOOT_STAGE; fi
 if [ -n "$preset" ]; then export COS_BOOT_PRESET="$preset"; else unset COS_BOOT_PRESET; fi

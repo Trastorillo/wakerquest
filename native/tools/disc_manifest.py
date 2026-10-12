@@ -135,7 +135,8 @@ from collections import Counter
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-BUILD = os.path.join(REPO, "build", "native-mac")
+# COS_BUILD_DIR, as run.sh: another build directory (e.g. the European build, build/native-mac-eur)
+BUILD = os.path.join(REPO, os.environ.get("COS_BUILD_DIR") or os.path.join("build", "native-mac"))
 DEFAULT_DISC = os.environ.get("COS_DISC") or None
 DEFAULT_OUT = os.path.join(BUILD, "disc_manifest.json")
 DISC_CHECK_CACHE = os.path.join(BUILD, "runs", "disc_check.txt")

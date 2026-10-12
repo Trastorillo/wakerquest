@@ -22,7 +22,7 @@ Options:
   --range A-B     process names to sweep (default every one)
   --timeout S     run.sh --timeout per run (default 300)
   --max-runs N    stop after N runs (default 200)
-  --disc PATH     the GZLE01 .iso (default COS_DISC)
+  --disc PATH     the build's disc, GZLE01 (GZLP01 for a European build) .iso (default COS_DISC)
   --exe PATH      the executable (default build/native-mac/switchwaker)
   --out DIR       the sweep directory (default build/native-mac/runs/actor-sweeps-<timestamp>)
 Nothing here is meant for git.
@@ -41,7 +41,8 @@ import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(SCRIPT_DIR, "..", ".."))
-BUILD = os.path.join(REPO, "build", "native-mac")
+# COS_BUILD_DIR, as run.sh: another build directory (e.g. the European build, build/native-mac-eur)
+BUILD = os.path.join(REPO, os.environ.get("COS_BUILD_DIR") or os.path.join("build", "native-mac"))
 COS_RUN = os.path.join(SCRIPT_DIR, "run.sh")
 PROFILE_LST = os.path.join(REPO, "game", "src", "f_pc", "f_pc_profile_lst.cpp")
 
@@ -51,9 +52,20 @@ boot_sweep = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(boot_sweep)
 
 
+def build_version():
+    """"PAL" for the European build directory (COS_GAME_ID GZLP01 in its CMakeCache.txt), else "USA"."""
+    try:
+        with open(os.path.join(BUILD, "CMakeCache.txt"), encoding="utf-8") as f:
+            return "PAL" if "COS_GAME_ID:STRING=GZLP01" in f.read() else "USA"
+    except OSError:
+        return "USA"
+
+
 def profile_names():
     """g_fpcPfLst_ProfileList in order (index = fpcNm process name), from the TARGET_PC list, with
-    its `#if VERSION ==/!= VERSION_<X>` lines taken for the USA build (VERSION_USA, GZLE01)."""
+    its `#if VERSION ==/!= VERSION_<X>` lines taken for the build's version (VERSION_USA, GZLE01; or
+    VERSION_PAL, GZLP01, for the European build)."""
+    version = build_version()
     text = boot_sweep.read(PROFILE_LST)
     m = re.search(r"#if TARGET_PC.*?g_fpcPfLst_ProfileList\[\] = \{(.*?)\};", text, re.S)
     if not m:
@@ -62,7 +74,7 @@ def profile_names():
     for line in m.group(1).splitlines():
         c = re.match(r"\s*#if VERSION (==|!=) VERSION_(\w+)", line)
         if c:
-            keep.append(keep[-1] and ((c.group(2) == "USA") == (c.group(1) == "==")))
+            keep.append(keep[-1] and ((c.group(2) == version) == (c.group(1) == "==")))
             continue
         if re.match(r"\s*#endif", line):
             keep.pop()
