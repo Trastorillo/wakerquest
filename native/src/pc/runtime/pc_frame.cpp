@@ -1704,6 +1704,7 @@ void pc_frame_end(void) {
     qolProbeFrame(frames);
     evcamFrame(frames);
     windScreenFrame(frames);
+    sunGlareFrame(frames);
     kyProcsFrame(frames);
     chestFrame(frames);
     dmapFrame(frames);

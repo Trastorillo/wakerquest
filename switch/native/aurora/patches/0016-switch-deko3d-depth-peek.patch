@@ -1,0 +1,120 @@
+Switch: GXPeekZ on the deko3d NRO (AURORA_GFX_DEKO3D; issue #7, the sun's glare)
+
+GXPeekZ reads depth_peek's latest snapshot, which encoding.cpp fills with a compute pass after the frame's
+last EFB pass. The deko3d NRO records its frames through switch/deko/aurora instead of encoding.cpp, so no
+snapshot was ever taken: every GXPeekZ read 0 (nearest), and the game drew no sun lens flare or glare (the
+sun's five check points never read the sky's 0xFFFFFF), as Dolphin's "Skip EFB access from CPU" does. With
+AURORA_GFX_DEKO3D:
+- initialize() enables the snapshots without the compute pipeline (Dawn's Null device);
+- take_snapshot_request() hands the encoder the pending request (with the 30 Hz limit) and the mapping
+  of make_params from logical EFB pixels to the depth image; switch/deko/aurora/dk_encode.cpp copies
+  the area around the peeked points with the copy engine after the frame's last pass;
+- read_latest() reads the newest copy the GPU has finished (dk::depth_peek_read, no wait).
+Without AURORA_GFX_DEKO3D (the Mac) nothing changes.
+
+Switch only (switch/native/aurora/patches); not for upstream.
+
+diff --git a/lib/gfx/depth_peek.cpp b/lib/gfx/depth_peek.cpp
+index 08f7743..83c7d0d 100644
+--- a/lib/gfx/depth_peek.cpp
++++ b/lib/gfx/depth_peek.cpp
+@@ -14,6 +14,9 @@
+ 
+ #include <magic_enum.hpp>
+ #include <tracy/Tracy.hpp>
++#if defined(AURORA_GFX_DEKO3D)
++#include "dk_gfx.hpp"
++#endif
+ 
+ namespace aurora::gfx::depth_peek {
+ namespace {
+@@ -306,6 +309,11 @@ void complete_slot(size_t slotIdx, wgpu::MapAsyncStatus status, wgpu::StringView
+ } // namespace
+ 
+ void initialize() {
++#if defined(AURORA_GFX_DEKO3D)
++  // the deko3d NRO: the encoder copies the depth (take_snapshot_request), no compute pipeline
++  g_enabled = true;
++  return;
++#endif
+   if (!webgpu::g_hasCoreFeatures) {
+     return;
+   }
+@@ -332,6 +340,9 @@ void request_snapshot() noexcept {
+ }
+ 
+ bool read_latest(uint16_t x, uint16_t y, uint32_t& z) noexcept {
++#if defined(AURORA_GFX_DEKO3D)
++  return dk::depth_peek_read(x, y, z);
++#endif
+   std::lock_guard lock{g_mutex};
+   if (x >= g_latest.width || y >= g_latest.height || g_latest.data.empty()) {
+     return false;
+@@ -424,6 +435,37 @@ void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureV
+   cmd.CopyBufferToBuffer(storageBuffer, 0, readbackBuffer, 0, byteSize);
+ }
+ 
++#if defined(AURORA_GFX_DEKO3D)
++bool take_snapshot_request(uint32_t sourceWidth, uint32_t sourceHeight, SnapshotMapping& mapping) noexcept {
++  if (!g_enabled) {
++    return false;
++  }
++  const auto now = Clock::now();
++  {
++    std::lock_guard lock{g_mutex};
++    if (!g_snapshotRequested || now < g_nextSnapshotTime) {
++      return false;
++    }
++    g_snapshotRequested = false;
++    g_nextSnapshotTime = now + SnapshotInterval;
++  }
++  const auto dstSize = vi::configured_fb_size();
++  if (dstSize.x == 0 || dstSize.y == 0 || sourceWidth == 0 || sourceHeight == 0) {
++    return false;
++  }
++  const Params params = make_params(wgpu::Extent3D{.width = sourceWidth, .height = sourceHeight}, dstSize);
++  mapping = {
++      .logicalWidth = params.dstWidth,
++      .logicalHeight = params.dstHeight,
++      .offsetX = params.offsetX,
++      .offsetY = params.offsetY,
++      .scaleX = params.scaleX,
++      .scaleY = params.scaleY,
++  };
++  return true;
++}
++#endif
++
+ void after_submit() noexcept {
+   if (!g_enabled) {
+     return;
+diff --git a/lib/gfx/depth_peek.hpp b/lib/gfx/depth_peek.hpp
+index 47e9a0a..916b14e 100644
+--- a/lib/gfx/depth_peek.hpp
++++ b/lib/gfx/depth_peek.hpp
+@@ -16,6 +16,25 @@ void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureV
+                            wgpu::Extent3D sourceSize, uint32_t msaaSamples) noexcept;
+ void after_submit() noexcept;
+ 
++#if defined(AURORA_GFX_DEKO3D)
++// The deko3d NRO (switch/native/aurora/patches/0016): no compute pass on Dawn's Null device. The
++// encoder (switch/deko/aurora/dk_encode.cpp) takes the pending request when it records the frame's
++// last EFB pass and copies the depth itself; read_latest reads its copies (dk::depth_peek_read).
++// Logical EFB pixel (x, y) is depth image pixel floor(offset + (x + 0.5, y + 0.5) * scale), as the
++// compute shader samples it.
++struct SnapshotMapping {
++  uint32_t logicalWidth = 0;
++  uint32_t logicalHeight = 0;
++  float offsetX = 0.f;
++  float offsetY = 0.f;
++  float scaleX = 1.f;
++  float scaleY = 1.f;
++};
++// render worker: whether GXPeekZ asked for a snapshot (cleared; the 30 Hz limit as for the compute
++// pass), and the mapping for a depth image whose EFB part is sourceWidth x sourceHeight
++bool take_snapshot_request(uint32_t sourceWidth, uint32_t sourceHeight, SnapshotMapping& mapping) noexcept;
++#endif
++
+ namespace testing {
+ void reset() noexcept;
+ bool snapshot_requested() noexcept;

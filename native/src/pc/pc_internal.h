@@ -332,6 +332,8 @@ int audioSeRegistered(u32 id);
 void evcamFrame(unsigned int frames);
 // COS_SMOKE=wind-screen (pc_wind_screen.cpp): the wind song's wind-direction screen.
 void windScreenFrame(unsigned int frames);
+// COS_SMOKE=sun-glare (pc_sun_glare.cpp, issue #7): the sun's flare and glare through GXPeekZ.
+void sunGlareFrame(unsigned int frames);
 // COS_SMOKE=ky-procs (pc_ky_procs.cpp): effect processes with fixed-size heaps.
 void kyProcsFrame(unsigned int frames);
 // COS_SMOKE=chest (pc_chest.cpp): the chest after Niko's rope lesson.

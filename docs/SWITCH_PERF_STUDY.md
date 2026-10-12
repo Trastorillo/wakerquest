@@ -174,8 +174,10 @@ only when the GPU has not finished the previous frame when the next `Execute` st
   CommandBufferGL.cpp:1199): off. `gpu_prof::initialize` needs `TimestampQuery`, which Aurora only
   requests under `TRACY_ENABLE` (`gpu.cpp:948`), the run's "Enabling features" list has none, and
   Dawn GL's `WriteTimestamp` is unimplemented (:1211).
-- Depth-peek snapshot/readback: only when `GXPeekZ` was requested (`depth_peek.cpp:353`); the game does
-  not call it (no `GXPeekZ` in `game/src`).
+- Depth-peek snapshot/readback: only when `GXPeekZ` was requested (`depth_peek.cpp:353`). (Corrected
+  2026-10-12, issue #7: the game does call it, through `dDlst_peekZ_c::peekData` for the sun's five check
+  points and the lantern, and directly in `d_a_ff`; the deko3d NRO copies only the peeked area, see
+  `switch/deko/aurora/dk_encode.cpp`.)
 - Vsync / window buffer dequeue: Dawn's device context is on a pbuffer (`ContextEGL.cpp:271`); the
   window surface is touched only in `SwapChainEGL::PresentImpl` (MakeCurrent + `glBlitFramebuffer`
   + `eglSwapBuffers`) = "present 0.5 ms". Frame times (37-40 ms) are not vblank multiples.

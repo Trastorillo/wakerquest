@@ -18,7 +18,7 @@
 //               post-pass -> the uam worker for a miss; the GX fixed state as gx::pipeline_state_desc
 //               gives it
 //   present     the EFB resampled (area or bilinear) and drawn with the aspect fit, under ImGui
-//   readback    read_texture (the picto box, COS_SHOT)
+//   readback    read_texture (the picto box, COS_SHOT); depth_peek_read (GXPeekZ: the sun's glare)
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -82,5 +82,12 @@ OverflowUpload overflow_upload(const uint8_t* data, uint32_t bytesPerRow, uint32
 // (logged) if the texture is unknown or not 4 bytes per texel. Waits for the GPU.
 bool read_texture(WGPUTexture texture, std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height,
                   wgpu::TextureFormat& format, uint32_t mip = 0);
+
+// ---- depth peek (GXPeekZ; depth_peek.cpp with switch/native/aurora/patches/0016, issue #7)
+// Game thread: the GX depth (24 bits, 0xFFFFFF at the far plane) at logical EFB pixel (x, y) from the newest
+// depth copy the GPU has finished, without waiting; false when none covers the point (GXPeekZ then reads
+// 0, as before any copy). The point widens the area the next copy takes (encode_pass: the frame's last
+// EFB pass, when the game asked for a snapshot).
+bool depth_peek_read(uint16_t x, uint16_t y, uint32_t& z);
 
 }  // namespace aurora::gfx::dk
