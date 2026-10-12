@@ -3,7 +3,7 @@
 // compare. Not a test by itself (no exit code); any boot or input script.
 //   [cos] qol-probe f=<frame> <stage>:<room> pos=(x,y,z) spd=<speedF> ang=<shape_angle.y>
 //     roll=<checkFrontRoll> ev=<event id> "<event name>" msg=<message number>:<status> eye=(x,y,z)
-//     ship=<boat speedF, -1 without boat> do=<the A button's action, dActStts_*> sw=<switch, -1>
+//     ship=<boat speedF, -1 without boat>@(<boat position>) do=<the A button's action, dActStts_*> sw=<switch, -1>
 //     [act=<name>:(x,y,z)]
 // Variables:
 //   COS_QOL_PROBE_FROM=<frame>, COS_QOL_PROBE_TO=<frame>   only the lines of those frames;
@@ -17,7 +17,12 @@
 //   COS_QOL_PROBE_ROPE=<frame>   the player grabs the nearest hanging rope (d_a_himo3) as the rope smoke
 //       does (pc_rope.cpp);
 //   COS_QOL_PROBE_BALLAD=<frame>:<destination>   starts the boat's Ballad of Gales warp (a cyclone and
-//       daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat.
+//       daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat;
+//   COS_QOL_PROBE_WARP=<frame>:<stage>:<room>:<point>   the options menu's travel at that frame
+//       (pc_menu.cpp doWarp: dComIfGp_setNextStage with the game's own layer);
+//   COS_QOL_PROBE_SE=<n>   every n frames (also outside the PLAY scene) one line with what JAudio plays:
+//       "[cos] qol-probe se f=<frame> <pc_audio_state.cpp's line>" (the registered sound effects, the
+//       SE tracks still sounding, the BGM, the audio thread's counters).
 #include "pc_internal.h"
 
 #include "d/actor/d_a_player.h"
@@ -61,6 +66,18 @@ struct Spawn {
 Spawn sSpawns[4];
 int sSpawnCount = 0;
 int sSwitch = -1;
+unsigned int sWarpFrame = 0;
+char sWarpStage[8] = {};
+int sWarpRoom = 0;
+int sWarpPoint = 0;
+unsigned int sSeEvery = 0;
+
+// What JAudio plays (pc_audio_state.cpp).
+void seLine(unsigned int frames) {
+    char line[1536];
+    audioStateLine(line, sizeof(line));
+    writef(STDERR_FILENO, "[cos] qol-probe se f=%u %s\n", frames, line);
+}
 
 void* isPlayScene(void* proc, void*) {
     return fpcM_GetName(proc) == fpcNm_PLAY_SCENE_e ? proc : nullptr;
@@ -141,13 +158,30 @@ void qolProbeFrame(unsigned int frames) {
             sBalladFrame = (unsigned int)strtoul(v, &end, 0);
             sBalladTo = end != nullptr && *end == ':' ? (int)strtol(end + 1, nullptr, 0) : 0;
         }
+        if (const char* v = getenv("COS_QOL_PROBE_WARP"); v != nullptr) {
+            char stage[16] = {};
+            unsigned int f = 0;
+            if (sscanf(v, "%u:%7[^:]:%d:%d", &f, stage, &sWarpRoom, &sWarpPoint) == 4) {
+                sWarpFrame = f;
+                snprintf(sWarpStage, sizeof(sWarpStage), "%s", stage);
+            }
+        }
+        if (const char* v = getenv("COS_QOL_PROBE_SE"); v != nullptr) {
+            sSeEvery = (unsigned int)strtoul(v, nullptr, 0);
+        }
         if (const char* v = getenv("COS_QOL_PROBE_MSG"); v != nullptr) {
             char* end = nullptr;
             sMsgFrame = (unsigned int)strtoul(v, &end, 0);
             sMsgNo = end != nullptr && *end == ':' ? (unsigned int)strtoul(end + 1, nullptr, 0) : 0;
         }
     }
-    if (sOn == 0 || frames < sFrom || frames > sTo || fpcM_Search(isPlayScene, nullptr) == nullptr) {
+    if (sOn == 0 || frames < sFrom || frames > sTo) {
+        return;
+    }
+    if (sSeEvery != 0 && frames % sSeEvery == 0) {
+        seLine(frames);
+    }
+    if (fpcM_Search(isPlayScene, nullptr) == nullptr) {
         return;
     }
     daPy_py_c* player = (daPy_py_c*)dComIfGp_getPlayer(0);
@@ -193,6 +227,11 @@ void qolProbeFrame(unsigned int frames) {
             writef(STDERR_FILENO, "[cos] qol-probe: Ballad of Gales warp %d ordered at frame %u\n", sBalladTo, frames);
         }
     }
+    if (sWarpFrame != 0 && frames == sWarpFrame) {
+        writef(STDERR_FILENO, "[cos] qol-probe: warp to %s room %d point %d at frame %u\n", sWarpStage, sWarpRoom,
+               sWarpPoint, frames);
+        dComIfGp_setNextStage(sWarpStage, (s16)sWarpPoint, (s8)sWarpRoom, -1);
+    }
     if (sMsgNo != 0 && frames == sMsgFrame) {
         sMsgId = fopMsgM_messageSet(sMsgNo, &player->eyePos);
         writef(STDERR_FILENO, "[cos] qol-probe: message %u shown at frame %u (process %d)\n", sMsgNo, frames,
@@ -234,11 +273,13 @@ void qolProbeFrame(unsigned int frames) {
     }
     writef(STDERR_FILENO,
            "[cos] qol-probe f=%u %s:%d pos=(%.1f,%.1f,%.1f) spd=%.2f ang=%04x roll=%d ev=%d \"%s\" msg=%u:%u "
-           "eye=(%.1f,%.1f,%.1f) ship=%.2f do=%u sw=%d%s\n",
+           "eye=(%.1f,%.1f,%.1f) ship=%.2f@(%.0f,%.0f,%.0f) do=%u sw=%d%s\n",
            frames, dComIfGp_getStartStageName(), (int)fopAcM_GetRoomNo(player), player->current.pos.x,
            player->current.pos.y, player->current.pos.z, player->speedF, (unsigned)(u16)player->shape_angle.y,
            player->checkFrontRoll() ? 1 : 0, ev->mEventId, evName, msgNo, msgStatus, eye.x, eye.y,
-           eye.z, ship != nullptr ? ship->speedF : -1.0f, (unsigned)dComIfGp_getDoStatus(),
+           eye.z, ship != nullptr ? ship->speedF : -1.0f, ship != nullptr ? ship->current.pos.x : 0.0f,
+           ship != nullptr ? ship->current.pos.y : 0.0f, ship != nullptr ? ship->current.pos.z : 0.0f,
+           (unsigned)dComIfGp_getDoStatus(),
            sSwitch >= 0 ? (int)dComIfGs_isSwitch(sSwitch, fopAcM_GetRoomNo(player)) : -1, act);
 }
 

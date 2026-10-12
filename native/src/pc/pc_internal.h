@@ -323,6 +323,11 @@ void sailingFrame(unsigned int frames);
 void ropeFrame(unsigned int frames);
 // COS_TRACE=qol (pc_qol_probe.cpp): a line per frame for the quality-of-life options' checks.
 void qolProbeFrame(unsigned int frames);
+// What JAudio is playing (pc_audio_state.cpp; game thread): one line with the registered sound effects,
+// the SE tracks still sounding, the BGM and the audio thread's counters; and how many registered sound
+// effects have the id `id`.
+int audioStateLine(char* out, size_t size);
+int audioSeRegistered(u32 id);
 // COS_SMOKE=evcam (pc_evcam.cpp, bug B20): the event camera's pointer arguments.
 void evcamFrame(unsigned int frames);
 // COS_SMOKE=wind-screen (pc_wind_screen.cpp): the wind song's wind-direction screen.
