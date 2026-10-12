@@ -75,6 +75,17 @@ saving in the game keeps them):
   chests: `warp kindan 14 0` (Forbidden Woods, the mark ~1,270 units from the spawn), `M_Dai` room 9, `Siren`
   room 6, `kaze` room 3 (marks at the `agbTBOX` actors of those rooms).
 
+### Known issue: the boat's wave sound stuck after a warp
+
+On the console (dev 0.3.1-32, 2026-10-12) the boat's wave / sailing sound once kept playing after a warp
+from the options menu (Viajar to `sea 11 0`), after sailing with "Vela" switched between 0, swift and
+brisk from the menu. Not reproduced on the Mac: sailing at speed or stopped, Vela 0, swift and brisk (also
+switched from the menu while sailing), then Viajar or Navegar to Windfall and on to an interior
+(`COS_TRACE=qol`, `COS_QOL_PROBE_SE`, `COS_QOL_PROBE_WARP`): the boat's sounds end with the boat at the
+scene change, nothing is left registered in the interior, and the audio thread keeps mixing. At Windfall
+the docked boat itself plays its idle wave (0x3006) while the player is near it, as in the original. If it
+happens again: `audio` twice a few seconds apart (on the island, then in an interior), and the log.
+
 A typical loop:
 
 ```

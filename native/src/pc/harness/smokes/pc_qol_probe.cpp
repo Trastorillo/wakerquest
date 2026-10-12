@@ -18,7 +18,7 @@
 //       does (pc_rope.cpp);
 //   COS_QOL_PROBE_BALLAD=<frame>:<destination>   starts the boat's Ballad of Gales warp (a cyclone and
 //       daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat;
-//   COS_QOL_PROBE_WARP=<frame>:<stage>:<room>:<point>   the options menu's travel at that frame
+//   COS_QOL_PROBE_WARP=<frame>:<stage>:<room>:<point>[;...] (up to 4)   the options menu's travel at that frame
 //       (pc_menu.cpp doWarp: dComIfGp_setNextStage with the game's own layer);
 //   COS_QOL_PROBE_GIVE=<frame>:<name>[,<name>...]   the debug server's "give" at that frame (pc_debug_give,
 //       pc_menu.cpp: the same queue, run by the game thread at the frame's end);
@@ -68,10 +68,14 @@ struct Spawn {
 Spawn sSpawns[4];
 int sSpawnCount = 0;
 int sSwitch = -1;
-unsigned int sWarpFrame = 0;
-char sWarpStage[8] = {};
-int sWarpRoom = 0;
-int sWarpPoint = 0;
+struct ProbeWarp {
+    unsigned int frame;
+    char stage[8];
+    int room;
+    int point;
+};
+ProbeWarp sWarps[4];
+int sWarpCount = 0;
 unsigned int sSeEvery = 0;
 unsigned int sGiveFrame = 0;
 char sGive[256] = {};
@@ -164,11 +168,16 @@ void qolProbeFrame(unsigned int frames) {
             sBalladTo = end != nullptr && *end == ':' ? (int)strtol(end + 1, nullptr, 0) : 0;
         }
         if (const char* v = getenv("COS_QOL_PROBE_WARP"); v != nullptr) {
-            char stage[16] = {};
-            unsigned int f = 0;
-            if (sscanf(v, "%u:%7[^:]:%d:%d", &f, stage, &sWarpRoom, &sWarpPoint) == 4) {
-                sWarpFrame = f;
-                snprintf(sWarpStage, sizeof(sWarpStage), "%s", stage);
+            for (const char* p = v; p != nullptr && *p != '\0' && sWarpCount < 4;) {
+                ProbeWarp& w = sWarps[sWarpCount];
+                char stage[16] = {};
+                if (sscanf(p, "%u:%7[^:]:%d:%d", &w.frame, stage, &w.room, &w.point) != 4) {
+                    break;
+                }
+                snprintf(w.stage, sizeof(w.stage), "%s", stage);
+                sWarpCount++;
+                p = strchr(p, ';');
+                p = p != nullptr ? p + 1 : nullptr;
             }
         }
         if (const char* v = getenv("COS_QOL_PROBE_GIVE"); v != nullptr) {
@@ -251,10 +260,13 @@ void qolProbeFrame(unsigned int frames) {
         const int ok = pc_debug_give(names, count, done, sizeof(done));
         writef(STDERR_FILENO, "[cos] qol-probe: give %s at frame %u: %s\n", sGive, frames, ok ? done : "unknown item");
     }
-    if (sWarpFrame != 0 && frames == sWarpFrame) {
-        writef(STDERR_FILENO, "[cos] qol-probe: warp to %s room %d point %d at frame %u\n", sWarpStage, sWarpRoom,
-               sWarpPoint, frames);
-        dComIfGp_setNextStage(sWarpStage, (s16)sWarpPoint, (s8)sWarpRoom, -1);
+    for (int i = 0; i < sWarpCount; i++) {
+        const ProbeWarp& w = sWarps[i];
+        if (frames == w.frame) {
+            writef(STDERR_FILENO, "[cos] qol-probe: warp to %s room %d point %d at frame %u\n", w.stage, w.room,
+                   w.point, frames);
+            dComIfGp_setNextStage(w.stage, (s16)w.point, (s8)w.room, -1);
+        }
     }
     if (sMsgNo != 0 && frames == sMsgFrame) {
         sMsgId = fopMsgM_messageSet(sMsgNo, &player->eyePos);
