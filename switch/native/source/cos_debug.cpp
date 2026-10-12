@@ -67,9 +67,10 @@ debugsrv::Reply info(const debugsrv::Args&) {
     svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
     const AppletType type = appletGetAppletType();
     char b[704];
-    // "game": the disc this NRO runs (GZLE01, GZLP01 for switchwaker-eur), for deploy's guard
-    snprintf(b, sizeof(b), "version %s\ngame %s (" COS_SWITCH_NRO_NAME ".nro)\n%smemory used %llu MiB of %llu MiB\nrunning as %s\naddress %s:%d\n",
-             COS_SWITCH_VERSION_STR, COS_GAME_ID_STR, status, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20),
+    // "game": the disc this NRO runs, whatever its file name on the card (the European build is installed
+    // as switchwaker.nro too): deploy refuses to replace it with the other region's NRO
+    snprintf(b, sizeof(b), "version %s\ngame %s (%s, build " COS_SWITCH_NRO_NAME ")\n%smemory used %llu MiB of %llu MiB\nrunning as %s\naddress %s:%d\n",
+             COS_SWITCH_VERSION_STR, COS_GAME_ID_STR, PC_GAME_REGION_EN, status, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20),
              type == AppletType_Application ? "application (the HOME menu forwarder: reload works)"
                                             : "applet or hbmenu (reload does not work: quit, then start it again)",
              ipText().c_str(), gPort);

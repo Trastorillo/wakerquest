@@ -10,9 +10,9 @@
 # the local SHA-256. --build runs scripts/switch/build_native.sh first. (--logs is gone: the
 # session logs come from scripts/switch/switchwaker_debug.py lastlog.) --disc copies
 # the player's disc image as GZLE01.iso, or GZLP01.iso for the European disc (all the native port
-# reads; skipped if already on the console with the same size). `native-eur`: the European NRO, to
-# sdmc:/switch/switchwaker-eur/switchwaker-eur.nro (its own folder: the Homebrew Menu lists one NRO per
-# folder), with the same caches in sdmc:/switch/switchwaker/ (where both NROs read them). `native` is the native port's NRO
+# reads; skipped if already on the console with the same size). `native-eur` (or any *-eur.nro): the
+# European NRO, pushed as sdmc:/switch/switchwaker/switchwaker.nro like the USA one (one region per SD
+# card: it replaces the USA NRO; the HOME-menu forwarder starts either), with the same caches. `native` is the native port's NRO
 # (scripts/switch/build_native.sh, the deko3d renderer), switchwaker.nro, with its
 # initial_pipeline_cache.db and initial_dksh_cache.bin (the DKSH cache built next to it).
 # (Run options live in native/user/settings.ini, written by the in-game options menu; developer
@@ -102,13 +102,13 @@ done
 
 for target in "$@"; do
     dksh=''
-    nro_dir=$remote_dir  # the NRO's folder; the caches always go to $remote_dir
+    name=''  # the name on the console (default: the file's)
     case $target in
         native) script=build_native.sh nro=build/switch-native/switchwaker.nro
                 dksh=build/switch-native/initial_dksh_cache.bin ;;
         native-eur) script="build_native.sh --eur" nro=build/switch-native-eur/switchwaker-eur.nro
-                dksh=build/switch-native-eur/initial_dksh_cache.bin nro_dir=switch/switchwaker-eur ;;
-        *-eur.nro) script='' nro=$target nro_dir=switch/switchwaker-eur ;;
+                dksh=build/switch-native-eur/initial_dksh_cache.bin name=switchwaker.nro ;;
+        *-eur.nro) script='' nro=$target name=switchwaker.nro ;;
         *.nro) script='' nro=$target ;;
         *) echo "push: unknown target $target" >&2; exit 2 ;;
     esac
@@ -122,17 +122,7 @@ for target in "$@"; do
         exit 1
     fi
 
-    copy=$(mktemp)
-    trap 'rm -f "$copy"' EXIT
-    "$tool" push "$nro" "$nro_dir" "$copy"
-    want=$(shasum -a 256 "$nro" | cut -d' ' -f1)
-    got=$(shasum -a 256 "$copy" | cut -d' ' -f1)
-    rm -f "$copy"
-    if [[ $want != "$got" ]]; then
-        echo "push: read-back of $(basename "$nro") does not match ($got != $want)" >&2
-        exit 1
-    fi
-    echo "verified $nro_dir/$(basename "$nro") $want"
+    push_verified "$nro" "${name:-$(basename "$nro")}" "$remote_dir"
     if [[ $with_db -eq 1 ]]; then
         push_pipeline_cache "$bundled_db"
         # the DKSH cache (build_native.sh builds it next to the NRO)

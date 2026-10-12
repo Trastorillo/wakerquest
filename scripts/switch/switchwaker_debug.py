@@ -7,12 +7,12 @@ log says '[switch] debug server listening on <ip>:6543'. The console's address: 
   switchwaker_debug.py info                      build, frame, stage, memory, address
   switchwaker_debug.py log [--all] [--save F] [--grep RE] [--seconds N]
                                                  the log as it is written (Ctrl-C ends it)
-  switchwaker_debug.py deploy [NRO] [--eur] [--no-reload] [--nro-only]
+  switchwaker_debug.py deploy [NRO] [--eur] [--force] [--no-reload] [--nro-only]
                                                  upload the NRO (default build/switch-native/switchwaker.nro;
-                                                 --eur: build/switch-native-eur/switchwaker-eur.nro to
-                                                 /switch/switchwaker-eur/, never restarted) and the caches
-                                                 built next to it (to sdmc:/switch/switchwaker/),
-                                                 check it, restart
+                                                 --eur: build/switch-native-eur/switchwaker-eur.nro) as
+                                                 switchwaker.nro, and the caches built next to it,
+                                                 check it, restart; refused when the running game's
+                                                 region differs (--force)
   switchwaker_debug.py shot [OUT.png] [--game]   screenshot of the next frame
   switchwaker_debug.py press A [B ...] [ms]      also hold, release, stick L|R x y [ms]
   switchwaker_debug.py warps | warp N | warp STAGE [ROOM] [POINT] [LAYER]
@@ -47,11 +47,11 @@ ENV_PORT = "SWITCHWAKER_DEBUG_PORT"
 DEFAULT_NRO = REPO / "build" / "switch-native" / "switchwaker.nro"
 BUILD_HINT = "scripts/switch/build_native.sh"
 REMOTE_NRO = "switchwaker.nro"          # relative to the server's root, sdmc:/switch/switchwaker
-# The European NRO (deploy --eur), in its own folder (the Homebrew Menu lists one NRO per folder); it reads
-# its caches, disc and native/ from the server's root as the USA one does. None where there is no such build.
+# The European NRO (deploy --eur): installed as REMOTE_NRO too (one region per SD card; the HOME-menu
+# forwarder starts either). The disc each build runs, as info's "game" line names it. None where there
+# is no such build.
 DEFAULT_NRO_EUR = REPO / "build" / "switch-native-eur" / "switchwaker-eur.nro"
-REMOTE_NRO_EUR = "/switch/switchwaker-eur/switchwaker-eur.nro"
-EUR_ENTRY = "SwitchWaker EUR"
+GAME_USA, GAME_EUR = "GZLE01", "GZLP01"
 REMOTE_LOGS = "native/logs"
 SESSION_LOG = r"switchwaker(?:_gl|_dk|-eur)?_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.log"
 
@@ -156,6 +156,7 @@ def check_game(args):
     if version.startswith("v") or "(" in version:
         sys.exit(f"the console runs another game ({first.strip()}), not {PORT_NAME}: nothing sent. "
                  f"Start {PORT_NAME} and try again.")
+    return text
 
 
 def simple(args, *cmd, timeout=30.0):
@@ -253,32 +254,40 @@ def wait_server(args, seconds):
     return False
 
 
+def region_guard(args, eur):
+    """The NRO replaces the running one at the same path: one of the other region would not start with the
+    console's disc (a USA console's GZLE01.iso, a European build). Refused unless --force."""
+    if GAME_EUR is None:
+        return
+    want = GAME_EUR if eur else GAME_USA
+    m = re.search(r"^game (\S+)", args.info or "", re.M)
+    if m is None:
+        print(f"note: the running build does not say its game (older than info's game line): "
+              f"cannot check that it is {want} like this NRO", file=sys.stderr)
+        return
+    if m.group(1) != want and not args.force:
+        sys.exit(f"the console runs the {m.group(1)} build, this NRO is the {want} one: it would replace "
+                 f"switchwaker.nro with the other region's, which does not run with the console's disc. "
+                 f"Nothing sent ({'without --eur' if eur else '--eur'} for the {m.group(1)} build, or --force).")
+
+
 def cmd_deploy(args):
-    eur = args.eur or (REMOTE_NRO_EUR is not None and args.nro is not None and args.nro.endswith("-eur.nro"))
-    if eur and REMOTE_NRO_EUR is None:
+    eur = args.eur or (DEFAULT_NRO_EUR is not None and args.nro is not None and args.nro.endswith("-eur.nro"))
+    if eur and DEFAULT_NRO_EUR is None:
         sys.exit("--eur: this port has no European build")
     nro = Path(args.nro or (DEFAULT_NRO_EUR if eur else DEFAULT_NRO))
-    remote = args.remote or (REMOTE_NRO_EUR if eur else REMOTE_NRO)
     if not nro.exists():
         sys.exit(f"{nro} does not exist ({BUILD_HINT}{' --eur' if eur else ''} builds it)")
+    region_guard(args, eur)
     c = connect(args)
     try:
-        folder = remote.rpartition("/")[0]
-        if folder:
-            c.command("mkdir", folder, timeout=10.0)
-        put_file(c, nro, remote)
+        # the European build too goes in as switchwaker.nro (the forwarder's path)
+        put_file(c, nro, args.remote)
         # the bundled caches built next to the NRO (deko3d's DKSH file changes with every build): in the
-        # server's root, where every NRO reads them (switch/native/CMakeLists.txt, COS_SWITCH_NRO_DIR),
-        # wherever the NRO itself goes
+        # server's root, where every NRO reads them (switch/native/CMakeLists.txt, COS_SWITCH_NRO_DIR)
         for extra in ([] if args.nro_only else ["initial_pipeline_cache.db", "initial_dksh_cache.bin"]):
             if (nro.parent / extra).exists():
                 put_file(c, nro.parent / extra, extra)
-        if eur and not args.no_reload:
-            # reload restarts what the HOME-menu forwarder starts, the USA NRO; the European one runs from
-            # the Homebrew Menu, where nothing can restart it
-            print(f"not restarted: {EUR_ENTRY} runs from the Homebrew Menu (the forwarder starts the USA NRO), "
-                  f"where reload cannot restart it. Quit the game and start {EUR_ENTRY} again.")
-            return
         if args.no_reload:
             return
         print(c.command("reload", timeout=10.0).decode())
@@ -382,10 +391,12 @@ def main():
         sp.add_argument("remote", nargs="?" if name == "ls" else None, default="")
     sp = sub.add_parser("deploy")
     sp.add_argument("nro", nargs="?")
-    sp.add_argument("--remote", help=f"where on the SD card (default {REMOTE_NRO}; --eur: {REMOTE_NRO_EUR})")
+    sp.add_argument("--remote", default=REMOTE_NRO, help=f"where on the SD card (default {REMOTE_NRO})")
     sp.add_argument("--eur", action="store_true",
-                    help=f"the European NRO ({DEFAULT_NRO_EUR.relative_to(REPO)}), to {REMOTE_NRO_EUR}; "
-                         "implies --no-reload (it runs from the Homebrew Menu); also when NRO ends in -eur.nro")
+                    help=f"the European NRO ({DEFAULT_NRO_EUR.relative_to(REPO)}), also as {REMOTE_NRO}; "
+                         "also when NRO ends in -eur.nro")
+    sp.add_argument("--force", action="store_true",
+                    help="deploy even when the running game is the other region's build")
     sp.add_argument("--no-reload", action="store_true")
     sp.add_argument("--nro-only", action="store_true",
                     help="only the NRO, not the initial_pipeline_cache.db / initial_dksh_cache.bin next to it")
@@ -402,8 +413,9 @@ def main():
 
     args = p.parse_args()
     try:
+        args.info = None
         if args.cmd in CHANGING_COMMANDS:
-            check_game(args)
+            args.info = check_game(args)
         if args.cmd in ("info", "ping", "help", "warps", "quit", "reload", "crash", "audio"):
             simple(args, args.cmd)
         elif args.cmd in ("press", "hold", "release", "warp", "stick", "event", "give"):

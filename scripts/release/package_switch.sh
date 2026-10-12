@@ -7,13 +7,13 @@
 #     -> build/release/SwitchWaker-TAG-switch.zip and .sha256, for the USA disc ("SwitchWaker" in hbmenu):
 #          switch/switchwaker/switchwaker.nro, initial_pipeline_cache.db, initial_dksh_cache.bin
 #     --with-eur: also build/release/SwitchWaker-TAG-switch-eur.zip and .sha256, for the European disc
-#        ("SwitchWaker EUR", docs/PAL_DISC_PLAN.md):
-#          switch/switchwaker-eur/switchwaker-eur.nro
-#          switch/switchwaker/initial_pipeline_cache.db, initial_dksh_cache.bin
+#        ("SwitchWaker EUR", docs/PAL_DISC_PLAN.md), the same layout:
+#          switch/switchwaker/switchwaker.nro (build/switch-native-eur/switchwaker-eur.nro, renamed),
+#          initial_pipeline_cache.db, initial_dksh_cache.bin
 #
-# One NRO per folder: the Homebrew Menu lists a single .nro per folder of sdmc:/switch/. Both NROs read
-# everything else from sdmc:/switch/switchwaker/ (the disc, these caches, saves, settings, logs), so the two
-# zips share the caches, which must be the same files: a player can extract both onto one card.
+# One region per SD card: both zips install switch/switchwaker/switchwaker.nro, the path the HOME-menu
+# forwarder starts, so they conflict on purpose (INSTALL.md: to change region, the other zip's
+# switchwaker.nro and the matching disc image). The caches are the same files in both.
 #
 # Players add their own disc as switch/switchwaker/GZLE01.iso, or GZLP01.iso for the European one
 # (INSTALL.md). Build first, at the tag:
@@ -38,10 +38,10 @@ if [[ $with_eur == 1 ]]; then
     for f in switchwaker-eur.nro "${caches[@]}"; do
         [[ -s $eur_dir/$f ]] || fail "$eur_dir/$f is missing: build it at $tag with --eur --runtime-assets"
     done
-    # both zips write switch/switchwaker/<cache>: extracting one over the other must change nothing
+    # the caches are built from the same pipeline database: both downloads must carry the same files
     for f in "${caches[@]}"; do
         cmp -s "$usa_dir/$f" "$eur_dir/$f" ||
-            fail "$usa_dir/$f and $eur_dir/$f differ: both downloads install it in switch/switchwaker/"
+            fail "$usa_dir/$f and $eur_dir/$f differ: both downloads must carry the same caches"
     done
 fi
 
@@ -66,13 +66,13 @@ for n in "${nros[@]}"; do
         fail "$n does not carry version $version (built from another commit?)"
 done
 
-# zip NAME NRO_FOLDER BUILD_DIR NRO: the NRO in switch/NRO_FOLDER/, the caches in switch/switchwaker/
+# zip NAME BUILD_DIR NRO: the NRO as switch/switchwaker/switchwaker.nro, the caches next to it
 package() {
-    local name=$1 folder=$2 dir=$3 nro=$4 stage
+    local name=$1 dir=$2 nro=$3 stage
     stage=build/release/$name
     rm -rf "$stage" "build/release/$name.zip" "build/release/$name.zip.sha256"
-    mkdir -p "$stage/switch/$folder" "$stage/switch/switchwaker"
-    cp "$dir/$nro" "$stage/switch/$folder/"
+    mkdir -p "$stage/switch/switchwaker"
+    cp "$dir/$nro" "$stage/switch/switchwaker/switchwaker.nro"
     for f in "${caches[@]}"; do cp "$dir/$f" "$stage/switch/switchwaker/"; done
     (cd "$stage" && zip -qr "../$name.zip" switch)
     rm -rf "$stage"
@@ -80,5 +80,5 @@ package() {
     unzip -l "build/release/$name.zip"
 }
 mkdir -p build/release
-package "SwitchWaker-$tag-switch" switchwaker "$usa_dir" switchwaker.nro
-[[ $with_eur == 0 ]] || package "SwitchWaker-$tag-switch-eur" switchwaker-eur "$eur_dir" switchwaker-eur.nro
+package "SwitchWaker-$tag-switch" "$usa_dir" switchwaker.nro
+[[ $with_eur == 0 ]] || package "SwitchWaker-$tag-switch-eur" "$eur_dir" switchwaker-eur.nro

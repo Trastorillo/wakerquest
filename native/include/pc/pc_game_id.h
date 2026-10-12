@@ -29,9 +29,9 @@
 /* What the player sees on the Switch (INSTALL.md): each build's Homebrew Menu entry (its NACP name,
  * switch/native/CMakeLists.txt) and the end of its release download's name
  * (scripts/release/package_switch.sh: SwitchWaker-<tag>-switch.zip, SwitchWaker-<tag>-switch-eur.zip).
- * The USA NRO is sdmc:/switch/switchwaker/switchwaker.nro, the European one
- * sdmc:/switch/switchwaker-eur/switchwaker-eur.nro (hbmenu lists one NRO per folder); both read
- * everything else (disc, caches, saves, settings, logs) from sdmc:/switch/switchwaker/. */
+ * Both downloads install the NRO as sdmc:/switch/switchwaker/switchwaker.nro (one region per SD card,
+ * so the HOME-menu forwarder starts either); the European build is switchwaker-eur.nro only on the
+ * build machine (PC_GAME_NRO_EUR, its .elf and log names). */
 #define PC_GAME_ENTRY_USA "SwitchWaker"
 #define PC_GAME_ENTRY_EUR "SwitchWaker EUR"
 #define PC_GAME_ZIP_USA "-switch.zip"

@@ -256,7 +256,9 @@ void startSessionLog() {
     std::vector<Log> logs;
     if (DIR* dir = opendir(kLogDir)) {
         while (dirent* e = readdir(dir)) {
-            // this NRO's own logs only (switchwaker-eur's are pruned by switchwaker-eur.nro)
+            // this build's own logs only: the name is the build's (COS_SWITCH_NRO_NAME, switchwaker or
+            // switchwaker-eur), not the file's, so the European build installed as switchwaker.nro still
+            // writes and prunes switchwaker-eur_*.log, and leaves the USA build's switchwaker_*.log alone
             if (strncmp(e->d_name, COS_SWITCH_NRO_NAME "_", sizeof(COS_SWITCH_NRO_NAME "_") - 1) != 0) {
                 continue;
             }

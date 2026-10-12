@@ -33,25 +33,34 @@ bool sDiscMissing;
 bool sOtherRegionDisc;
 
 #if defined(__SWITCH__)
-// One build as the player knows it: its disc, its Homebrew Menu entry, its download (pc_game_id.h).
+// One build as the player knows it: its disc, its version's name, its download (pc_game_id.h). Both
+// install as sdmc:/switch/switchwaker/switchwaker.nro (one region per SD card), so the remedy for the
+// other region's disc is the other download's switchwaker.nro.
 struct PlayerBuild {
-    const char* id;        // GZLE01
-    const char* iso;       // GZLE01.iso
-    const char* discEn;    // the USA disc
-    const char* discEs;    // el disco de EE. UU.
-    const char* entry;     // SwitchWaker
-    const char* zip;       // -switch.zip
+    const char* id;          // GZLE01
+    const char* iso;         // GZLE01.iso
+    const char* discEn;      // the USA disc
+    const char* discEs;      // el disco de EE. UU.
+    const char* versionEn;   // the USA version
+    const char* versionEs;   // la versión de EE. UU.
+    const char* entry;       // SwitchWaker (the NACP name)
+    const char* zip;         // -switch.zip
+    const char* regionEn;    // USA
+    const char* regionEs;    // EE. UU.
 };
 constexpr PlayerBuild kUsaBuild{PC_GAME_ID_USA, PC_GAME_ID_USA ".iso", "the USA disc", "el disco de EE. UU.",
-                                PC_GAME_ENTRY_USA, PC_GAME_ZIP_USA};
+                                "the USA version", "la versi\u00f3n de EE. UU.", PC_GAME_ENTRY_USA,
+                                PC_GAME_ZIP_USA, "USA", "EE. UU."};
 constexpr PlayerBuild kEurBuild{PC_GAME_ID_EUR, PC_GAME_ID_EUR ".iso", "the European disc", "el disco europeo",
-                                PC_GAME_ENTRY_EUR, PC_GAME_ZIP_EUR};
+                                "the European version", "la versi\u00f3n europea", PC_GAME_ENTRY_EUR,
+                                PC_GAME_ZIP_EUR, "Europe", "Europa"};
 
 // The disc folder: COS_SWITCH_DEFAULT_DISC without its file name.
 constexpr const char kDiscDir[] = "sdmc:/switch/switchwaker/";
 
 // The message for the player: with the other region's disc in the folder (and not this build's), or
-// at this build's path, name the build that runs it, its entry and its download. English, then Spanish.
+// at this build's path, say which version this switchwaker.nro is and which download replaces it.
+// English, then Spanish.
 void playerMessage(char* text, size_t size) {
     const PlayerBuild& self = PC_GAME_IS_EUR ? kEurBuild : kUsaBuild;
     const PlayerBuild& other = PC_GAME_IS_EUR ? kUsaBuild : kEurBuild;
@@ -60,23 +69,28 @@ void playerMessage(char* text, size_t size) {
         sDiscMissing && stat((std::string("/switch/switchwaker/") + other.iso).c_str(), &st) == 0;
     if (otherInFolder) {
         snprintf(text, size,
-                 "This is %s, for %s (%s), but %s holds %s (%s). For that disc, start \"%s\" in the Homebrew "
-                 "Menu: it comes in the download whose name ends in \"%s\".\n\n"
-                 "Esto es %s, para %s (%s), pero %s contiene %s (%s). Para ese disco, abre \"%s\" en el "
-                 "Homebrew Menu: viene en la descarga cuyo nombre termina en \"%s\".",
-                 self.entry, self.discEn, self.iso, kDiscDir, other.iso, other.discEn, other.entry, other.zip,
-                 self.entry, self.discEs, self.iso, kDiscDir, other.iso, other.discEs, other.entry, other.zip);
+                 "This switchwaker.nro is %s (%s), for %s (%s), but %s holds %s (%s). For that disc, download "
+                 "the release file whose name ends in \"%s\" (%s) and replace switchwaker.nro with the one "
+                 "inside it.\n\n"
+                 "Este switchwaker.nro es %s (%s), para %s (%s), pero %s contiene %s (%s). Para ese disco, "
+                 "descarga el archivo de la release cuyo nombre termina en \"%s\" (%s) y reemplaza "
+                 "switchwaker.nro por el que trae.",
+                 self.versionEn, self.entry, self.discEn, self.iso, kDiscDir, other.iso, other.discEn, other.zip,
+                 other.regionEn, self.versionEs, self.entry, self.discEs, self.iso, kDiscDir, other.iso,
+                 other.discEs, other.zip, other.regionEs);
         return;
     }
     if (sOtherRegionDisc) {
         snprintf(text, size,
-                 "%s%s is %s (%s), and this is %s, for %s. Rename the file to %s and start \"%s\" in the "
-                 "Homebrew Menu: it comes in the download whose name ends in \"%s\".\n\n"
-                 "%s%s es %s (%s), y esto es %s, para %s. Cambia el nombre del archivo a %s y abre \"%s\" en "
-                 "el Homebrew Menu: viene en la descarga cuyo nombre termina en \"%s\".",
-                 kDiscDir, self.iso, other.discEn, other.id, self.entry, self.discEn, other.iso, other.entry,
-                 other.zip, kDiscDir, self.iso, other.discEs, other.id, self.entry, self.discEs, other.iso,
-                 other.entry, other.zip);
+                 "%s%s is %s (%s), and this switchwaker.nro is %s (%s). For %s, rename the file to %s, "
+                 "download the release file whose name ends in \"%s\" (%s) and replace switchwaker.nro with "
+                 "the one inside it.\n\n"
+                 "%s%s es %s (%s), y este switchwaker.nro es %s (%s). Para %s, cambia el nombre del archivo "
+                 "a %s, descarga el archivo de la release cuyo nombre termina en \"%s\" (%s) y reemplaza "
+                 "switchwaker.nro por el que trae.",
+                 kDiscDir, self.iso, other.discEn, other.id, self.versionEn, self.entry, other.discEn, other.iso,
+                 other.zip, other.regionEn, kDiscDir, self.iso, other.discEs, other.id, self.versionEs, self.entry,
+                 other.discEs, other.iso, other.zip, other.regionEs);
         return;
     }
     snprintf(text, size,

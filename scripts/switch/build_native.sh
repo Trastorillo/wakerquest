@@ -17,8 +17,10 @@
 # and libnx, clang for the game units (switch/native/clang-launcher.sh).
 #
 # --eur builds the European version (COS_VERSION=3, the GZLP01 disc; docs/PAL_DISC_PLAN.md):
-# build/switch-native-eur/switchwaker-eur.nro, "SwitchWaker EUR" in the Homebrew Menu, which reads
-# sdmc:/switch/switchwaker/GZLP01.iso. Without it: the USA version (GZLE01), as always.
+# build/switch-native-eur/switchwaker-eur.nro, "SwitchWaker EUR" in the Homebrew Menu, installed as
+# sdmc:/switch/switchwaker/switchwaker.nro like the USA one (one region per SD card; the release zip,
+# make_sd.sh, push.sh and the debug client rename it), which reads sdmc:/switch/switchwaker/GZLP01.iso.
+# Without it: the USA version (GZLE01), as always.
 # --build-dir DIR   the build directory, relative to the checkout (default build/switch-native, or
 #                   build/switch-native-eur with --eur); it is mounted where the container's CMake
 #                   cache expects build/switch-native, so a copy of another build directory (cp -c on

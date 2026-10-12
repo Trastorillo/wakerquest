@@ -19,9 +19,10 @@ extern "C" {
  * (pc_game_id.h, docs/PAL_DISC_PLAN.md), so both discs can sit side by side. */
 #include "pc/pc_game_id.h"
 #define COS_SWITCH_DEFAULT_DISC "/switch/switchwaker/" PC_GAME_ISO_NAME
-/* The NRO's name: its logs (COS_SWITCH_ROOT/logs/<name>_<date>_<time>.log) and its symbols (<name>.elf):
- * switchwaker, in /switch/switchwaker/ with its bundled caches next to the data above (disc, saves,
- * settings and its [dev] section, Aurora's caches). */
+/* The build's name: its logs (COS_SWITCH_ROOT/logs/<name>_<date>_<time>.log) and its symbols (<name>.elf):
+ * switchwaker, or switchwaker-eur for the European build. Both are installed as
+ * /switch/switchwaker/switchwaker.nro, with the bundled caches next to the data above (disc, saves,
+ * settings and its [dev] section, Aurora's caches); the name stays the build's whatever the file's. */
 #ifndef COS_SWITCH_NRO_NAME
 #define COS_SWITCH_NRO_NAME "switchwaker"
 #endif
