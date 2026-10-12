@@ -14,6 +14,8 @@
 //       frame, from the player's layer; the first is the probed actor unless COS_QOL_PROBE_ACTOR says
 //       otherwise;
 //   COS_QOL_PROBE_MSG=<frame>:<message number>   shows that message (fopMsgM_messageSet) at that frame;
+//   COS_QOL_PROBE_ROPE=<frame>   the player grabs the nearest hanging rope (d_a_himo3) as the rope smoke
+//       does (pc_rope.cpp);
 //   COS_QOL_PROBE_BALLAD=<frame>:<destination>   starts the boat's Ballad of Gales warp (a cyclone and
 //       daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat.
 #include "pc_internal.h"
@@ -46,6 +48,7 @@ unsigned int sTo = ~0u;
 unsigned int sMsgFrame = 0;
 unsigned int sMsgNo = 0;
 fpc_ProcID sMsgId = fpcM_ERROR_PROCESS_ID_e;
+unsigned int sRopeFrame = 0;
 unsigned int sBalladFrame = 0;
 int sBalladTo = 0;
 struct Spawn {
@@ -67,12 +70,31 @@ void* isActorName(void* proc, void*) {
     return fpcM_IsCreating(fpcM_GetID(proc)) == FALSE && fpcM_GetName(proc) == sActorName ? proc : nullptr;
 }
 
+void* nearestRope(void* proc, void* data) {
+    fopAc_ac_c** best = (fopAc_ac_c**)data;
+    fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    if (fopAcM_GetName((fopAc_ac_c*)proc) == fpcNm_HIMO3_e) {
+        fopAc_ac_c* rope = (fopAc_ac_c*)proc;
+        if (*best == nullptr ||
+            (rope->current.pos - player->current.pos).absXZ() < ((*best)->current.pos - player->current.pos).absXZ()) {
+            *best = rope;
+        }
+    }
+    return nullptr;
+}
+
 void* isMessage(void* proc, void*) {
     const s16 name = fpcM_GetName(proc);
     return name == fpcNm_MSG_e || name == fpcNm_MSG2_e || name == fpcNm_MSG3_e ? proc : nullptr;
 }
 
 } // namespace
+
+} // namespace pc
+
+extern "C" int pc_debug_grab_rope(fopAc_ac_c* rope, const cXyz* at); // pc_rope.cpp
+
+namespace pc {
 
 void qolProbeFrame(unsigned int frames) {
     if (sOn < 0) {
@@ -111,6 +133,9 @@ void qolProbeFrame(unsigned int frames) {
         if (const char* v = getenv("COS_QOL_PROBE_SWITCH"); v != nullptr) {
             sSwitch = (int)strtol(v, nullptr, 0);
         }
+        if (const char* v = getenv("COS_QOL_PROBE_ROPE"); v != nullptr) {
+            sRopeFrame = (unsigned int)strtoul(v, nullptr, 0);
+        }
         if (const char* v = getenv("COS_QOL_PROBE_BALLAD"); v != nullptr) {
             char* end = nullptr;
             sBalladFrame = (unsigned int)strtoul(v, &end, 0);
@@ -146,6 +171,16 @@ void qolProbeFrame(unsigned int frames) {
         fpc_ProcID id = fopAcM_create((s16)s.name, s.param, &pos, fopAcM_GetRoomNo(player), &angle);
         writef(STDERR_FILENO, "[cos] qol-probe: actor %d (0x%08X) spawned at frame %u at (%.1f,%.1f,%.1f) (process %d)\n",
                s.name, s.param, frames, pos.x, pos.y, pos.z, (int)id);
+    }
+    if (sRopeFrame != 0 && frames == sRopeFrame) {
+        // The rope smoke's grab (pc_rope.cpp): the nearest hanging rope, 200 below its top.
+        fopAc_ac_c* rope = nullptr;
+        fpcM_Search(nearestRope, &rope);
+        if (rope != nullptr) {
+            cXyz at(rope->current.pos.x + 20.0f, rope->current.pos.y - 200.0f, rope->current.pos.z);
+            pc_debug_grab_rope(rope, &at);
+            writef(STDERR_FILENO, "[cos] qol-probe: rope grabbed at frame %u\n", frames);
+        }
     }
     if (sBalladFrame != 0 && frames == sBalladFrame) {
         // What the Ballad of Gales does on the boat once a destination is chosen
