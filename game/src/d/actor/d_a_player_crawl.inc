@@ -31,7 +31,14 @@ f32 daPy_lk_c::getCrawlMoveSpeed() {
     if (fVar1 >= 17.0f) {
         fVar1 = fVar1 - 17.0f;
     }
+#if TARGET_PC
+    // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_player_movement_speeds):
+    // crawling at twice the speed (6.0 instead of 3.0)
+    return ((pc_qol(PC_QOL_FAST_CLIMB) ? 6.0f : m_HIO->mCrouch.m.field_0x3C) * mFrameCtrlUnder[UNDER_MOVE0_e].getRate()) *
+           cM_fsin((M_PI / 17) * fVar1);
+#else
     return (m_HIO->mCrouch.m.field_0x3C * mFrameCtrlUnder[UNDER_MOVE0_e].getRate()) * cM_fsin((M_PI / 17) * fVar1);
+#endif
 }
 
 /* 80138868-801389D0       .text setCrawlMoveDirectionArrow__9daPy_lk_cFv */

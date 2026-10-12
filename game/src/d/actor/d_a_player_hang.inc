@@ -601,7 +601,13 @@ BOOL daPy_lk_c::procHangWallCatch_init() {
     commonProcInit(daPyProc_HANG_WALL_CATCH_e);
     setSingleMoveAnime(
         ANM_VJMPCHB,
+#if TARGET_PC
+        // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): climbing up a ledge
+        // starts at 1.6 instead of 0.8
+        pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mWallCatch.m.field_0x1C,
+#else
         m_HIO->mWallCatch.m.field_0x1C,
+#endif
         m_HIO->mWallCatch.m.field_0x34,
         m_HIO->mWallCatch.m.field_0x0,
         m_HIO->mWallCatch.m.field_0x20

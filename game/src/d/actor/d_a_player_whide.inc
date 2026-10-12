@@ -24,7 +24,13 @@ void daPy_lk_c::setBlendWHideMoveAnime(f32 param_0) {
     f32 fVar3;
     daPy_ANM anm0;
     if (!checkNoResetFlg0(daPyFlg0_UNK10000)) {
+#if TARGET_PC
+        // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): sidling along
+        // a wall at 2.0 instead of 1.6
+        anm_speed_0 = pc_qol(PC_QOL_FAST_CLIMB) ? 2.0f : m_HIO->mWall.m.field_0x14;
+#else
         anm_speed_0 = m_HIO->mWall.m.field_0x14;
+#endif
         morf = m_HIO->mWall.m.field_0x40;
         anm1 = ANM_WALL;
         end = m_HIO->mWall.m.field_0x8;
