@@ -24,6 +24,10 @@ their work; this repository adds the layer that runs it on new hardware.
   included (with encounter's Dawn fork for it).
 - **[Dusklight](https://github.com/TwilitRealm/dusklight)** (TwilitRealm): the native port of a
   sibling game on Aurora; the model for this project's SDK layer, and CC0 helper code.
+- **[BetterWW](https://github.com/WideBoner/betterww)** (WideBoner) and
+  **[wwrando](https://github.com/LagoLunatic/wwrando)** (LagoLunatic; with brainfubar, MelonSpeedruns
+  and JarheadHME): the options menu's "Calidad de vida" (quality of life) options are derived from
+  their patches ([docs/QOL_PLAN.md](docs/QOL_PLAN.md)).
 - **[Dolphin](https://dolphin-emu.org)**: its DSP HLE plays the game's audio (`native/dsp_hle/`, GPL).
 - **[elliotttate/Wind-Waker-Recomp](https://github.com/elliotttate/Wind-Waker-Recomp)** and
   **[RecompCore](https://github.com/elliotttate/RecompCore)**: the static recompilation this work
