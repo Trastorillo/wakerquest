@@ -170,7 +170,7 @@ const char* newGameGap() {
 void openFrame(unsigned int frames) {
     base_process_class* proc = executing(fpcNm_OPEN_SCENE_e);
     if (sPhase == kWaitOpen) {
-        if (proc == nullptr && pc_qol(PC_QOL_SKIP_INTRO) && executing(fpcNm_PLAY_SCENE_e) != nullptr) {
+        if (proc == nullptr && isTarget() && pc_qol(PC_QOL_SKIP_INTRO) && executing(fpcNm_PLAY_SCENE_e) != nullptr) {
             // QoL "Saltar la introducción" (docs/QOL_PLAN.md): the name scene requests the PLAY scene
             // itself; new-game is logged once it executes, with the same checks of the name scene.
             writef(STDERR_FILENO, "[cos] new-game: no prologue (COS_QOL_SKIP_INTRO): PLAY scene executing at "
