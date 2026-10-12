@@ -8,7 +8,9 @@
 // grappling hook) to each line. COS_QOL_PROBE_MSG=<frame>:<message number> shows that message
 // (fopMsgM_messageSet, as a talk does) at that frame. COS_QOL_PROBE_SPAWN=<frame>:<process name>:
 // <parameters>[:<distance>] creates that actor (angle z 0xFFFF) <distance> (150) in front of the
-// player at that frame, and is the probed actor unless COS_QOL_PROBE_ACTOR says otherwise. COS_QOL_PROBE_FROM=<frame> / COS_QOL_PROBE_TO=<frame> limit the lines.
+// player at that frame, and is the probed actor unless COS_QOL_PROBE_ACTOR says otherwise.
+// COS_QOL_PROBE_BALLAD=<frame>:<destination> starts the boat's Ballad of Gales warp (a cyclone and
+// daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat. COS_QOL_PROBE_FROM=<frame> / COS_QOL_PROBE_TO=<frame> limit the lines.
 #include "pc_internal.h"
 
 #include "d/actor/d_a_player.h"
@@ -39,6 +41,8 @@ unsigned int sTo = ~0u;
 unsigned int sMsgFrame = 0;
 unsigned int sMsgNo = 0;
 fpc_ProcID sMsgId = fpcM_ERROR_PROCESS_ID_e;
+unsigned int sBalladFrame = 0;
+int sBalladTo = 0;
 unsigned int sSpawnFrame = 0;
 int sSpawnName = -1;
 u32 sSpawnParam = 0;
@@ -87,6 +91,11 @@ void qolProbeFrame(unsigned int frames) {
                 sActorName = sSpawnName;
             }
         }
+        if (const char* v = getenv("COS_QOL_PROBE_BALLAD"); v != nullptr) {
+            char* end = nullptr;
+            sBalladFrame = (unsigned int)strtoul(v, &end, 0);
+            sBalladTo = end != nullptr && *end == ':' ? (int)strtol(end + 1, nullptr, 0) : 0;
+        }
         if (const char* v = getenv("COS_QOL_PROBE_MSG"); v != nullptr) {
             char* end = nullptr;
             sMsgFrame = (unsigned int)strtoul(v, &end, 0);
@@ -113,6 +122,17 @@ void qolProbeFrame(unsigned int frames) {
         fpc_ProcID id = fopAcM_create((s16)sSpawnName, sSpawnParam, &pos, fopAcM_GetRoomNo(player), &angle);
         writef(STDERR_FILENO, "[cos] qol-probe: actor %d (0x%08X) spawned at frame %u at (%.1f,%.1f,%.1f) (process %d)\n",
                sSpawnName, sSpawnParam, frames, pos.x, pos.y, pos.z, (int)id);
+    }
+    if (sBalladFrame != 0 && frames == sBalladFrame) {
+        // What the Ballad of Gales does on the boat once a destination is chosen
+        // (daPy_lk_c::procTactPlay_init, procTactPlayEnd): the cyclone, then the boat's warp.
+        if (daShip_c* boat = dComIfGp_getShipActor(); boat != nullptr) {
+            fpc_ProcID warpID = fopAcM_create(fpcNm_TORNADO_e, 1, &player->current.pos, fopAcM_GetRoomNo(player));
+            boat->setTactWarpID(warpID);
+            boat->setTactWarpPosNum(sBalladTo);
+            boat->setTactWarp();
+            writef(STDERR_FILENO, "[cos] qol-probe: Ballad of Gales warp %d ordered at frame %u\n", sBalladTo, frames);
+        }
     }
     if (sMsgNo != 0 && frames == sMsgFrame) {
         sMsgId = fopMsgM_messageSet(sMsgNo, &player->eyePos);

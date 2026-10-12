@@ -22,6 +22,9 @@
 #include "d/actor/d_a_bomb.h"
 #include "d/actor/d_a_grid.h"
 #include "res/Object/Ship.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 static char l_arcName[] = "Ship";
 static Vec l_cannon_top = {85.0f, 0.0f, 10.0f};
@@ -2796,7 +2799,15 @@ BOOL daShip_c::procTactWarp_init() {
     speed.y = 0.0f;
     onStateFlg(daSFLG_FLY_e);
     m037A = 0;
+#if TARGET_PC
+    // QoL "Balada del vendaval rápida" (pc_qol.h; BetterWW ballad.asm): no warp music, which would go
+    // on playing after the early warp
+    if (!pc_qol(PC_QOL_FAST_BALLAD)) {
+        fopAcM_seStartCurrent(this, 0x186E, 0);
+    }
+#else
     fopAcM_seStartCurrent(this, 0x186E, 0);
+#endif
     dCam_getBody()->StartEventCamera(0xe, fopAcM_GetID(this), 0);
     dKy_get_seacolor(amb, &diff);
     m03BC.x = 0;
@@ -2854,7 +2865,13 @@ BOOL daShip_c::procTactWarp() {
               cLib_chaseF(&current.pos.x, tornado->getJointXPos(iVar4), 50.0f);
               cLib_chaseF(&current.pos.z, tornado->getJointZPos(iVar4), 50.0f);
         }
+#if TARGET_PC
+        // QoL "Balada del vendaval rápida" (pc_qol.h; BetterWW ballad.asm): the warp starts at once,
+        // without waiting for the boat to rise 5000 units into the cyclone
+        if (m037A != 2 && (pc_qol(PC_QOL_FAST_BALLAD) || current.pos.y > m03F4 + 5000.0f)) {
+#else
         if (m037A != 2 && current.pos.y > m03F4 + 5000.0f ) {
+#endif
             m037A = 2;
             dStage_changeScene(mTactWarpPosNum + 0xC5, 0.0f, 0, 0xFF);
             mDoAud_taktModeMuteOff();
