@@ -23,6 +23,15 @@
 //
 // The command list goes to the GPU every COS_DK_SUBMIT_DRAWS draws (default 256, 0 = once per
 // frame), as SwitchWakerHD's, so the GPU starts on a frame while the FIFO thread still records it.
+//
+// Depth peek (GXPeekZ, issue #7: the sun's lens flare and glare, the lantern's and the fireflies' glow test
+// the EFB depth at a few points). Aurora's Mac path snapshots the whole depth buffer with a compute pass
+// after the frame's last EFB pass and maps the copy later (depth_peek.cpp); here the frame's last pass,
+// when GXPeekZ asked for a snapshot (depth_peek::take_snapshot_request), copies only the area around the
+// points the game peeked since the last copy (a margin of kPeekMargin logical pixels) with the copy engine
+// into CPU-visible memory, after the pass's barrier. GXPeekZ reads the newest copy whose frame the GPU
+// has finished (swdk::frames_completed, no wait), so the game sees the depth one to two frames late, as on the
+// Mac; it never waits for the GPU. A point outside the copied area reads as no data (0, occluded).
 #include "dk_encode.hpp"
 
 #include "dk_aurora.h"
@@ -30,6 +39,7 @@
 #include "dk_gfx.hpp"
 
 #include "gfx/clear.hpp"
+#include "gfx/depth_peek.hpp"
 #include "gfx/frame.hpp"
 #include "gfx/pipeline_cache.hpp"
 #include "gfx/resource_cache.hpp"
@@ -41,6 +51,7 @@
 #include "webgpu/gpu.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -686,6 +697,111 @@ void depth_snapshot(const wgpu::TextureView& srcDepth, uint32_t samples, const w
     }
 }
 
+// ---- depth peek (see the top of the file)
+constexpr int kPeekMargin = 64;    // logical pixels around the peeked points (a camera turn of 1-2 frames)
+constexpr uint32_t kPeekSlots = 3;  // one being read, up to two in flight
+
+enum class PeekState : uint8_t { Free, InFlight, Done };
+struct PeekSlot {
+    swdk::Block mem;
+    PeekState state = PeekState::Free;
+    uint64_t frame = 0;                  // the deko3d frame whose commands fill it
+    uint32_t x = 0, y = 0, w = 0, h = 0;  // the copied area, in depth image pixels
+    depth_peek::SnapshotMapping map;     // logical EFB pixel -> depth image pixel
+};
+// Guards everything below: GXPeekZ's game thread reads, the render worker copies. Taken before
+// swdk::fence_mutex (frames_completed), never after it.
+std::mutex g_peekMutex;
+PeekSlot g_peek[kPeekSlots];
+int g_peekLatest = -1;  // the newest Done slot (the one read)
+int g_peekMinX = INT_MAX, g_peekMinY = INT_MAX, g_peekMaxX = INT_MIN, g_peekMaxY = INT_MIN;  // logical
+uint64_t g_peekCopies = 0;
+
+// Needs g_peekMutex: slots whose frame the GPU finished become Done, the newest of them the one read
+void peek_refresh_locked() {
+    const uint64_t completed = swdk::frames_completed();  // (any thread; one queue, in order)
+    for (uint32_t i = 0; i < kPeekSlots; i++) {
+        PeekSlot& p = g_peek[i];
+        if (p.state == PeekState::InFlight && p.frame <= completed) p.state = PeekState::Done;
+    }
+    int newest = g_peekLatest;
+    for (uint32_t i = 0; i < kPeekSlots; i++) {
+        if (g_peek[i].state == PeekState::Done && (newest < 0 || g_peek[i].frame > g_peek[newest].frame)) newest = int(i);
+    }
+    for (uint32_t i = 0; i < kPeekSlots; i++) {
+        if (int(i) != newest && g_peek[i].state == PeekState::Done) g_peek[i].state = PeekState::Free;
+    }
+    g_peekLatest = newest;
+}
+
+// encode_pass of the frame's last EFB pass (RenderPass::captureDepthSnapshot), after its barrier
+void depth_peek_capture(const RenderPass& pass) {
+    const auto& scene = pass.colorAttachments[SceneColorAttachmentIndex];
+    // native/patches/aurora/0009 (as encoding.cpp): with an EFB content scale the depth is in the top-left part
+    uint32_t sw = scene.size.width, sh = scene.size.height;
+    if (pass.depthSnapshotScale < 1.f) {
+        sw = std::max<uint32_t>(1, uint32_t(std::lround(float(sw) * pass.depthSnapshotScale)));
+        sh = std::max<uint32_t>(1, uint32_t(std::lround(float(sh) * pass.depthSnapshotScale)));
+    }
+    depth_peek::SnapshotMapping map;
+    if (!depth_peek::take_snapshot_request(sw, sh, map)) return;
+    View* v = pass.copySourceDepthView ? find_view(pass.copySourceDepthView.Get()) : nullptr;
+    Tex* t = v ? v->tex : nullptr;
+    if (!t || !t->valid || t->wformat != WGPUTextureFormat_Depth32Float || pass.msaaSamples > 1 || swdk::C.flipY) {
+        log_once("a depth peek of a depth buffer that is not single-sampled Depth32Float drawn upright");
+        return;
+    }
+    sw = std::min(sw, t->width);
+    sh = std::min(sh, t->height);
+    std::lock_guard<std::mutex> lock(g_peekMutex);
+    if (g_peekMinX > g_peekMaxX) return;  // (no point peeked since the last copy)
+    // the peeked area plus the margin, in depth image pixels (logical pixel x covers offset + [x, x + 1) * scale)
+    const auto lo = [](float off, float scale, int v, uint32_t size) {
+        return uint32_t(std::clamp(std::floor(off + float(v) * scale), 0.f, float(size - 1)));
+    };
+    const auto hi = [](float off, float scale, int v, uint32_t size) {
+        return uint32_t(std::clamp(std::ceil(off + float(v + 1) * scale), 1.f, float(size)));
+    };
+    const uint32_t x0 = lo(map.offsetX, map.scaleX, g_peekMinX - kPeekMargin, sw);
+    const uint32_t y0 = lo(map.offsetY, map.scaleY, g_peekMinY - kPeekMargin, sh);
+    const uint32_t x1 = hi(map.offsetX, map.scaleX, g_peekMaxX + kPeekMargin, sw);
+    const uint32_t y1 = hi(map.offsetY, map.scaleY, g_peekMaxY + kPeekMargin, sh);
+    g_peekMinX = g_peekMinY = INT_MAX;
+    g_peekMaxX = g_peekMaxY = INT_MIN;
+    if (x1 <= x0 || y1 <= y0) return;
+    peek_refresh_locked();
+    PeekSlot* slot = nullptr;
+    for (uint32_t i = 0; i < kPeekSlots && !slot; i++) {
+        if (g_peek[i].state == PeekState::Free) slot = &g_peek[i];
+    }
+    if (!slot) return;  // two copies still in flight: the next request
+    const uint32_t w = x1 - x0, h = y1 - y0, bytes = w * h * 4;
+    if (slot->mem.size < bytes) {
+        if (slot->mem) swdk::block_free_deferred(slot->mem.block);
+        slot->mem = swdk::block_create((bytes + 0xFFFFu) & ~0xFFFFu, "a depth peek copy");
+        if (!slot->mem) return;
+    }
+    transfer_begin();
+    const DkImageView src = level_view(t, 0);
+    const DkImageRect rect = {x0, y0, 0, w, h, 1};
+    const DkCopyBuf out = {slot->mem.gpu, w * 4, 0};
+    dkCmdBufCopyImageToBuffer(R.cmd, &src, &rect, &out, 0);
+    // the copy out of the GPU's L2 into memory before the CPU reads it (as read_texture)
+    barrier(DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);
+    g_stats.copies++;
+    gpu_mark(GpuWork::Copy);
+    slot->state = PeekState::InFlight;
+    slot->frame = R.frame + 1;
+    slot->x = x0;
+    slot->y = y0;
+    slot->w = w;
+    slot->h = h;
+    slot->map = map;
+    if (g_peekCopies++ == 0) {
+        dklog("depth peek: first copy, %ux%u of the %ux%u depth buffer at (%u, %u) for GXPeekZ", w, h, sw, sh, x0, y0);
+    }
+}
+
 // encoding.cpp render(): the EFB copy of a pass into its resolve target
 void efb_copy(const RenderPass& pass) {
     const auto& dst = pass.resolveTarget;
@@ -813,6 +929,7 @@ void encode_pass(FramePacket& frame, RenderPass& pass) {
                    0, tw, th);
     }
     if (pass.snapshotDepthDst) depth_snapshot(pass.copySourceDepthView, pass.msaaSamples, pass.snapshotDepthDst);
+    if (pass.captureDepthSnapshot) depth_peek_capture(pass);
     if (pass.snapshotNormalDst) {
         copy_image(find_texture(pass.copySourceNormalTexture.Get()), 0, 0, 0, find_texture(pass.snapshotNormalDst.Get()),
                    0, 0, 0, tw, th);
@@ -846,6 +963,27 @@ void gpu_mark(GpuWork work) {
 }
 
 EncodeStats& encode_stats() { return g_stats; }
+
+bool depth_peek_read(uint16_t x, uint16_t y, uint32_t& z) {
+    std::lock_guard<std::mutex> lock(g_peekMutex);
+    g_peekMinX = std::min(g_peekMinX, int(x));
+    g_peekMinY = std::min(g_peekMinY, int(y));
+    g_peekMaxX = std::max(g_peekMaxX, int(x));
+    g_peekMaxY = std::max(g_peekMaxY, int(y));
+    peek_refresh_locked();
+    if (g_peekLatest < 0) return false;
+    const PeekSlot& p = g_peek[g_peekLatest];
+    if (x >= p.map.logicalWidth || y >= p.map.logicalHeight) return false;
+    // depth_peek.cpp's shader: the depth image pixel under the logical pixel's centre
+    const int px = int(std::floor(p.map.offsetX + (float(x) + 0.5f) * p.map.scaleX));
+    const int py = int(std::floor(p.map.offsetY + (float(y) + 0.5f) * p.map.scaleY));
+    if (px < int(p.x) || py < int(p.y) || px >= int(p.x + p.w) || py >= int(p.y + p.h)) return false;
+    float depth;
+    memcpy(&depth, p.mem.cpu + (size_t(py - p.y) * p.w + size_t(px - p.x)) * 4, sizeof depth);
+    if (gx::UseReversedZ) depth = 1.f - depth;
+    z = std::min(uint32_t(std::clamp(depth, 0.f, 1.f) * 16777215.f + 0.5f), 0x00FFFFFFu);
+    return true;
+}
 
 bool fixed_draw(const char* module, const char* vsEntry, const char* fsEntry, const DkImageView* target, uint32_t w,
                 uint32_t h, bool clear, const FixedBind* binds, uint32_t bindCount) {

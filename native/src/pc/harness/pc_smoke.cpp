@@ -346,6 +346,7 @@ const Smoke kSmokes[] = {
     {"rope", kInGame},
     {"evcam", kInGame},
     {"wind-screen", kInGame},
+    {"sun-glare", kInGame},
     {"ky-procs", kInGame},
     {"chest", kInGame},
     {"item-sweep", kInGame},

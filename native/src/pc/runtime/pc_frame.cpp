@@ -1701,6 +1701,7 @@ void pc_frame_end(void) {
     ropeFrame(frames);
     evcamFrame(frames);
     windScreenFrame(frames);
+    sunGlareFrame(frames);
     kyProcsFrame(frames);
     chestFrame(frames);
     itemSweepFrame(frames);

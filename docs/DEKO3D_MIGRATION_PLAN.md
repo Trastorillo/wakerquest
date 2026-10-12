@@ -262,7 +262,7 @@ wgpu calls or only use the format enum. The backend-specific part:
 | EFB copies | never read back: `CopyTextureToTexture` or a conversion pass (`tex_copy_conv.cpp`: 16 format shaders incl. Z8/Z16 from depth, `blit` for scaling), `tex_palette_conv` for indexed copies, `GXCopyDisp` no-op | `dkCmdBufCopyImage` / `dkCmdBufBlitImage`; the conversion and palette passes as DKSH compiled offline from their fixed WGSL | `encoding.cpp:257-334`, `tex_copy_conv.cpp` (700), `tex_palette_conv.cpp` (262) |
 | texture uploads | `CopyBufferToTexture` from the frame's 24 MiB region (256-byte rows), oversized uploads get their own buffer; per mip level; HD packs: BC1-7 with mips, `dawn-switch-gl-compressed-upload.patch` for the per-level GLES path | staging ring + `dkCmdBufCopyBufferToImage` per level (HD `surfaces.cpp:229-345` ring, `upload_surface`); `image_tile_size_fix` for BC levels 6-8 block rows tall (deko3d 0.5.0 bug) | `encoding.cpp:396`, `recording.cpp:668-705` |
 | present | resample pass (bilinear/area, `gpu.cpp:673`), blit to the swapchain with the aspect fit (patch 0006), ImGui pass (`imgui_impl_wgpu`), `Submit`, `Present` | HD `backend.cpp present()`: acquire, draw the picture fitted 16:9 with a linear or nearest sampler, overlay, `dkQueuePresentImage`; ImGui from HD `overlay_dk.cpp` | `aurora.cpp:290-424`, `imgui.cpp` (298) |
-| readbacks | none in Aurora; game side `pc_capture.cpp` (picto box B36/B37, `CopyTextureToBuffer` + `MapAsync` + `WaitAny` on the worker) and `pc_shot.cpp` (`COS_SHOT`); `depth_peek.cpp` compute pass for `GXPeekZ` (the game never calls it); census occlusion/atomic counter (patch 0008, Mac debugging) | one Aurora function `gfx::read_texture(handle, rgba)` over `dkCmdBufCopyImageToBuffer` + fence (HD `guest_writeback`, `capture.cpp`), so no unit of ours touches backend types (bug B38's lesson); depth peek and census not ported | `native/src/pc/game_hooks/pc_capture.cpp:47-111`, `harness/pc_shot.cpp:226-266` |
+| readbacks | none in Aurora; game side `pc_capture.cpp` (picto box B36/B37, `CopyTextureToBuffer` + `MapAsync` + `WaitAny` on the worker) and `pc_shot.cpp` (`COS_SHOT`); `depth_peek.cpp` compute pass for `GXPeekZ` (the sun's glare and the lantern; issue #7); census occlusion/atomic counter (patch 0008, Mac debugging) | one Aurora function `gfx::read_texture(handle, rgba)` over `dkCmdBufCopyImageToBuffer` + fence (HD `guest_writeback`, `capture.cpp`), so no unit of ours touches backend types (bug B38's lesson); census not ported; depth peek: a copy-engine copy of the peeked area, read without waiting (2026-10-12, issue #7) | `native/src/pc/game_hooks/pc_capture.cpp:47-111`, `harness/pc_shot.cpp:226-266` |
 | GPU timers | `GL_TIME_ELAPSED_EXT` per pass (`dawn-switch-gl-gpu-timer*.patch`), PTIMER x1.6276 | `dkCmdBufReportCounter(DkCounter_Timestamp)` at pass boundaries (HD `GpuPasses`, `backend.cpp:791`), the factor measured at start (HD `GpuClock`, `backend.cpp:763-787`) | `cos_switch_stats.cpp` |
 | caches | `pipeline_cache.db` (configs, 2772-byte `gx::PipelineConfig` v13), `dawn_cache.db` (GL program binaries, sqlite), Mesa `mesa_shader_cache.bin` | `pipeline_cache.db` unchanged; the two binary caches replaced by two DKSH files (section 6) | `pipeline_cache.cpp` (1211), `gpu_cache.cpp` (439), `cos_shader_cache.cpp` |
 
@@ -369,7 +369,8 @@ blending (`enable dual_source_blending` in Aurora's WGSL, Tint emits `GL_EXT_ble
 with `index = 1`: if uam rejects it, Aurora's two-pipeline alpha prepass path `gx/pipeline.cpp:30-52`
 is the fallback at the cost of a second draw for those pipelines), `textureSampleBias`,
 `isampler2D` loads for palette indices, depth texture loads for Z copies, and the depth-peek
-compute shader (not ported: the game never calls `GXPeekZ`).
+compute shader (not ported; corrected 2026-10-12, issue #7: the game does peek Z, the sun's glare
+and the lantern; the deko3d encoder copies the peeked area with the copy engine instead).
 
 Pipeline count: 3055 GX configs (one clear pipeline besides); a config yields one or two pipelines
 (main plus alpha prepass) and the shader hash also covers `dstAlphaMode` and the normal
@@ -701,8 +702,9 @@ How it is put together, and where it departs from the deliverables above:
   between `Full` barriers (also before a frame's first transfer); EFB copies as `encoding.cpp`
   decides them (`dkCmdBufCopyImage`, or the conversion / blit draw with `tex_copy_conv_<fmt>` from
   the cache's named records), pass snapshots, depth snapshots and the palette conversions before
-  their pass. The list goes to the GPU every `COS_DK_SUBMIT_DRAWS` draws (256). The depth peek and
-  the draw census are not ported (plan 3.1); a runtime-registered draw type or encoder task is
+  their pass. The list goes to the GPU every `COS_DK_SUBMIT_DRAWS` draws (256). The draw census is
+  not ported (plan 3.1); the depth peek is (2026-10-12, issue #7: a copy-engine copy of the peeked
+  area after the frame's last pass, read a frame or two later without waiting, Aurora Switch patch 0016); a runtime-registered draw type or encoder task is
   logged once and skipped (the game registers none).
 - **Pipelines** (`dk_pipeline.cpp`) are built on Aurora's compile thread: the module's two DKSH from
   the caches by the module records, else WGSL (`gx::build_shader_source`) -> Tint -> post-pass ->
@@ -1000,8 +1002,9 @@ Each with a recommendation; "ask" marks a decision for the user.
    `lib/webgpu/gpu.hpp`, which also removes the compiler-layout hazard of bug B38 for good. The
    deko3d readback is a copy-engine copy into CPU-cached memory plus a fence wait: ~1 ms for the
    shutter area, done once per photo. `GXPeekARGB` itself stays white (the game only uses the B37
-   path). Depth peek (`GXPeekZ`) and the census are not ported: the game never peeks Z and the
-   census is a Mac tool.
+   path). The census is not ported (a Mac tool). Depth peek (`GXPeekZ`) was left out on the belief
+   that the game never peeks Z; it does (the sun's lens flare and glare, issue #7), and is ported since
+   2026-10-12 as a copy-engine copy of the peeked area (`dk_encode.cpp`, Aurora Switch patch 0016).
 9. **Shadows, DOF, mist, sky options.** All are passes and copies through the same mechanism as
    the main EFB; the offscreen variants (`COS_SHADOW_OFFSCREEN`, `COS_MIST_LOWRES`, `COS_SKY_LOWRES`)
    add render targets and partial-clear draws. The Z16 conversion reads the depth image: a view of
