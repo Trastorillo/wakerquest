@@ -6,6 +6,9 @@
 //   3. kDrawFrames later, a shot, and in the screen's map panel (kPanel*, fractions of the picture)
 //      the rooms counted: the visited room the player stands in (color_on, green, flashing towards
 //      0, 255, 180) and, with the map, the rooms not visited yet (color_off_map_possession, dark grey).
+// The shot compiles each pipeline before its first draw (COS_SYNC_PIPELINES on for this smoke,
+// pc_harness.cpp): with Aurora's default the panel's draws were skipped while their pipelines compiled,
+// and the first uncapped run of a build directory (cold pipeline cache) read an empty panel.
 // Exit 0 when the screen opened and both counts reach kMinPixels (per mille of the panel), else 1.
 // Before the fix the floor TLUT stayed all zero (alpha 0: the palette read in host order matched no
 // room colour) and the panel showed the grid alone.
