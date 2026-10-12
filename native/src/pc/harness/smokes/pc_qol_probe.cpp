@@ -3,10 +3,12 @@
 // compare. Not a test by itself (no exit code); any boot or input script.
 //   [cos] qol-probe f=<frame> <stage>:<room> pos=(x,y,z) spd=<speedF> ang=<shape_angle.y>
 //     roll=<checkFrontRoll> ev=<event id> "<event name>" msg=<talk message number>:<status> eye=(x,y,z)
-//     ship=<boat speedF, -1 without boat> [act=<name>:(x,y,z)]
+//     ship=<boat speedF, -1 without boat> do=<the A button's action, dActStts_*> [act=<name>:(x,y,z)]
 // COS_QOL_PROBE_ACTOR=<process name number> adds the first actor of that name (e.g. a block or the
 // grappling hook) to each line. COS_QOL_PROBE_MSG=<frame>:<message number> shows that message
-// (fopMsgM_messageSet, as a talk does) at that frame. COS_QOL_PROBE_FROM=<frame> / COS_QOL_PROBE_TO=<frame> limit the lines.
+// (fopMsgM_messageSet, as a talk does) at that frame. COS_QOL_PROBE_SPAWN=<frame>:<process name>:
+// <parameters>[:<distance>] creates that actor (angle z 0xFFFF) <distance> (150) in front of the
+// player at that frame, and is the probed actor unless COS_QOL_PROBE_ACTOR says otherwise. COS_QOL_PROBE_FROM=<frame> / COS_QOL_PROBE_TO=<frame> limit the lines.
 #include "pc_internal.h"
 
 #include "d/actor/d_a_player.h"
@@ -18,6 +20,7 @@
 #include "f_op/f_op_camera.h"
 #include "f_op/f_op_msg.h"
 #include "f_op/f_op_msg_mng.h"
+#include "f_pc/f_pc_layer.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_name.h"
 
@@ -36,6 +39,10 @@ unsigned int sTo = ~0u;
 unsigned int sMsgFrame = 0;
 unsigned int sMsgNo = 0;
 fpc_ProcID sMsgId = fpcM_ERROR_PROCESS_ID_e;
+unsigned int sSpawnFrame = 0;
+int sSpawnName = -1;
+u32 sSpawnParam = 0;
+float sSpawnDistance = 150.0f;
 
 void* isPlayScene(void* proc, void*) {
     return fpcM_GetName(proc) == fpcNm_PLAY_SCENE_e ? proc : nullptr;
@@ -64,6 +71,22 @@ void qolProbeFrame(unsigned int frames) {
         if (const char* v = getenv("COS_QOL_PROBE_TO"); v != nullptr) {
             sTo = (unsigned int)strtoul(v, nullptr, 0);
         }
+        if (const char* v = getenv("COS_QOL_PROBE_SPAWN"); v != nullptr) {
+            char* end = nullptr;
+            sSpawnFrame = (unsigned int)strtoul(v, &end, 0);
+            if (end != nullptr && *end == ':') {
+                sSpawnName = (int)strtol(end + 1, &end, 0);
+            }
+            if (end != nullptr && *end == ':') {
+                sSpawnParam = (u32)strtoul(end + 1, &end, 0);
+            }
+            if (end != nullptr && *end == ':') {
+                sSpawnDistance = strtof(end + 1, &end);
+            }
+            if (sActorName < 0) {
+                sActorName = sSpawnName;
+            }
+        }
         if (const char* v = getenv("COS_QOL_PROBE_MSG"); v != nullptr) {
             char* end = nullptr;
             sMsgFrame = (unsigned int)strtoul(v, &end, 0);
@@ -78,11 +101,25 @@ void qolProbeFrame(unsigned int frames) {
         return;
     }
 
+    // Made from the player's layer, as the player's own requests are (pc_actor_sweep.cpp).
+    layer_class* savedLayer = fpcLy_CurrentLayer();
+    fpcLy_SetCurrentLayer(static_cast<base_process_class*>(player)->mLyTg.mpLayer);
+    if (sSpawnName >= 0 && frames == sSpawnFrame) {
+        const s16 yaw = player->shape_angle.y;
+        cXyz pos = player->current.pos;
+        pos.x += sSpawnDistance * cM_ssin(yaw);
+        pos.z += sSpawnDistance * cM_scos(yaw);
+        csXyz angle(0, (s16)(yaw + 0x8000), (s16)0xFFFF);
+        fpc_ProcID id = fopAcM_create((s16)sSpawnName, sSpawnParam, &pos, fopAcM_GetRoomNo(player), &angle);
+        writef(STDERR_FILENO, "[cos] qol-probe: actor %d (0x%08X) spawned at frame %u at (%.1f,%.1f,%.1f) (process %d)\n",
+               sSpawnName, sSpawnParam, frames, pos.x, pos.y, pos.z, (int)id);
+    }
     if (sMsgNo != 0 && frames == sMsgFrame) {
         sMsgId = fopMsgM_messageSet(sMsgNo, &player->eyePos);
         writef(STDERR_FILENO, "[cos] qol-probe: message %u shown at frame %u (process %d)\n", sMsgNo, frames,
                (int)sMsgId);
     }
+    fpcLy_SetCurrentLayer(savedLayer);
 
     dEvt_control_c* ev = g_dComIfG_gameInfo.play.getEvent();
     const char* evName = "";
@@ -118,11 +155,11 @@ void qolProbeFrame(unsigned int frames) {
     }
     writef(STDERR_FILENO,
            "[cos] qol-probe f=%u %s:%d pos=(%.1f,%.1f,%.1f) spd=%.2f ang=%04x roll=%d ev=%d \"%s\" msg=%u:%u "
-           "eye=(%.1f,%.1f,%.1f) ship=%.2f%s\n",
+           "eye=(%.1f,%.1f,%.1f) ship=%.2f do=%u%s\n",
            frames, dComIfGp_getStartStageName(), (int)fopAcM_GetRoomNo(player), player->current.pos.x,
            player->current.pos.y, player->current.pos.z, player->speedF, (unsigned)(u16)player->shape_angle.y,
            player->checkFrontRoll() ? 1 : 0, ev->mEventId, evName, msgNo, msgStatus, eye.x, eye.y,
-           eye.z, ship != nullptr ? ship->speedF : -1.0f, act);
+           eye.z, ship != nullptr ? ship->speedF : -1.0f, (unsigned)dComIfGp_getDoStatus(), act);
 }
 
 } // namespace pc
