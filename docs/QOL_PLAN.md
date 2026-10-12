@@ -2,6 +2,9 @@
 
 Plan written 2026-10-12 from `main` ba8d0a3 for issue #4 ("Quality-of-life options (BetterWW
 features)"; the scope is the checklist in the maintainer's comment). Line numbers are from that commit.
+Items 13-16 (unrestricted boat, skip the intro, the original game's bug fixes, the wind-only sail) and
+the BetterWW preset rows were added the same day on `feature/qol` after the merge with the European
+build (`VERSION` 3): every hunk is the same in VERSION 2 and 3, or takes both branches (the hookshot).
 
 BetterWW and wwrando patch `main.dol` and the RELs at fixed addresses, so a patched disc cannot run
 here (SwitchWaker compiles the game from the decompilation and refuses a changed `main.dol`). Each
@@ -15,9 +18,14 @@ patch is redone in the game's C++ instead, behind a toggle of a new options-menu
   `asm/patches/custom_funcs.asm`.
 - wwrando, [github.com/LagoLunatic/wwrando](https://github.com/LagoLunatic/wwrando) at `9775811`
   (2026-07-20), the randomizer BetterWW is built on: the same tweaks, some newer.
-- Both MIT, copyright LagoLunatic (BetterWW's additions by WideBoner); credited in
-  `THIRD_PARTY.md`. No code, asset or text is copied: the asm patches were read to find what each
-  one changes, and the same change is written in the decompiled function it patches.
+- Both MIT, copyright 2018 LagoLunatic (BetterWW's additions by WideBoner). The code here is derived
+  from their patches: each asm patch was read to find what it changes, and the same change, with its
+  constants, is written in the decompiled function it patches. No asset of theirs is used. The MIT
+  notice and the people they credit are in `THIRD_PARTY.md`.
+
+**Credits:** BetterWW by WideBoner, built on LagoLunatic's wwrando (with brainfubar's fork, the Brisk
+Sail designed by MelonSpeedruns, releases by JarheadHME); wwrando's helpers are listed in
+`THIRD_PARTY.md`.
 
 Addresses were mapped to functions with the decomp's `config/GZLE01/symbols.txt` (main.dol) and, for
 REL offsets (file offsets in BetterWW), the REL's section table plus `config/GZLE01/rels/<rel>/
@@ -48,12 +56,17 @@ instruction, matched to the source line below.
 | 4 | Faster grappling hook | `COS_QOL_FAST_GRAPPLE` | `tweaks.increase_grapple_animation_speed` | `new_himo2_move` (`d_a_himo2.cpp`): throw speed 20 -> 40 (1094), first-person extension 40 -> 20 frames (982), third-person 20 -> 10 (1051), fall onto the target 10 -> 20 (1364), wrap speed constant 17 -> 25 (1367), wrap counter +1 -> +6 (1371) |
 | 5 | Faster crawling, climbing and NPC chat zoom | `COS_QOL_FAST_CLIMB` | `tweaks.increase_misc_animations` (climb start 0.8 -> 1.6, ladder/vine climb 1.2 -> 1.6, start 1.0 -> 1.6, end 0.9 -> 1.4, sidle 1.6 -> 2.0, talk camera 20 -> 10 frames) + the crawl part of `increase_player_movement_speeds` (crawl 3.0 -> 6.0) | `d_a_player_hang.inc:604` (`mWallCatch` +0x1C), `d_a_player_ladder.inc:19` (+0x24), `:93` and `d_a_player_climb.inc:213` (+0x4), `d_a_player_ladder.inc:175` (+0xC), `d_a_player_whide.inc:27` (`mWall` +0x14), `d_a_player_crawl.inc:34` (`mCrouch` +0x3C); `dCamera_c::talktoCamera` (`d_camera.cpp:4012`) |
 | 6 | Faster Ballad of Gales (no warp cutscene) | `COS_QOL_FAST_BALLAD` | `ballad.asm` (BetterWW): no wait for the boat to rise 5000 units before the warp, no warp music | `daShip_c::procTactWarp` (`d_a_ship.cpp`, the `m03F4 + 5000.0f` check), `daShip_c::procTactWarp_init` (`fopAcM_seStartCurrent(this, 0x186E, 0)`). The arrival (falling out of the cyclone) is kept, as in BetterWW (wwrando's `remove_ballad_of_gales_warp_in_cutscene` changes 49 rooms' spawn data and is commented out there) |
-| 7 | Remove the title / ending videos | `COS_QOL_SKIP_VIDEOS` | `tweaks.remove_title_and_ending_videos`: `title_loop.thp` and `end_st_epilogue.thp` replaced by a blank video | `dScnTitle_Execute` (`d_s_title.cpp:73`, `86`): the movie counts as finished at once, so the title scene goes back to the opening and the ending scene goes on as when the epilogue ends. BetterWW's same toggle also applies `skipintro.asm` (skips the opening legend), `misc_rando_features.asm` and `fix_vanilla_bugs.asm`: randomizer changes outside this item, **not** done |
+| 7 | ~~Remove the title / ending videos~~ (removed) | ~~`COS_QOL_SKIP_VIDEOS`~~ | `tweaks.remove_title_and_ending_videos` | Removed: the port plays no THP video yet, so the option changed nothing (see "Not implemented"). Its BetterWW toggle's other parts are items 14 and 15 |
 | 8 | Reveal the full sea chart | `COS_QOL_REVEAL_CHART` | `reveal_sea_chart.asm`: `dSv_player_map_c::init` sets bit 0 of all 49 sectors on a new game | See "Saves": the chart menus (`d_menu_fmap.cpp`, `d_menu_fmap2.cpp`) read every sector as charted while the option is on; the save is not written |
 | 9 | Tingle chests without the Tingle Tuner | `COS_QOL_TINGLE_CHESTS` | `tingle_chests_without_tuner.asm` (BetterWW: no GBA link checks, any bomb, Tingle Bomb or not; dungeon map and minimap show the chests with the compass) | `daAgbsw0_c::ExeSubT` (`d_a_agbsw0.cpp:1153-1157`); `dMenu_Dmap_c::treasureSet` (`d_menu_dmap.cpp`, the current floor's `tboxNo != 0xF && != 0x10`, the one check the patch removes), `dMap_c::drawPointGc` (`d_map.cpp:3319`) |
-| 10 | Swift Sail / Brisk Sail | `COS_QOL_SAIL` (`0`, `swift`, `brisk`) | `swift_sail.asm`, `brisk_sail.asm`, `tweaks.make_sail_behave_like_swift_sail` / `_brisk_sail`: wind always behind the boat (rounded to 45 degrees) while sailing; every 55.0 and 80.0 of `d_a_ship.rel` doubled (sailing and initial speed); A-stop deceleration 1.0/0.1 -> 2.0/0.2 (brisk 3.0/0.2); idle deceleration 1.0/0.05 -> 2.0/0.1 (brisk 4.0/0.2); R cruise 10 -> 30; `decrementShipSpeed` 0.1/0.015 -> 0.2/0.03; `firstDecrementShipSpeed` 5.0/1.0 -> 10.0/2.0 | `daShip_c` (`d_a_ship.cpp`): `execute` (4353, after `mDoAud_setShipSailState(1)`: `dKyw_tact_wind_set`), `setSelfMove`, `procWait`, `decrementShipSpeed`, `firstDecrementShipSpeed`, and the `55.0f` / `80.0f` literals (one pooled constant each in the REL: 945, 1148, 1657, 1661-1662, 2274, 2605, 2646, 2648, 3808, 4101, 4275). The new sail textures, icon and the item name "Swift Sail" are BetterWW assets: not done (the sail looks and is named as in the original) |
+| 10 | Swift Sail / Brisk Sail (and item 16) | `COS_QOL_SAIL` (`0`, `swift`, `brisk`, `wind`) | `swift_sail.asm`, `brisk_sail.asm`, `tweaks.make_sail_behave_like_swift_sail` / `_brisk_sail`: wind always behind the boat (rounded to 45 degrees) while sailing; every 55.0 and 80.0 of `d_a_ship.rel` doubled (sailing and initial speed); A-stop deceleration 1.0/0.1 -> 2.0/0.2 (brisk 3.0/0.2); idle deceleration 1.0/0.05 -> 2.0/0.1 (brisk 4.0/0.2); R cruise 10 -> 30; `decrementShipSpeed` 0.1/0.015 -> 0.2/0.03; `firstDecrementShipSpeed` 5.0/1.0 -> 10.0/2.0 | `daShip_c` (`d_a_ship.cpp`): `execute` (4353, after `mDoAud_setShipSailState(1)`: `dKyw_tact_wind_set`), `setSelfMove`, `procWait`, `decrementShipSpeed`, `firstDecrementShipSpeed`, and the `55.0f` / `80.0f` literals (one pooled constant each in the REL: 945, 1148, 1657, 1661-1662, 2274, 2605, 2646, 2648, 3808, 4101, 4275). The new sail textures, icon and the item name "Swift Sail" are BetterWW assets: not done (the sail looks and is named as in the original) |
 | 11 | Turn while swinging or grappling | `COS_QOL_SWING_TURN` | `swing_turn.asm` + `custom_funcs.asm` `turn_while_swinging` (BetterWW): in `procRopeSwing`, while swinging, the main stick's X turns the player by `64 * x` units a frame (none under 25 %) | `daPy_lk_c::procRopeSwing` (`d_a_player_rope.inc`, the last `else` before `f30_3 > 0.6f`); the grappling hook's swing is the same procedure |
 | 12 | No song replays | `COS_QOL_NO_SONG_REPLAY` | `song_no_replay.asm` (BetterWW): `procTactPlay` stops waiting for the "You conducted..." box to close and for the conducting animation to end | `daPy_lk_c::procTactPlay` (`d_a_player_tact.inc:605`, `666`) |
+| 13 | Unrestricted boat | `COS_QOL_FREE_BOAT` | `KORL_control.asm` (d_a_ship.rel 0x29EC, 0x2A08, 0x2A24: the three story checks of `checkOutRange` made unconditional; 0xB2D8: the boarding check) | `daShip_c::checkOutRange` (`d_a_ship.cpp`): paths 0-2 of the sea stage count as passed (`pc_qol(...) && pathIndex <= 2`), path 3 and later (the edge) stay. `daShip_c::execute`: the boat offers "get in" (`fopAc_Attn_ACTION_SHIP_e`) whatever 0x0902 / 0x1980 / 0x0A80 and the wind say |
+| 14 | Skip the intro | `COS_QOL_SKIP_INTRO` | `skipintro.asm` (main.dol 0x80232C78, 0x80232C88: `dScnOpen_c::execute` no longer runs the legend and changes to the game scene at once); part of BetterWW's "remove intro video" toggle | `dScnName_c::changeGameScene` (`d_s_name.cpp`): a new file requests the PLAY scene, as a loaded one does, instead of the OPEN scene. The legend scene sets no event bit and writes nothing (its proc only draws and starts its music), so nothing is to be set in its place. BetterWW's patch also cut the title's attract legend (OPEN2, the same scene class); here that one stays |
+| 15 | Fixes of the original game's bugs | `COS_QOL_FIX_BUGS` (two fixes always on) | `fix_vanilla_bugs.asm` (part of BetterWW's "remove intro video" toggle) and the vanilla parts of `necessary_fixes.asm` / `misc_rando_features.asm` | Fix by fix in "Bugs of the original game" below |
+| 16 | Normal sail, wind at your back | `COS_QOL_SAIL=wind` | `normal_sail_wind.asm` (BetterWW's `normal_sail2`: the swift/brisk sails' `set_wind_dir_to_ship_dir` at d_a_ship.rel 0xB9FC, without their speed changes). BetterWW's `randomizer.py` calls `tweaks.normal_sail_wind`, which its `tweaks.py` at `4501481` does not define; the asm patch is taken as the intent | Item 10's `dKyw_tact_wind_set` in `daShip_c::execute` for every non-zero value; the speed changes now ask `pc_qol_fast_sail()` (swift or brisk only) |
+| - | BetterWW preset | (action rows) | BetterWW's UI defaults (`wwr_ui/randomizer_window.ui`): Swift Sail, instant text, faster roll / grapple / blocks / crawling, Tingle chests, no song replays, swing turn, fast Ballad, remove intro video (here items 14 and 15) on; invert camera, full sea chart, unrestricted boat, random enemy colours off | `pc_menu.cpp`: "Experiencia BetterWW" sets every QoL row to those values, "Valores originales" sets every row to 0, both through `pc_settings_set_mode` (saved, each row still editable; a row locked by the environment is kept). Invert camera stays with the menu's existing camera rows |
 
 ## Saves
 
@@ -67,6 +80,10 @@ instruction, matched to the source line below.
 - Item 10: the wind direction follows the boat through `dKyw_tact_wind_set`, the function the Wind's
   Requiem uses: like the song, it stores the direction in the save's wind fields (`dComIfGs_setWindX/Y`),
   which every save keeps anyway. Turning the option off leaves the last wind until the song changes it.
+- Item 14 writes nothing either: the skipped legend scene never wrote the save (checked: the save
+  data in memory on arriving at Outset is the same with and without it, see the results).
+- Item 15's fixes change what the game itself saves only in the bugged cases (a Miniblin's switch set
+  when a Light Arrow kills it, as any other death sets it).
 - No other item touches save data.
 
 ## Notes and choices
@@ -75,7 +92,6 @@ instruction, matched to the source line below.
   input, `dMsg_outnowProc`, the instant-finish check with `mDrawType == 0`) are unchanged, as there.
 - Item 5's crawl constant belongs to wwrando's "movement speeds" tweak; the checklist (and BetterWW's
   label) names crawling with climbing, so it is under item 5.
-- Item 7: the THP actor is still created (as with the blank video); its first frame may be drawn.
 - Item 9: wwrando's newer version also lets any explosion hit (not only a bomb actor); BetterWW's
   (bombs, Tingle Bombs too) is followed. Only the current floor's check in `treasureSet` is removed,
   as in both patches; the floors above and below still hide Tingle chests.
@@ -85,6 +101,54 @@ instruction, matched to the source line below.
   once on first use (a live option cannot change it) and paired with `local_right(-80.0f, ...)`, a
   different constant the patch leaves at -80: doubling only one side there is a side effect of the
   patch, not a sail behaviour.
+
+## Unrestricted boat (item 13): what it can break
+
+BetterWW (and wwrando, where it is always on) accept these; they are the player's choice here too, and
+the row's help says that story places can be reached early.
+
+- The three story paths keep the player in the sea's middle row until Dragon Roost's arrival (0x0902),
+  out of the east until Farore's Pearl, and out of the Forsaken Fortress corner until the Master
+  Sword. With the option the whole sea is open from the first boarding: islands can be reached before
+  the story leads there, and their arrival events (`d_a_tag_island`) and the boat's story talks
+  (`checkForceMessage`: the sail talk 0x5E0, the wind talk 0x5ED, the pearl talks) play out of their
+  usual order, but each still plays when its own bits say so.
+- Before the Wind's Requiem the wind cannot be turned: sailing upwind is slow (no softlock, the boat
+  can always be paddled with the sail down).
+- Places gated by items or story bits stay gated (e.g. the Tower of the Gods needs the three pearls,
+  Hyrule the tower); only the boat's own limits go. The edge of the sea (path 3) still turns the boat
+  back.
+- Boarding: between Dragon Roost's arrival and the first boarding after the boat's wind talk, the
+  original only lets the player in while the wind blows north (the talk sends them to get the song).
+  With the option the boat can be boarded at once: leaving Dragon Roost before the Wind's Requiem is
+  possible (the song can still be learnt later on the island).
+- Nothing is written to the save by the option itself; turning it off restores the limits from the
+  boat's next check (a boat already past a story limit is turned back toward it).
+
+## Bugs of the original game (item 15)
+
+Every fix in BetterWW's `fix_vanilla_bugs.asm`, and what `necessary_fixes.asm` and
+`misc_rando_features.asm` apply that is not randomizer-only. None of them was already fixed by the
+port (`docs/GAME_DIVERGENCE.md`, bugs B1-B39: those are host bugs, not the original's). The rule: a fix
+is **always on** only if the bug crashes the port and the fix changes nothing in normal play; every
+other one changes what the original does in some case, so it is behind the toggle (off by default).
+
+| Fix (BetterWW) | Decomp | Decision |
+|---|---|---|
+| Hookshot sight on the shards of Helmaroc King's mask (`hookshot_sight_failsafe_check`) | `daHookshot_rockLineCallback` (`d_a_hookshot.cpp`): `collided_actor` can be NULL; the GameCube read low memory (BetterWW: a crash), the host faults | **Always on**: no actor, no hook target. Both the USA and the PAL condition |
+| Orca with no sword equipped | `daNpc_Ji1_c::battleAction`: the counter's sword icon comes from `getSelectEquip(0)` = 0xFF, an item with no texture; BetterWW: a crash | **Always on**: no counter without a sword (as BetterWW). Not reachable in normal play (the sword cannot be unequipped), but the debug travel and the sailing preset can bring a swordless file to Orca |
+| Grandmother's soup without an empty bottle (message 2041) | `daNpc_Ba1_c::next_msgStatus`: 0x7F9 is not in the game's text; the port shows a stand-in (message 1) where the GameCube crashed (checked on the Mac: message 2041 shows message 1, 2037 shows) | Toggle: 0x7F5 (2037) either way |
+| Beedle buys Blue Chu Jelly | `daNpc_Bs1_c::getMsg`: selling it can leave too little for Doctor Bandam's blue potion | Toggle: the "I don't buy that" answer (0xF75) |
+| Deluxe Picto Box on a button | `item_func_camera2` (`d_item.cpp`): an X/Y/Z button keeps the Picto Box (0x23) until the item menu sets it again | Toggle: such a button now holds 0x26 |
+| Morths falling out of the map | `naraku_check` (`d_a_ks.cpp`): only void ground (code 4) deletes them; with no ground under them they fall for ever (a room waiting for its enemies stays shut) | Toggle: no ground counts as void ground |
+| Stalfos lower body after a Light Arrow | `daSt_Execute` (`d_a_st.cpp`): the lower body only dies with an upper body that died normally (`mCountdownToDeath`), so it becomes unkillable | Toggle: it starts its own Light Arrow death. (`necessary_fixes.asm`'s other answer, Stalfos immune to Light Arrows, is superseded by this one) |
+| Miniblin switch after a Light Arrow | `daPt_Create`: `mEnemyIce.mDeathSwitch` is left 0, so a non-respawning Miniblin killed by a Light Arrow does not set its switch | Toggle: its switch is given to the enemy-ice death (as `d_a_tn`, `d_a_mt` do) |
+| Jalhalla's Poes and Light Arrows | `Big_pow_down_check` (`d_a_pw.cpp`): a Poe dying to a Light Arrow keeps health > 0 and never counts for Jalhalla | Toggle: such a Poe counts; one that rejoins Jalhalla stops dying |
+| Respawning Magtails and Light Arrows | `damage_check` (`d_a_mt.cpp`): a Light Arrow in the head does not set `m1CBC`, so the Magtail does not come back | Toggle |
+| Phantom Ganon's trigger in the Forsaken Fortress | `start` (`d_a_fganon.cpp`): an XZ circle with no height limit | Toggle: not while the player is 1000 or more above him. Mostly a randomizer case (entrances), harmless in normal play |
+| Island LoD models' heap estimate, JKRHeap warnings (`d_a_lod_bg`) | A GameCube heap-fragmentation measure and debug-console noise | Not done: the port's heaps are host-sized (`docs/GAME_DIVERGENCE.md`), nothing to fix |
+| `necessary_fixes.asm`, active parts | the new-game save init (`init_save_with_tweaks`: with BetterWW's settings it sets nothing), the void out zone before the Forbidden Woods kept after Farore's Pearl, the custom models' arc pointers, Stalfos immune to Light Arrows, the rainbow 500-rupee, custom text commands, cannons dying to one boomerang hit | Not done: randomizer design or cosmetic changes, not bugs of the original (the rainbow rupee and the one-hit cannons are listed under "Not implemented") |
+| `misc_rando_features.asm`, active parts | warp message colours for a custom message, a ChuChu float moved for recolouring, the missing-particle warning text | Not done: only serve randomizer features |
 
 ## Verification (Mac)
 
@@ -104,17 +168,49 @@ show a message, grab a rope and order the Ballad of Gales warp) or shots; the re
 | 4 | grappling hook thrown into the air (tool sweep case) | ~19 units/frame, turns back at 486 | ~38, at 466 |
 | 5 | crawl (R + stick); talk camera to the grandmother | ~5 units/frame; settles in 20 frames | ~10; 10 frames |
 | 6 | Ballad of Gales warp ordered at frame 600 (sailing preset) | new PLAY scene at 885 | at 631 |
-| 7 | title attract video | ends after 61 frames (no THP playback in the port yet) | the same |
+| 7 | (removed) title attract video | ends after 61 frames (no THP playback in the port yet) | the same |
 | 8 | sea chart (D-pad up, sailing preset) | 3 sectors drawn | all 49 |
 | 9 | a spawned Tingle trigger (type T, switch 0x20) and a normal bomb | switch stays off | set 2 frames after the bomb |
 | 10 | sailing smoke; A held at full speed | 54.84 units/frame; -1/frame | 109.71 (swift, brisk); -2 (swift), -3 (brisk) |
 | 11 | rope swing (Asoko), stick forward-right | angle stays 0x0000 | turns ~45 units/frame |
 | 12 | Wind's Requiem played (C stick, 30 frames a beat) | message 1453 up 814-960, wind window at 962 | message closed at 815, window at 816 |
+| 13 | sailing smoke with 0x0902 cleared (before Dragon Roost), sailing north | KoRL's talk at the path 0 limit, stopped after 22913 units: FAIL | into room 18, 96721 units: PASS |
+| 13 | sailing smoke with 0x1980 and 0x0A80 cleared: off the boat, A next to it | no "get in" (attention flags 0): FAIL | flags 0x80, back on in 132 frames: PASS |
+| 13 | `checkOutRange` at fixed points (probe, 0x0902 cleared, no Master Sword): Windfall's corner / middle of the sea / fortress corner / past the north edge / past the west edge | 0 / 1 / 1 / 1 / 1 | 0 / 0 / 0 / 1 / 1 |
+| 14 | M14's new-game flow from a clean card (uncapped): the first frame with the player on Outset | 43623 (after the legend) | 1474 |
+| 14 | the save data in memory 40 frames after that (1912 bytes) | - | the same but one byte: `mRandomSalvagePoint`, a `cM_rndF` roll at file creation (2 / 1) |
+| 14 | M14 with the input retimed (`new-game-skip-intro.txt`) | - | Outset's intro event and its STB demo play, the player is free at frame 4449, M14 passes |
+| 15 | Picto Box on X (`COS_BOOT_ITEMS=23`), Deluxe Picto Box given at frame 400 | X holds 0x23 | 0x26 |
+| 15 | a Miniblin (type 1, switch 5) spawned on Outset, a Light Arrow hit (its enemy-ice timer started, as its damage check does) | switch 5 stays off | set as it vanishes (frame ~600) |
+| 15 | a Morth spawned 4000 in front of the player in LinkRM (no ground under it) | still falling at y -9508 after 500 frames | deleted within 60 frames |
+| 15 | message 2041 / 2037 shown | 2041 is not in the text: the port shows message 1 | (the toggle asks for 2037, which shows) |
+| 16 | sailing smoke heading west with the wind set north (crosswind) | 41.2 units/frame | `wind` 54.8 (the wind turned behind, normal speed); `swift` 109.6 |
+| - | `menu-qol-preset.txt`: "Experiencia BetterWW", then Voltereta off by hand | - | all 15 values as BetterWW's, saved; the hand change kept |
+| - | `menu-qol-original.txt`: BetterWW, then "Valores originales" | - | every row 0, saved |
+
+European build (`-DCOS_VERSION=3`, `build/native-mac-eur`, GZLP01): the item 13 sailing smoke with
+0x0902 cleared fails off and passes on, M14 with item 14 passes (the player free at frame 4449),
+`menu-qol-preset.txt` passes, and the Deluxe Picto Box check gives 0x26 on X with item 15 on.
+
+Not run on the Mac (the cases need a whole game's progress): Beedle's Blue Chu Jelly, the Stalfos,
+Jalhalla's and Magtails' Light Arrow fixes, Phantom Ganon's trigger, the hookshot on the mask shards
+and Orca without a sword; each is a one-line change to the condition BetterWW patches, reviewed
+against its assembly.
 
 Live: `native/check/input/menu-qol.txt` (a regression target) turns Voltereta más rápida on from the
 menu; the next roll, from speedF 3.45, starts at 21.22.
 
-Regression: `native/tools/regress.sh` passes with every option off (the default). With every option on
+Regression targets added with items 13-16: the two sailing smokes of item 13 with the option on, M14
+with item 14 on, and the two preset scripts.
+
+Checkpoint after items 13-16 and the presets (`feature/qol`, 2026-10-12): `native/tools/regress.sh`
+with every option off passes, 88 checks (the menu smokes options-menu, menu-qol, menu-qol-preset,
+menu-qol-original, menu-sailing and menu-travel-save among them); the all-on run below was for items
+1-12 and was not repeated (item 14 on changes the new-game flow M11/M14 check by design). The Switch NRO
+(`scripts/switch/build_native.sh --runtime-assets`) builds. The probe's
+call of `daShip_c::checkOutRange` (a REL symbol) is listed in `native/check/expected_unresolved_phase2.txt`.
+
+Regression for items 1-12: `native/tools/regress.sh` passes with every option off (the default). With every option on
 (`COS_QOL_*` in the environment, `COS_QOL_SAIL=swift`) all targets pass but two that the instant text
 breaks by design: `msg-sweep` compares `getMesgEntry` with the file (the draw type is now 1), and
 `telescope-demo`'s input script is timed to the original text speed. Both pass with the instant text
@@ -124,7 +220,41 @@ off and the other options on.
 
 - Every option once on the Switch (the menu tab's layout at 720p, a live switch of each row).
 - Not reached by a Mac run: ladders, vines, ledges and sidling (item 5); the grappling hook wrapping
-  around a target (item 4); the ending's epilogue (item 7, and the title video once THP plays);
+  around a target (item 4); a whole trip with the unrestricted boat (item 13); the bug fixes of item
+  15 that need a game's progress;
   Tingle chests on the dungeon map and minimap with the compass (item 9); a Tingle statue chest in a
   real dungeon with a normal bomb (item 9); Forsaken Fortress's big door with item 3 on (it keeps the
   original door push, so no softlock is expected); the Brisk Sail's idle stop (item 10).
+
+## Not implemented
+
+What remains of BetterWW (`4501481`) after this branch, for a follow-up issue:
+
+- **Remove the title and ending videos.** The option existed (`COS_QOL_SKIP_VIDEOS`) and was removed:
+  the port plays no THP video yet. `daMP` (`d_a_movie_player.cpp`) is created for `title_loop.thp` (the
+  title's attract video, after a long idle on the title) and `end_st_epilogue.thp` (the ending), but it
+  carries its own copy of the SDK's THP decoder, whose Huffman and IDCT paths are PowerPC assembly
+  (the host build keeps only `TODO(native phase 4)` stand-ins around them), so it appears nothing is
+  decoded; the movie reports its frames as done after about 2 s of black
+  and the scene goes on (`docs/NATIVE_PORT_PHASE4_6.md` step 4.18, "d_a_movie_player going through
+  Aurora's THP", deferred). Aurora has a THP decoder (`lib/dolphin/thp/THPDec.cpp`, `THPAudio.cpp`,
+  linked as `aurora::thp`), so playback looks feasible. Once videos play, the option comes back (BetterWW
+  and wwrando replace both files with a blank video; here `dScnTitle_Execute` would take the movie as
+  finished, as the removed hunk did).
+- **Random enemy colours** (`randomize_enemy_palettes`): recolours enemy textures and particles in the
+  disc's files; needs texture and particle colour changes at load time.
+- **Custom player models** (`custom_player_model`, the casual-clothes choice, custom items and voice):
+  replaces Link's model archives with community models; needs loading replacement archives from the SD.
+- **Swift Sail looks**: its sail textures, item icon and the item name "Swift Sail" (BetterWW assets and
+  text). Here the sail keeps its look and name; only the behaviour is done (item 10). Also BetterWW's
+  "for HD texture pack" sail variants.
+- **The rainbow 500-rupee** (`necessary_fixes.asm`, `check_animate_rainbow_rupee_color`) and **cannons
+  dying to one boomerang hit** (`obj_canon` 0x7D0): small changes BetterWW applies always; could be rows.
+- **The optional Gecko codes** BetterWW ships (by Ralf and wiiztec): a second set of equipped items
+  (D-pad down to switch), Hero Mode (double damage, no heart drops), items don't disappear, unrestricted
+  camera, no heart beeping, blur off.
+- **Title screen logo and memory card banner** (`titlelogo`, `memorylogo`): BetterWW's own branding,
+  not wanted here.
+- **Invert camera** is not part of the preset: the menu's existing camera rows ("Invertir cámara
+  horizontal / vertical") cover it.
+
