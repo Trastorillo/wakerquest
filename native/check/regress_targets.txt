@@ -188,3 +188,7 @@ event-sweep 0 --stage Ekaze:0:0 --env COS_EVENT_SWEEP=60 --env COS_BOOT_EVENTS=2
 # as a model's BRK (dropped by B35, so the model had no BRK) and later a real BRK for it, which
 # actPerformance initialised through the missing BRK (SIGSEGV). The demo plays to its stage change
 event-sweep 0 --stage Pjavdou:0:1:8 --preset sailing --env COS_EVENT_SWEEP=64 --env COS_EVENT_SWEEP_SECONDS=60
+# COS_SMOKE=dmap (issue #6): the dungeon map screen (Up in Dragon Roost Cavern, map and compass given) draws
+# the rooms: the floor TLUT's palette lookup read the big-endian dmap%d.bti palette in host order, so the
+# TLUT stayed transparent and the map showed its grid alone
+dmap 0 --stage M_NewD2:0:0

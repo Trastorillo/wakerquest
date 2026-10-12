@@ -13,7 +13,9 @@ const int AGB_POINT_TYPE_NUM = 21;
 const int DSP_ENABLE_BOTH_SIZE = 3;
 
 struct dmap_dmap_tlut_s {
-    u16 field_0x0[16];
+    // The dungeon map's floor TLUT, written by dMap_Dmap_c::setTlut and read by the GX as
+    // big-endian RGB5A3 halfwords: BE(u16) on TARGET_PC, u16 on GameCube (helpers/endian.h).
+    BE(u16) field_0x0[16];
 };
 
 struct map_dt_c {

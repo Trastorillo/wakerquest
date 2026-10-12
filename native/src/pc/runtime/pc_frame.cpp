@@ -1703,6 +1703,7 @@ void pc_frame_end(void) {
     windScreenFrame(frames);
     kyProcsFrame(frames);
     chestFrame(frames);
+    dmapFrame(frames);
     itemSweepFrame(frames);
     saveSweepFrame(frames);
     eventSweepFrame(frames);

@@ -4556,7 +4556,8 @@ void dMap_Dmap_c::setTlut(dmap_dmap_tlut_s* param_1, u8 param_2, u8 param_3, u8 
             if (*r29 == -1) {
                 continue;
             }
-            u16* r30 = NULL;
+            // The TLUT entry the GX reads, big-endian on TARGET_PC (dmap_dmap_tlut_s, issue #6).
+            BE(u16)* r30 = NULL;
             int tmp = field_0x2bb[param_2 - Floor_Base][i + 1];
             if (tmp >= 0) {
                 r30 = &param_1->field_0x0[tmp];
@@ -4632,7 +4633,14 @@ void dMap_Dmap_c::setFloorTextureOne(u8 param_1) {
         field_0x2bb[r29][i] = -1;
     }
     for (i = 0; i < 16; i++) {
+#if TARGET_PC
+        // The dmap%d.bti palette is big-endian RGB5A3 in the archive (issue #6): read in host order
+        // no colour but 0x0000 and 0xFFFF matched l_indexColor, setTlut found no room entry to
+        // write and the floor TLUT stayed all zero (alpha 0), so every room of the map was invisible.
+        u16 color = ((BE(u16)*)((u8*)imageP + imageP->paletteOffset))[i];
+#else
         u16 color = ((u16*)((u8*)imageP + imageP->paletteOffset))[i];
+#endif
         u32 j;
         for (j = 0; j < 16; j++) {
             if (color == l_indexColor[j]) {
