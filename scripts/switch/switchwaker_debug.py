@@ -7,9 +7,11 @@ log says '[switch] debug server listening on <ip>:6543'. The console's address: 
   switchwaker_debug.py info                      build, frame, stage, memory, address
   switchwaker_debug.py log [--all] [--save F] [--grep RE] [--seconds N]
                                                  the log as it is written (Ctrl-C ends it)
-  switchwaker_debug.py deploy [NRO] [--no-reload] [--nro-only]
-                                                 upload the NRO (default build/switch-native/switchwaker.nro)
-                                                 and the caches built next to it,
+  switchwaker_debug.py deploy [NRO] [--eur] [--no-reload] [--nro-only]
+                                                 upload the NRO (default build/switch-native/switchwaker.nro;
+                                                 --eur: build/switch-native-eur/switchwaker-eur.nro to
+                                                 /switch/switchwaker-eur/, never restarted) and the caches
+                                                 built next to it (to sdmc:/switch/switchwaker/),
                                                  check it, restart
   switchwaker_debug.py shot [OUT.png] [--game]   screenshot of the next frame
   switchwaker_debug.py press A [B ...] [ms]      also hold, release, stick L|R x y [ms]
@@ -45,8 +47,13 @@ ENV_PORT = "SWITCHWAKER_DEBUG_PORT"
 DEFAULT_NRO = REPO / "build" / "switch-native" / "switchwaker.nro"
 BUILD_HINT = "scripts/switch/build_native.sh"
 REMOTE_NRO = "switchwaker.nro"          # relative to the server's root, sdmc:/switch/switchwaker
+# The European NRO (deploy --eur), in its own folder (the Homebrew Menu lists one NRO per folder); it reads
+# its caches, disc and native/ from the server's root as the USA one does. None where there is no such build.
+DEFAULT_NRO_EUR = REPO / "build" / "switch-native-eur" / "switchwaker-eur.nro"
+REMOTE_NRO_EUR = "/switch/switchwaker-eur/switchwaker-eur.nro"
+EUR_ENTRY = "SwitchWaker EUR"
 REMOTE_LOGS = "native/logs"
-SESSION_LOG = r"switchwaker(?:_gl|_dk)?_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.log"
+SESSION_LOG = r"switchwaker(?:_gl|_dk|-eur)?_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.log"
 
 
 class ServerError(Exception):
@@ -247,17 +254,31 @@ def wait_server(args, seconds):
 
 
 def cmd_deploy(args):
-    nro = Path(args.nro or DEFAULT_NRO)
+    eur = args.eur or (REMOTE_NRO_EUR is not None and args.nro is not None and args.nro.endswith("-eur.nro"))
+    if eur and REMOTE_NRO_EUR is None:
+        sys.exit("--eur: this port has no European build")
+    nro = Path(args.nro or (DEFAULT_NRO_EUR if eur else DEFAULT_NRO))
+    remote = args.remote or (REMOTE_NRO_EUR if eur else REMOTE_NRO)
     if not nro.exists():
-        sys.exit(f"{nro} does not exist ({BUILD_HINT} builds it)")
+        sys.exit(f"{nro} does not exist ({BUILD_HINT}{' --eur' if eur else ''} builds it)")
     c = connect(args)
     try:
-        put_file(c, nro, args.remote)
-        # the bundled caches built next to the NRO (deko3d's DKSH file changes with every build)
-        remote_dir = args.remote.rpartition("/")[0]
+        folder = remote.rpartition("/")[0]
+        if folder:
+            c.command("mkdir", folder, timeout=10.0)
+        put_file(c, nro, remote)
+        # the bundled caches built next to the NRO (deko3d's DKSH file changes with every build): in the
+        # server's root, where every NRO reads them (switch/native/CMakeLists.txt, COS_SWITCH_NRO_DIR),
+        # wherever the NRO itself goes
         for extra in ([] if args.nro_only else ["initial_pipeline_cache.db", "initial_dksh_cache.bin"]):
             if (nro.parent / extra).exists():
-                put_file(c, nro.parent / extra, f"{remote_dir}/{extra}" if remote_dir else extra)
+                put_file(c, nro.parent / extra, extra)
+        if eur and not args.no_reload:
+            # reload restarts what the HOME-menu forwarder starts, the USA NRO; the European one runs from
+            # the Homebrew Menu, where nothing can restart it
+            print(f"not restarted: {EUR_ENTRY} runs from the Homebrew Menu (the forwarder starts the USA NRO), "
+                  f"where reload cannot restart it. Quit the game and start {EUR_ENTRY} again.")
+            return
         if args.no_reload:
             return
         print(c.command("reload", timeout=10.0).decode())
@@ -361,7 +382,10 @@ def main():
         sp.add_argument("remote", nargs="?" if name == "ls" else None, default="")
     sp = sub.add_parser("deploy")
     sp.add_argument("nro", nargs="?")
-    sp.add_argument("--remote", default=REMOTE_NRO, help=f"where on the SD card (default {REMOTE_NRO})")
+    sp.add_argument("--remote", help=f"where on the SD card (default {REMOTE_NRO}; --eur: {REMOTE_NRO_EUR})")
+    sp.add_argument("--eur", action="store_true",
+                    help=f"the European NRO ({DEFAULT_NRO_EUR.relative_to(REPO)}), to {REMOTE_NRO_EUR}; "
+                         "implies --no-reload (it runs from the Homebrew Menu); also when NRO ends in -eur.nro")
     sp.add_argument("--no-reload", action="store_true")
     sp.add_argument("--nro-only", action="store_true",
                     help="only the NRO, not the initial_pipeline_cache.db / initial_dksh_cache.bin next to it")

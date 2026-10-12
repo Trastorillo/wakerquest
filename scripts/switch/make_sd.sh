@@ -12,9 +12,11 @@
 #   2. builds build/switch-native/switchwaker.nro (scripts/docker/build.sh switch: asset headers from
 #      the disc, RecompCore, Aurora, Dawn, the deko3d renderer and its shader cache; the first build
 #      takes an hour or more, later ones minutes);
-#   3. writes OUT/switch/switchwaker/ (default OUT: build/sd) with switchwaker.nro (switchwaker-eur.nro),
-#      the bundled initial_pipeline_cache.db and initial_dksh_cache.bin, and a copy of the disc as
-#      GZLE01.iso (GZLP01.iso)
+#   3. writes OUT/switch/switchwaker/ (default OUT: build/sd) with switchwaker.nro, the bundled
+#      initial_pipeline_cache.db and initial_dksh_cache.bin, and a copy of the disc as GZLE01.iso; for the
+#      European disc the NRO goes in its own folder, OUT/switch/switchwaker-eur/switchwaker-eur.nro (the
+#      Homebrew Menu lists one NRO per folder), and the rest, with the disc as GZLP01.iso, in
+#      OUT/switch/switchwaker/ as for USA
 #      (--no-disc leaves the disc out, for an update when it is already on the card). Copy OUT's
 #      contents to the root of the SD card.
 #
@@ -33,7 +35,7 @@ while [[ $# -gt 0 ]]; do
         --gl) echo "make_sd: --gl is gone: the OpenGL ES NRO was removed (deko3d is the only renderer)" >&2; exit 2 ;;
         --deko3d) echo "make_sd: --deko3d is the only renderer now (switchwaker.nro)" >&2; shift ;;
         --jobs|--engine) build_args+=("$1" "$2"); shift 2 ;;
-        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
         *) echo "make_sd: unknown option $1 (--help)" >&2; exit 2 ;;
     esac
 done
@@ -54,21 +56,24 @@ revision 0, as an uncompressed .iso (not RVZ, GCZ, CISO or NKit; Dolphin can con
 Convert File)."
 fi
 game_id=$(head -c 6 "$disc")
-nro=switchwaker.nro built=$root/build/switch-native
+nro=switchwaker.nro built=$root/build/switch-native nro_folder=switchwaker entry=SwitchWaker
 if [[ $game_id == GZLP01 ]]; then
-    nro=switchwaker-eur.nro built=$root/build/switch-native-eur
+    nro=switchwaker-eur.nro built=$root/build/switch-native-eur nro_folder=switchwaker-eur entry="SwitchWaker EUR"
 fi
 
 step 2 "building the Switch homebrew (an hour or more the first time, minutes later)"
 "$root/scripts/docker/build.sh" switch --disc "$disc" ${build_args[@]+"${build_args[@]}"} || fail "the build failed (see above)"
 
 step 3 "the SD card folder"
+# the NRO in its own folder (switchwaker/ for USA, switchwaker-eur/ for Europe); the caches, the disc and
+# native/ (saves, settings, logs) in switchwaker/ for both, where the NROs look for them
 dst=$out/switch/switchwaker
-mkdir -p "$dst"
+mkdir -p "$dst" "$out/switch/$nro_folder"
 for f in "$nro" initial_pipeline_cache.db initial_dksh_cache.bin; do
     [[ -f $built/$f ]] || fail "the build made no $built/$f"
-    cp "$built/$f" "$dst/$f"
 done
+cp "$built/$nro" "$out/switch/$nro_folder/$nro"
+for f in initial_pipeline_cache.db initial_dksh_cache.bin; do cp "$built/$f" "$dst/$f"; done
 if [[ $copy_disc == 1 ]]; then
     echo "  copying the disc ($(du -h "$disc" | cut -f1))"
     cp "$disc" "$dst/$game_id.iso"
@@ -78,10 +83,10 @@ cat <<EOF
 Done: $out
 
 Copy the contents of that folder to the root of the SD card (switch/switchwaker/ ends up at
-sdmc:/switch/switchwaker/). Saves and settings already on the card are kept. Then hold R while
-starting any installed game to open the Homebrew Menu in title mode and pick SwitchWaker (SwitchWaker
-EUR for the European disc). The
-shaders come prebuilt (initial_dksh_cache.bin): there is no shader preparation at the first start.
+sdmc:/switch/switchwaker/, the program at sdmc:/switch/$nro_folder/$nro). Saves and settings already on
+the card are kept. Then hold R while starting any installed game to open the Homebrew Menu in title
+mode and pick $entry. The shaders come prebuilt (initial_dksh_cache.bin): there is no shader
+preparation at the first start.
 
 These files contain the game: they are for your own console only; do not share them.
 EOF
