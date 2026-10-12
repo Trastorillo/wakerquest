@@ -131,6 +131,10 @@ options-menu 0 --stage sea:44:206 --input native/check/input/menu-sailing.txt
 options-menu 0 --stage sea:44:206 --input native/check/input/menu-fps60.txt
 # Calidad de vida (docs/QOL_PLAN.md): a QoL row turned on from the menu, saved, then in effect live
 options-menu 0 --stage sea:11:0 --input native/check/input/menu-qol.txt
+# a warp from the menu in the middle of conducting the Wind Waker (Y on the boat, then Depuración > Viajar):
+# the baton's metronome, drone and pulse loops have no actor position, so the scene change did not end them
+# and they sounded on at Windfall for good; the next PLAY scene now stops them (fails without the fix)
+options-menu 0 --preset sailing --input native/check/input/menu-warp-conducting.txt
 static-init 2 --preset bogus
 # COS_SMOKE=sailing (lane sailing): the sailing preset's boot on the boat, off it with A and back on
 # with A after swimming to it (bug B17: the preset lacked event bits 0x0A80/0x1980), the wind turned north (the wind

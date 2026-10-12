@@ -44,6 +44,7 @@
 #include "d/actor/d_a_player.h"
 #include "m_Do/m_Do_MemCard.h"
 #include "m_Do/m_Do_MemCardRWmng.h"
+#include "m_Do/m_Do_audio.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_manager.h"
 #include "f_pc/f_pc_layer.h"
@@ -820,12 +821,43 @@ void setOpen(bool open) {
     }
 }
 
+// A warp ordered here (Viajar, Navegar, the debug server's warp) can leave in the middle of conducting
+// the Wind Waker, which the game's own ways out of a scene never do: conducting stops its loops itself
+// (JAIZelInst::reset from daPy_lk_c's tact procedures). Those loops (metronome, drone, pulse, auftakt)
+// play with no actor position, so deleting the scene's actors does not stop them, and a warp while
+// conducting left them sounding in the next scene for good. The player conducts on through the fade-out
+// (restarting them on each beat), so they are stopped as JAIZelInst::reset does once the next PLAY scene
+// runs (warpAudioFrame); the auftakt, which only the next beat's sounds end, as well.
+fpc_ProcID sWarpFromScene = fpcM_ERROR_PROCESS_ID_e; // the PLAY scene a warp ordered here leaves
+
+void noteWarp() {
+    if (void* scene = fpcM_Search(isPlayScene, nullptr); scene != nullptr) {
+        sWarpFromScene = fpcM_GetID(scene);
+    }
+}
+
+void warpAudioFrame() {
+    if (sWarpFromScene == fpcM_ERROR_PROCESS_ID_e) {
+        return;
+    }
+    void* scene = fpcM_Search(isPlayScene, nullptr);
+    if (scene == nullptr || fpcM_GetID(scene) == sWarpFromScene || fpcM_IsCreating(fpcM_GetID(scene))) {
+        return;
+    }
+    sWarpFromScene = fpcM_ERROR_PROCESS_ID_e;
+    mDoAud_tact_reset();
+    mDoAud_seStop(JA_SE_WTAKT_AUFTAKT);
+    mDoAud_seStop(JA_SE_WTAKT_AUFTAKT_4);
+    mDoAud_seStop(JA_SE_WTAKT_AUFTAKT_6);
+}
+
 void doWarp(const Warp& w) {
     if (!inPlay()) {
         toast(T("El viaje solo funciona durante la partida", "Travel only works in the game"));
         return;
     }
     setOpen(false);
+    noteWarp();
     writef(STDERR_FILENO, "[cos] menu: warp to %s room %d point %d\n", w.stage, w.room, w.point);
     dComIfGp_setNextStage(w.stage, (s16)w.point, (s8)w.room, -1);
 }
@@ -839,6 +871,7 @@ void doSailing() {
     }
     applySailingPreset(true);
     setOpen(false);
+    noteWarp();
     writef(STDERR_FILENO, "[cos] menu: sailing preset, warp to %s room %d point %d\n", kSailingSpawn.stage,
            kSailingSpawn.room, kSailingSpawn.point);
     dComIfGp_setNextStage(kSailingSpawn.stage, (s16)kSailingSpawn.point, (s8)kSailingSpawn.room, -1);
@@ -1242,6 +1275,7 @@ void smokeError(const char* fmt, const std::string& a, const std::string& b = ""
 //   overlay <0|1>            the FPS overlay is shown
 //   alloc-failures <n>       JKR allocations that failed since the start (bug B8: 0)
 //   riding <0|1>             the player rides the boat with the sail on X (Depuración > Navegar)
+//   no-se <id>[,<id>...]     JAudio has none of these sound effects (hex ids) registered (pc_audio_state.cpp)
 //   card-roundtrip <stage> [<room>]  the game saved through its save screen: the card's save file (the
 //                            run's own card, "#card run") loads back (mDoMemCd_Load, checksum of
 //                            the file the game uses, card_to_memory) with the items the player has now
@@ -1457,6 +1491,26 @@ void smokeFrame(unsigned int frame) {
             }
         } else if (e.kind == "card-roundtrip") {
             checkCardRoundtrip(e.a, e.b);
+        } else if (e.kind == "no-se") {
+            for (const char* p = e.a.c_str(); *p != '\0';) {
+                char* end = nullptr;
+                const u32 id = (u32)strtoul(p, &end, 16);
+                if (end == p) {
+                    smokeError("no-se: bad id list %s%s", e.a);
+                    break;
+                }
+                const int n = audioSeRegistered(id);
+                char idText[16];
+                snprintf(idText, sizeof(idText), "%04x", (unsigned)id);
+                if (n != 0) {
+                    char line[1536];
+                    audioStateLine(line, sizeof(line));
+                    smokeError("sound effect %s still registered (%s)", idText, line);
+                } else {
+                    writef(STDERR_FILENO, "[cos] options-menu: ok no sound effect %s\n", idText);
+                }
+                p = *end == ',' ? end + 1 : end;
+            }
         } else {
             smokeError("unknown #expect %s%s", e.kind);
         }
@@ -1578,6 +1632,7 @@ void debugFrameEnd(unsigned int frame) {
     if (sDebugWarp.pending && play && !dComIfGp_isEnableNextStage()) {
         sDebugWarp.pending = false;
         setOpen(false);
+        noteWarp();
         writef(STDERR_FILENO, "[cos] debug server: warp to %s room %d point %d layer %d\n", sDebugWarp.stage,
                sDebugWarp.room, sDebugWarp.point, sDebugWarp.layer);
         dComIfGp_setNextStage(sDebugWarp.stage, (s16)sDebugWarp.point, (s8)sDebugWarp.room, (s8)sDebugWarp.layer);
@@ -1607,6 +1662,7 @@ void debugFrameEnd(unsigned int frame) {
 
 void menuFrameEnd(unsigned int frame) {
     debugFrameEnd(frame);
+    warpAudioFrame();
     if (m.pendingShot) {
         m.pendingShot = false;
         if (captureFrame(frame, saveShot, nullptr)) {
