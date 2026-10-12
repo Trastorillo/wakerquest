@@ -481,7 +481,8 @@ const PcSettingChoice kHitch[] = {{"0", "Desactivadas", "Off"}, {"33", "Más de 
 // Calidad de vida > Vela (COS_QOL_SAIL, pc_qol.h)
 const PcSettingChoice kQolSail[] = {{"0", "Original", "Original"},
                                     {"swift", "Vela rápida (Swift Sail)", "Swift Sail"},
-                                    {"brisk", "Vela ligera (Brisk Sail)", "Brisk Sail"}};
+                                    {"brisk", "Vela ligera (Brisk Sail)", "Brisk Sail"},
+                                    {"wind", "Vela normal con viento a favor", "Normal sail, wind at your back"}};
 const PcSettingChoice kHdStats[] = {{"0", "Desactivadas", "Off"}, {"150", "Cada 150 cuadros", "Every 150 frames"},
                                     {"300", "Cada 300 cuadros", "Every 300 frames"},
                                     {"600", "Cada 600 cuadros", "Every 600 frames"}};
@@ -633,11 +634,11 @@ const PcSettingDesc kBuiltins[] = {
      "Tingle chests appear with any bomb, and with the compass they show on the map (BetterWW)."},
     {"COS_QOL_SAIL", "Vela",
      "Rápida: el viento sopla siempre a favor y el barco va al doble, como en Wind Waker HD. Ligera: igual "
-     "y frena antes (BetterWW).",
+     "y frena antes. Vela normal con viento a favor: solo el viento (BetterWW).",
      PC_SETTING_TAB_QOL, 0, CHOICES(kQolSail), "0", applyQol, nullptr, 100,
      "Sail",
      "Swift: the wind always blows from behind and the boat goes twice as fast, as in Wind Waker HD. "
-     "Brisk: the same, and it stops sooner (BetterWW)."},
+     "Brisk: the same, and it stops sooner. Normal sail, wind at your back: only the wind (BetterWW)."},
     {"COS_QOL_FREE_BOAT", "Barco sin restricciones",
      "El Mascarón Rojo no te hace volver por no haber avanzado en la historia (solo en el borde del mar) y "
      "deja subir aunque el viento no sople a favor. Puedes llegar antes de tiempo a sitios de la historia "

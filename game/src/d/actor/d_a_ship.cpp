@@ -30,7 +30,7 @@
 // of them: turn rate, effects, a demo's speed, the cyclone's pull); daShip_qolSail gives a use of
 // either constant its value for the current option.
 static inline f32 daShip_qolSail(f32 v) {
-    return pc_qol(PC_QOL_SAIL) ? v * 2.0f : v;
+    return pc_qol_fast_sail() ? v * 2.0f : v;
 }
 #endif
 
@@ -1144,7 +1144,7 @@ BOOL daShip_c::checkOutRange() {
 void daShip_c::decrementShipSpeed(float decrementSpeed) {
 #if TARGET_PC
     // QoL "Vela": steps of 0.2 / 0.03 instead of 0.1 / 0.015 (swift_sail.asm)
-    if (pc_qol(PC_QOL_SAIL)) {
+    if (pc_qol_fast_sail()) {
         cLib_addCalc(&speedF, decrementSpeed, 0.05f, 0.2f, 0.03f);
         return;
     }
@@ -1156,8 +1156,8 @@ void daShip_c::decrementShipSpeed(float decrementSpeed) {
 void daShip_c::firstDecrementShipSpeed(float decrementSpeed) {
 #if TARGET_PC
     // QoL "Vela": steps of 10.0 / 2.0 instead of 5.0 / 1.0 (swift_sail.asm)
-    if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, pc_qol(PC_QOL_SAIL) ? 10.0f : 5.0f,
-                     pc_qol(PC_QOL_SAIL) ? 2.0f : 1.0f) < 3.0f) {
+    if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, pc_qol_fast_sail() ? 10.0f : 5.0f,
+                     pc_qol_fast_sail() ? 2.0f : 1.0f) < 3.0f) {
 #else
     if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, 5.0f, 1.0f) < 3.0f) {
 #endif
@@ -1455,7 +1455,7 @@ void daShip_c::setSelfMove(int param_1) {
 #if TARGET_PC
                     // QoL "Vela": A stops the boat with steps of 2.0 / 0.2 (brisk 3.0 / 0.2) instead of
                     // 1.0 / 0.1 (slow_down_ship_when_stopping)
-                    const int sail = pc_qol(PC_QOL_SAIL);
+                    const int sail = pc_qol_fast_sail();
                     fVar6 = cLib_addCalc(&speedF, 0.0f, 0.1f,
                                          sail == PC_QOL_SAIL_BRISK ? 3.0f : sail != 0 ? 2.0f : 1.0f,
                                          sail != 0 ? 0.2f : 0.1f);
@@ -1466,7 +1466,7 @@ void daShip_c::setSelfMove(int param_1) {
                 else {
 #if TARGET_PC
                     // QoL "Vela": R cruises at up to 30 instead of 10
-                    fVar6 = CPad_GET_ANALOG_R(0) * (pc_qol(PC_QOL_SAIL) ? 30.0f : 10.0f);
+                    fVar6 = CPad_GET_ANALOG_R(0) * (pc_qol_fast_sail() ? 30.0f : 10.0f);
 #else
                     fVar6 = CPad_GET_ANALOG_R(0) * 10.0f;
 #endif
@@ -1506,7 +1506,7 @@ BOOL daShip_c::procWait() {
 #if TARGET_PC
     // QoL "Vela": without the player the boat stops with steps of 2.0 / 0.1 (brisk 4.0 / 0.2) instead
     // of 1.0 / 0.05 (slow_down_ship_when_idle)
-    const int sail = pc_qol(PC_QOL_SAIL);
+    const int sail = pc_qol_fast_sail();
     cLib_addCalc(&speedF, 0.0f, 0.1f, sail == PC_QOL_SAIL_BRISK ? 4.0f : sail != 0 ? 2.0f : 1.0f,
                  sail == PC_QOL_SAIL_BRISK ? 0.2f : sail != 0 ? 0.1f : 0.05f);
 #else
@@ -4483,7 +4483,8 @@ BOOL daShip_c::execute() {
         mDoAud_setShipSailState(1);
 #if TARGET_PC
         // QoL "Vela" (set_wind_dir_to_ship_dir): while sailing, the wind blows the way the boat
-        // faces, rounded to 45 degrees, as the Wind's Requiem sets it
+        // faces, rounded to 45 degrees, as the Wind's Requiem sets it; every value of the row
+        // (swift, brisk, and wind: BetterWW normal_sail_wind.asm, the same call without the speeds)
         if (pc_qol(PC_QOL_SAIL)) {
             dKyw_tact_wind_set(0, (s16)((-(int)current.angle.y + 0x4000 + 0x1000) & ~0x1FFF));
         }

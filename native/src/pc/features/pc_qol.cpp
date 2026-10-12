@@ -34,6 +34,9 @@ int parse(int which, const char* v) {
         if (strcmp(v, "brisk") == 0) {
             return PC_QOL_SAIL_BRISK;
         }
+        if (strcmp(v, "wind") == 0) {
+            return PC_QOL_SAIL_WIND;
+        }
         return 0;
     }
     return strcmp(v, "1") == 0 ? 1 : 0;
@@ -53,6 +56,11 @@ int pc_qol(PcQol which) {
         }
     }
     return o.value;
+}
+
+int pc_qol_fast_sail(void) {
+    const int sail = pc_qol(PC_QOL_SAIL);
+    return sail == PC_QOL_SAIL_SWIFT || sail == PC_QOL_SAIL_BRISK ? sail : 0;
 }
 
 const char* pc_qol_key(PcQol which) {
