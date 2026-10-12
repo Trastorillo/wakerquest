@@ -89,7 +89,8 @@ int openRunFile(const char* name);
 // Every thread but the caller: suspended, then a frame-pointer backtrace of each (stall report).
 void dumpAllThreads(int fd);
 
-// pc_disc.cpp: 0 if COS_DISC is a readable GZLE01 revision 0 image, else prints why and returns
+// pc_disc.cpp: 0 if COS_DISC is a readable revision 0 image of the build's disc (COS_GAME_ID_STR:
+// GZLE01, or GZLP01 for the European build), else prints why and returns
 // PC_EXIT_DISC.
 int checkDisc();
 // pc_disc.cpp: a disc problem: logged as "[cos] DISC: ...", kept for exitDisc
@@ -100,7 +101,7 @@ void discMessage(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
 // pc_assets.cpp (docs/RUNTIME_ASSETS.md): with COS_RUNTIME_ASSETS, reads the game's data arrays from
 // the disc and fills them (pc_main.cpp, after aurora_dvd_open, before OSInit); exits PC_EXIT_DISC if
-// the disc's main.dol or RELs are not GZLE01 revision 0's. COS_SMOKE=assets dumps them and exits.
+// the disc's main.dol or RELs are not the build's disc's (COS_GAME_ID_STR, revision 0). COS_SMOKE=assets dumps them and exits.
 void loadAssets();
 
 // pc_smoke.cpp: runs COS_SMOKE if it is a test that runs before the SDK (it never returns then);

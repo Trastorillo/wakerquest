@@ -199,7 +199,7 @@ void listDiscDir(DiscListing& out, const char* path, int depth) {
     writef(STDERR_FILENO, "[cos] disc-ls: %s revision %u: %u files, %u directories, %u error(s)%s\n",
            game, (unsigned int)id->gameVersion, out.files, out.dirs, out.errors,
            gConfig.runDir != nullptr ? " (listing in disc_ls.txt)" : "");
-    bool ok = out.errors == 0 && out.files > 0 && strcmp(game, "GZLE01") == 0;
+    bool ok = out.errors == 0 && out.files > 0 && strcmp(game, COS_GAME_ID_STR) == 0;
     pc_exit(ok ? PC_EXIT_REACHED : PC_EXIT_CHECK_FAILED);
 }
 

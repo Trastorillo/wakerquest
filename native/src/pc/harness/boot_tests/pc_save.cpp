@@ -426,8 +426,8 @@ void checkGci(u32 saveCount) {
         return;
     }
     // The directory entry (CARDDir): game, maker, file name, block count, comment address.
-    if (memcmp(sGci + 0x0, "GZLE", 4) != 0 || memcmp(sGci + 0x4, "01", 2) != 0) {
-        fail("GCI entry game/maker \"%.4s\"/\"%.2s\", want GZLE/01", (const char*)sGci, (const char*)sGci + 4);
+    if (memcmp(sGci + 0x0, COS_GAME_ID_STR, 4) != 0 || memcmp(sGci + 0x4, COS_GAME_ID_STR + 4, 2) != 0) {
+        fail("GCI entry game/maker \"%.4s\"/\"%.2s\", want " COS_GAME_ID_STR, (const char*)sGci, (const char*)sGci + 4);
     }
     if (strncmp((const char*)sGci + 0x8, kSaveFile, 32) != 0) {
         fail("GCI entry file name \"%.32s\", want %s", (const char*)sGci + 0x8, kSaveFile);
@@ -478,7 +478,9 @@ void prepareRunCard(const char* who) {
     } else {
         snprintf(sCardBase, sizeof(sCardBase), "%s/card/", gConfig.runDir);
     }
-    snprintf(sGciPath, sizeof(sGciPath), "%sUSA/Card A/01-GZLE-%s.gci", sCardBase, kSaveFile);
+    // Aurora's card folder per region (lib/dolphin/card.cpp): USA, EUR for the European build
+    snprintf(sGciPath, sizeof(sGciPath), "%s%s/Card A/01-%.4s-%s.gci", sCardBase,
+             COS_GAME_ID_STR[3] == 'P' ? "EUR" : "USA", COS_GAME_ID_STR, kSaveFile);
     CARDSetBasePath(sCardBase, 0);
     writef(STDERR_FILENO, "[cos] %s: memory card A is the folder %s%s\n", who, sCardBase,
            cardDir != nullptr && cardDir[0] != '\0' ? " (COS_CARD_DIR)" : " (empty at start)");
