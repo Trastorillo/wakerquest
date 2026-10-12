@@ -20,6 +20,12 @@ build reads them from the player's own disc.
 | `native/tools/dksh_cache/dksh_cache.cpp`, `switch/deko/dksh_file.{h,cpp}`, `switch/deko/{dk.h,device.cpp,memory.cpp,descriptors.cpp,overlay.cpp,pattern.cpp}`, `switch/deko/shaders/{imgui,text}_{vsh,fsh}.glsl` | Adapted from [SwitchWakerHD](https://github.com/centollOS/SwitchWakerHD) at `df8fbde` (`tools/switch/dksh_cache/dksh_cache.cpp`, `runtime/src/gfx/deko/{shader_files.{h,cpp},dk.h,backend.cpp,memory.cpp,descriptors.cpp,overlay_dk.cpp}`, `runtime/src/gfx/deko/shaders/`) | MPL-2.0 (header in each file; [mozilla.org/MPL/2.0](https://mozilla.org/MPL/2.0/)) |
 | `switch/forwarder/nx-hbloader-forwarder.patch` | Patch to nx-hbloader | same as nx-hbloader (ISC) |
 
+The quality-of-life options (`docs/QOL_PLAN.md`, `native/src/pc/features/pc_qol.cpp` and the hunks in `game/`
+it lists) reimplement the behaviour of patches from [BetterWW](https://github.com/WideBoner/betterww)
+(WideBoner, at `4501481`) and [wwrando](https://github.com/LagoLunatic/wwrando) (LagoLunatic, at
+`9775811`), both MIT (copyright 2018 LagoLunatic): their asm patches and tweaks were read to see what
+they change; no code, asset or text of theirs is in this repository.
+
 Everything else is the project's own code under the MIT license (`LICENSE`), copyright Pulpparty
 and depende3000, and the SwitchWaker contributors.
 

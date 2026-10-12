@@ -35,6 +35,7 @@
 #include "pc_internal.h"
 
 #include "pc/pc_controls.h"
+#include "pc/pc_qol.h"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
@@ -422,6 +423,7 @@ void applyCameraInvertX(const char*, const char* v, void*) { pc_camera_invert_x_
 void applyCameraInvertY(const char*, const char* v, void*) { pc_camera_invert_y_set(strcmp(v, "1") == 0); }
 void applyCameraShake(const char*, const char* v, void*) { pc_camera_shake_set(strcmp(v, "1") == 0); }
 void applyHeatHaze(const char*, const char* v, void*) { pc_heat_haze_set(strcmp(v, "1") == 0); }
+void applyQol(const char* key, const char* v, void*) { pc_qol_set(key, v); }
 void applyGpuProfile(const char*, const char* v, void*) {
 #if defined(__SWITCH__)
     cos_switch_set_gpu_profile(v);
@@ -476,6 +478,10 @@ const PcSettingChoice kShowHide[] = {{"1", "Mostrar", "Show"}, {"0", "Ocultar", 
 const PcSettingChoice kHitch[] = {{"0", "Desactivadas", "Off"}, {"33", "Más de 33 ms", "Over 33 ms"},
                                   {"40", "Más de 40 ms", "Over 40 ms"}, {"50", "Más de 50 ms", "Over 50 ms"},
                                   {"100", "Más de 100 ms", "Over 100 ms"}};
+// Calidad de vida > Vela (COS_QOL_SAIL, pc_qol.h)
+const PcSettingChoice kQolSail[] = {{"0", "Original", "Original"},
+                                    {"swift", "Vela rápida (Swift Sail)", "Swift Sail"},
+                                    {"brisk", "Vela ligera (Brisk Sail)", "Brisk Sail"}};
 const PcSettingChoice kHdStats[] = {{"0", "Desactivadas", "Off"}, {"150", "Cada 150 cuadros", "Every 150 frames"},
                                     {"300", "Cada 300 cuadros", "Every 300 frames"},
                                     {"600", "Cada 600 cuadros", "Every 600 frames"}};
@@ -573,6 +579,75 @@ const PcSettingDesc kBuiltins[] = {
      "60 images a second by interpolating between frames; the game still runs at 30. More CPU and "
      "battery. When it cannot keep up it lowers the resolution (Dynamic resolution) or drops to 30 for "
      "a while."},
+    // Calidad de vida (pc_qol.h, docs/QOL_PLAN.md: BetterWW's and wwrando's patches; all off by default)
+    {"COS_QOL_INSTANT_TEXT", "Texto instantáneo",
+     "Los textos aparecen enteros y sin pausas; mantener B pasa los mensajes (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 10,
+     "Instant text",
+     "Text boxes appear whole and without pauses; holding B skips the messages (BetterWW)."},
+    {"COS_QOL_FAST_ROLL", "Voltereta más rápida",
+     "La voltereta sale siempre a casi toda velocidad, también desde parado (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 20,
+     "Faster roll",
+     "The roll always starts at nearly full speed, also from standing (BetterWW)."},
+    {"COS_QOL_FAST_BLOCKS", "Empujar bloques más rápido",
+     "Los bloques se empujan y arrastran más deprisa (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 30,
+     "Faster block moving",
+     "Blocks are pushed and pulled faster (BetterWW)."},
+    {"COS_QOL_FAST_GRAPPLE", "Garfio más rápido",
+     "El garfio sale, se enrolla y se suelta más deprisa, como en Wind Waker HD (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 40,
+     "Faster grappling hook",
+     "The grappling hook flies, wraps and lets go faster, as in Wind Waker HD (BetterWW)."},
+    {"COS_QOL_FAST_CLIMB", "Gatear y trepar más rápido",
+     "Más deprisa al gatear, trepar, subir escaleras y enredaderas y pegarse a la pared; la cámara llega "
+     "antes al hablar (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 50,
+     "Faster crawling and climbing",
+     "Faster crawling, climbing, ladders and vines and sidling; the camera gets there sooner when "
+     "talking (BetterWW)."},
+    {"COS_QOL_FAST_BALLAD", "Balada del vendaval rápida",
+     "El viaje con la Balada del vendaval empieza en cuanto aparece el tornado, sin la subida del barco "
+     "(BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 60,
+     "Faster Ballad of Gales",
+     "The Ballad of Gales warp starts as soon as the cyclone appears, without the boat's rise "
+     "(BetterWW)."},
+    {"COS_QOL_SKIP_VIDEOS", "Sin vídeos de título y final",
+     "Sin el vídeo que sale al esperar en el título ni el del epílogo del final (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 70,
+     "No title and ending videos",
+     "No video when waiting at the title screen and no epilogue video at the end (BetterWW)."},
+    {"COS_QOL_REVEAL_CHART", "Carta náutica completa",
+     "La carta náutica muestra todo el mar. No cambia la partida guardada: al desactivarlo vuelve a "
+     "mostrar lo explorado (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 80,
+     "Full sea chart",
+     "The sea chart shows the whole sea. The save does not change: turned off, it shows what was "
+     "explored again (BetterWW)."},
+    {"COS_QOL_TINGLE_CHESTS", "Cofres de Tingle sin Tingle Tuner",
+     "Los cofres de Tingle aparecen con cualquier bomba, y con la brújula salen en el mapa (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 90,
+     "Tingle chests without Tingle Tuner",
+     "Tingle chests appear with any bomb, and with the compass they show on the map (BetterWW)."},
+    {"COS_QOL_SAIL", "Vela",
+     "Rápida: el viento sopla siempre a favor y el barco va al doble, como en Wind Waker HD. Ligera: igual "
+     "y frena antes (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kQolSail), "0", applyQol, nullptr, 100,
+     "Sail",
+     "Swift: the wind always blows from behind and the boat goes twice as fast, as in Wind Waker HD. "
+     "Brisk: the same, and it stops sooner (BetterWW)."},
+    {"COS_QOL_SWING_TURN", "Girar al balancearse",
+     "El stick gira a Link mientras se balancea en una cuerda o con el garfio (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 110,
+     "Turn while swinging",
+     "The stick turns Link while he swings on a rope or the grappling hook (BetterWW)."},
+    {"COS_QOL_NO_SONG_REPLAY", "Canciones sin repetición",
+     "Tras tocar una canción con la batuta, Link no la vuelve a dirigir (BetterWW).",
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 120,
+     "No song replays",
+     "After a song is played with the baton, Link does not conduct it again (BetterWW)."},
     // Depuración
     {"COS_PERF_EVERY", "Intervalo del registro perf",
      "Cada cuántos cuadros se escribe una línea [cos] perf en el registro (native/logs/).",
@@ -625,8 +700,8 @@ struct Row {
     const PcSettingDesc* desc = nullptr;
 };
 
-const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Depuración"};
-const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Debug"};
+const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Calidad de vida", "Depuración"};
+const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Quality of life", "Debug"};
 
 struct Menu {
     bool initialized = false;

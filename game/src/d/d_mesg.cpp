@@ -13,6 +13,9 @@
 #include "JSystem/JMessage/resource.h"
 #include "JSystem/JUtility/JUTAssert.h"
 #include "d/d_com_inf_game.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 #include "d/d_meter.h"
 #if VERSION <= VERSION_JPN
 #include "d/d_s_play.h"
@@ -2529,7 +2532,12 @@ void dMesg_outwaitProc(sub_mesg_class* i_Msg) {
 #if VERSION > VERSION_DEMO
     JKRHeap* oldHeap = mDoExt_setCurrentHeap(i_Msg->field_0x100);
 #endif
+#if TARGET_PC
+    // QoL "Texto instantáneo" (pc_qol.h; wwrando b_button_skips_text.asm): B held, not only pressed
+    if (CPad_CHECK_TRIG_A(0) || (pc_qol(PC_QOL_INSTANT_TEXT) ? CPad_CHECK_HOLD_B(0) : CPad_CHECK_TRIG_B(0))) {
+#else
     if (CPad_CHECK_TRIG_A(0) || CPad_CHECK_TRIG_B(0)) {
+#endif
         for (int i = 0; i < 4; i++) {
             i_Msg->screen->initString(i_Msg->text[i], i);
             i_Msg->screen->setString(i_Msg->text[i], i);
@@ -2572,7 +2580,12 @@ void dMesg_closewaitProc(sub_mesg_class* i_Msg) {
 #if VERSION > VERSION_DEMO
     JKRHeap* oldHeap = mDoExt_setCurrentHeap(i_Msg->field_0x100);
 #endif
+#if TARGET_PC
+    // QoL "Texto instantáneo" (pc_qol.h; wwrando b_button_skips_text.asm): B held, not only pressed
+    if (CPad_CHECK_TRIG_A(0) || (pc_qol(PC_QOL_INSTANT_TEXT) ? CPad_CHECK_HOLD_B(0) : CPad_CHECK_TRIG_B(0))) {
+#else
     if (CPad_CHECK_TRIG_A(0) || CPad_CHECK_TRIG_B(0)) {
+#endif
         i_Msg->screen->dotAnimeInit();
         i_Msg->field_0x164 = 18;
         mDoAud_talkOut();

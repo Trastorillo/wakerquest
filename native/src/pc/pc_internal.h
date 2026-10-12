@@ -320,6 +320,8 @@ void setDrivenPad(bool on, uint16_t buttons, int8_t stickX, int8_t stickY, int8_
 void sailingFrame(unsigned int frames);
 // COS_SMOKE=rope (pc_rope.cpp, bug B19): the hanging ropes of Tetra's ship.
 void ropeFrame(unsigned int frames);
+// COS_TRACE=qol (pc_qol_probe.cpp): a line per frame for the quality-of-life options' checks.
+void qolProbeFrame(unsigned int frames);
 // COS_SMOKE=evcam (pc_evcam.cpp, bug B20): the event camera's pointer arguments.
 void evcamFrame(unsigned int frames);
 // COS_SMOKE=wind-screen (pc_wind_screen.cpp): the wind song's wind-direction screen.

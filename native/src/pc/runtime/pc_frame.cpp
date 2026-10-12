@@ -1699,6 +1699,7 @@ void pc_frame_end(void) {
     npcVariantsFrame(frames);
     sailingFrame(frames);
     ropeFrame(frames);
+    qolProbeFrame(frames);
     evcamFrame(frames);
     windScreenFrame(frames);
     kyProcsFrame(frames);

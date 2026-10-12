@@ -43,9 +43,11 @@
 456 - 0 0
 458 A 0 0
 460 - 0 0
-# R: Depuración; B closes the menu
+# R, R: Calidad de vida, Depuración; B closes the menu
 466 R 0 0
 468 - 0 0
+470 R 0 0
+472 - 0 0
 474 B 0 0
 476 - 0 0
 # open again (Depuración is still the tab): A on "Viajar", down twice to Windfall, A

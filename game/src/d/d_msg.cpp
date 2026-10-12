@@ -20,6 +20,9 @@
 #include "m_Do/m_Do_controller_pad.h"
 #include "m_Do/m_Do_lib.h"
 #include <stdio.h>
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 class J2DTextBox;
 struct fopMsgM_pane_class;
@@ -65,6 +68,15 @@ const u8 mBeatNum[] = {0x03, 0x04, 0x04, 0x06, 0x06, 0x03, 0x03, 0x04};
 #define dMsg_CHECK_TRIG_AB() (CPad_CHECK_TRIG_A(0) || CPad_CHECK_TRIG_A(3) || CPad_CHECK_TRIG_B(3) || CPad_CHECK_TRIG_B(0))
 #else
 #define dMsg_CHECK_TRIG_AB() (CPad_CHECK_TRIG_A(0) || CPad_CHECK_TRIG_B(0))
+#endif
+
+#if TARGET_PC
+// QoL "Texto instantáneo" (pc_qol.h; wwrando b_button_skips_text.asm): at the uses it patches, B held
+// advances the text, not only B pressed.
+#define dMsg_CHECK_TRIG_AB_QOL() \
+    (CPad_CHECK_TRIG_A(0) || (pc_qol(PC_QOL_INSTANT_TEXT) ? CPad_CHECK_HOLD_B(0) : CPad_CHECK_TRIG_B(0)))
+#else
+#define dMsg_CHECK_TRIG_AB_QOL() dMsg_CHECK_TRIG_AB()
 #endif
 
 void dMsg_textPosition(sub_msg_class*);
@@ -2371,7 +2383,7 @@ s32 dMsg_stopProc(sub_msg_class* i_Msg) {
             dMeter_setDoStatus(1);
         }
     } else {
-        if (dMsg_CHECK_TRIG_AB() && (!dComIfGp_checkMesgBgm())) {
+        if (dMsg_CHECK_TRIG_AB_QOL() && (!dComIfGp_checkMesgBgm())) {
             i_Msg->mStatus = fopMsgStts_MSG_TYPING_e;
             dMsg_value_init(i_Msg);
             dMsg_yose_select(i_Msg);
@@ -2428,7 +2440,7 @@ s32 dMsg_selectProc(sub_msg_class* i_Msg) {
     sVar3 = i_Msg->m026C[0].mUserArea;
     if (sVar3 == 0) {
         if ((i_Msg->mStatus == fopMsgStts_SELECT_2_e) || (i_Msg->mStatus == fopMsgStts_SELECT_3_e)) {
-            if (dMsg_CHECK_TRIG_AB() || (fopMsgM_checkMessageSend())) {
+            if (dMsg_CHECK_TRIG_AB_QOL() || (fopMsgM_checkMessageSend())) {
                 dMsg_subTextSizeSet(i_Msg);
                 i_Msg->m026C[0].mUserArea = 1;
                 mDoAud_seStart(JA_SE_TALK_SEL_WIN_OPEN);
@@ -2744,7 +2756,7 @@ s32 dMsg_continueProc(sub_msg_class* i_Msg) {
     iVar2 = (int)((J2DTextBox*)i_Msg->m0544[1].pane)->getCharSpace();
     if (
         (
-            dMsg_CHECK_TRIG_AB() ||
+            dMsg_CHECK_TRIG_AB_QOL() ||
             i_Msg->mMsgDataProc.getSelectFlag() != fopMsgM_msgDataProc_c::Select_OFF ||
             fopMsgM_checkMessageSend() ||
             (i_Msg->mMsgNo == 0x5ac && dComIfGp_checkMesgCancelButton())
@@ -2920,7 +2932,7 @@ s32 dMsg_closewaitProc(sub_msg_class* i_Msg) {
     } else {
         if (i_Msg->mMsgDataProc.handSendFlag != 0) {
             if (i_Msg->mMsgDataProc.dec_waitTimer() != 0) {
-                if ((dMsg_CHECK_TRIG_AB() || (fopMsgM_checkMessageSend())) && (!dComIfGp_checkMesgBgm())) {
+                if ((dMsg_CHECK_TRIG_AB_QOL() || (fopMsgM_checkMessageSend())) && (!dComIfGp_checkMesgBgm())) {
                     i_Msg->mMsgDataProc.setHandSendFlagOff();
                     i_Msg->mStatus = fopMsgStts_BOX_CLOSING_e;
                     bVar1 = i_Msg->mMesgEntry.mTextboxType;
@@ -2959,7 +2971,7 @@ s32 dMsg_closewaitProc(sub_msg_class* i_Msg) {
 s32 dMsg_finishProc(sub_msg_class* i_Msg) {
     if (
         (
-            dMsg_CHECK_TRIG_AB() ||
+            dMsg_CHECK_TRIG_AB_QOL() ||
             i_Msg->mMsgDataProc.getSelectFlag() != fopMsgM_msgDataProc_c::Select_OFF ||
             fopMsgM_checkMessageSend() ||
             (i_Msg->mMsgNo == 0x5ac && dComIfGp_checkMesgCancelButton())
