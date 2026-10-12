@@ -9,7 +9,7 @@ starts.
 
 | | |
 |---|---|
-| **The game** | Your own disc of **The Wind Waker (USA)**, `GZLE01` **revision 0**, as an **uncompressed `.iso`** (1.4 GB). RVZ, GCZ, CISO or NKit images must be converted first: in Dolphin, right-click the game → *Convert File...* → ISO |
+| **The game** | Your own disc of **The Wind Waker**, **USA** (`GZLE01`) or **Europe** (`GZLP01`), **revision 0**, as an **uncompressed `.iso`** (1.4 GB). RVZ, GCZ, CISO or NKit images must be converted first: in Dolphin, right-click the game → *Convert File...* → ISO |
 | **A Switch** | Running Atmosphère with the Homebrew Menu, and about 1.5 GB free on the SD card |
 
 How to dump your disc is outside this guide: [Dolphin's guide](https://dolphin-emu.org/docs/guides/ripping-games/)
@@ -22,17 +22,23 @@ From the project's **Releases** page, download `SwitchWaker-<version>-switch.zip
 
 ```
 switch/switchwaker/
-├── switchwaker.nro                the program
+├── switchwaker.nro                the program, for the USA disc
+├── switchwaker-eur.nro            the program, for the European disc
 ├── initial_pipeline_cache.db      the list of graphics pipelines the game uses
 └── initial_dksh_cache.bin         their shaders, compiled for the Switch's GPU
 ```
+
+The game's version is fixed when the program is built, so there is one program per disc: use
+`switchwaker.nro` with the USA disc and `switchwaker-eur.nro` with the European one. You can keep both
+(or delete the one you do not need).
 
 ## 3. Copy it to the SD card
 
 1. Copy the zip's `switch` folder to the root of the SD card, so the program ends up at
    `sdmc:/switch/switchwaker/switchwaker.nro`.
-2. Copy your disc image into that same folder, named **`GZLE01.iso`**:
-   `sdmc:/switch/switchwaker/GZLE01.iso`.
+2. Copy your disc image into that same folder, named after its disc ID: **`GZLE01.iso`** for the USA
+   disc (`sdmc:/switch/switchwaker/GZLE01.iso`), **`GZLP01.iso`** for the European one
+   (`sdmc:/switch/switchwaker/GZLP01.iso`).
 
 You can take the card out, or connect the Switch by USB with hekate (*Tools → USB Tools → SD Card*). The
 SD card must be FAT32 or exFAT; a 1.4 GB file is fine on both.
@@ -40,19 +46,25 @@ SD card must be FAT32 or exFAT; a 1.4 GB file is fine on both.
 ## 4. Play
 
 - Start the Homebrew Menu **in title mode**: hold **R** while starting any installed game, then pick
-  **SwitchWaker**. From the album (applet mode) the game does not get enough memory.
+  **SwitchWaker** (USA disc) or **SwitchWaker EUR** (European disc). From the album (applet mode) the
+  game does not get enough memory.
 - Optional: a HOME-screen icon that always starts it the right way (you build it with your own console
   keys): [switch/forwarder/INSTALL.md](switch/forwarder/INSTALL.md).
 - The shaders come prebuilt: the first start takes a few seconds, like every later one.
 - **Minus (−)** opens the options menu (in Spanish or English, following the console's language):
   graphics, performance, controls, debug. Settings are saved on the card.
+- **European disc, language**: the game starts in the console's language when it is English, German,
+  French, Spanish or Italian (any other: English); once you have a save, in the language it was saved
+  in, as on the GameCube (the file select screen can change it). The options menu's *Game language*
+  (last row of the first tab) can fix one of the five instead; it takes effect at the next start.
+- The European version always runs at 60 Hz: there is no 50/60 Hz question.
 - If the disc is missing, compressed or another version, the console says so and the program closes.
 
 ## Updating
 
 Download the new release and copy its `switch` folder over the old one (`switchwaker.nro`,
-`initial_pipeline_cache.db` and `initial_dksh_cache.bin`). Your disc, saves (`native/user/USA/Card A`) and
-settings stay.
+`switchwaker-eur.nro`, `initial_pipeline_cache.db` and `initial_dksh_cache.bin`). Your disc, saves
+(`native/user/USA/Card A`, `native/user/EUR/Card A` for the European disc) and settings stay.
 
 The OpenGL renderer (`switchwaker_gl.nro`, "SwitchWaker (GL)") was removed on 2026-10-09: deko3d is the
 only renderer. Optional, to free the space its files take on the card, delete what it left behind:
@@ -67,7 +79,7 @@ only renderer. Optional, to free the space its files take on the card, delete wh
 
 | | |
 |---|---|
-| The console says the disc is missing or not the right one | `sdmc:/switch/switchwaker/GZLE01.iso` must be the USA disc, revision 0, as an uncompressed ISO (see "What you need") |
+| The console says the disc is missing or not the right one | `sdmc:/switch/switchwaker/GZLE01.iso` must be the USA disc and `GZLP01.iso` the European one, revision 0, as an uncompressed ISO (see "What you need"), and you must start the program for that disc (*SwitchWaker* for USA, *SwitchWaker EUR* for Europe): the message names the right one |
 | The game closes at once or says it is out of memory | Start it in title mode (hold R), not from the album |
 | It fails to start after an update, or keeps stuttering | Delete `sdmc:/switch/switchwaker/native/user/cache/` (the local caches; they are rebuilt) |
 | Something else | The session logs in `sdmc:/switch/switchwaker/native/logs/` (the newest file is the last run) say what happened; include them in a report (they contain no game data) |
@@ -96,12 +108,13 @@ scripts/switch/make_sd.sh --disc /path/to/GZLE01.iso
 It checks the disc first, then builds everything in Docker. **The first build takes an hour or more**
 (it downloads and compiles the graphics libraries once); later builds take minutes. If the computer runs
 out of memory, add `--jobs 2`. At the end `build/sd/switch/switchwaker/` holds the three files above plus a
-copy of your disc as `GZLE01.iso` (`--no-disc` leaves it out, for an update): copy the **contents** of
+copy of your disc as `GZLE01.iso` (with the European disc: `switchwaker-eur.nro` and `GZLP01.iso`;
+`--no-disc` leaves the disc out, for an update): copy the **contents** of
 `build/sd/` to the root of the SD card. A build made this way contains code generated from your disc: it is
 for your own console only, do not share it. (The published download is built without the disc:
 `scripts/switch/build_native.sh --runtime-assets`, [docs/RUNTIME_ASSETS.md](docs/RUNTIME_ASSETS.md).)
 
 | Building problem | |
 |---|---|
-| `this is not the disc the port is built for` | The image is not GZLE01 revision 0 or is compressed: use the USA disc, converted to an uncompressed ISO |
+| `this is not a disc the port is built for` | The image is not GZLE01 or GZLP01 revision 0, or is compressed: use the USA or European disc, converted to an uncompressed ISO |
 | Docker errors | Docker Desktop must be running (on Windows, with its WSL integration on) |
