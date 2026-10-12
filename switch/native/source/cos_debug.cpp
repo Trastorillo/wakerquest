@@ -38,6 +38,8 @@ extern "C" int pc_debug_warp_list(char* out, size_t size);                      
 extern "C" int pc_debug_warp(int index, const char* stage, int room, int point, int layer, char* done, size_t size);
 extern "C" int pc_debug_event(const char* name);                                                    // pc_menu.cpp
 extern "C" int pc_debug_give(const char* const* names, int count, char* done, size_t size);         // pc_menu.cpp
+extern "C" int pc_debug_time(float hour);                                                         // pc_menu.cpp
+extern "C" int pc_debug_take(const char* const* names, int count);                                 // pc_menu.cpp
 extern "C" unsigned int pc_debug_audio_request(void);
 extern "C" int pc_debug_audio_done(unsigned int ticket, char* out, size_t size);
 extern "C" int pc_debug_status(char* out, size_t size);
@@ -132,6 +134,33 @@ debugsrv::Reply give(const debugsrv::Args& a) {
                         " requested (given once a file is being played; the log says what the game's check reports)");
 }
 
+// "time HOUR": the time of day (0-24, e.g. 17.5), set by the game thread once a file is being played
+debugsrv::Reply timeCmd(const debugsrv::Args& a) {
+    char* end = nullptr;
+    const float hour = a.size() == 1 ? strtof(a[0].c_str(), &end) : -1.0f;
+    if (a.size() != 1 || end == a[0].c_str() || *end != '\0' || !pc_debug_time(hour)) {
+        return debugsrv::err("usage: time <hour 0-24>, e.g. time 17.5 (the sun's glare shows from 8 to 18)");
+    }
+    fprintf(stderr, "[cos] debug server: time %s requested\n", a[0].c_str());
+    return debugsrv::ok("time " + a[0] + " requested (set once a file is being played)");
+}
+
+// "take map|compass ...": the current stage's dungeon map / compass taken away (what 'give' set)
+debugsrv::Reply takeCmd(const debugsrv::Args& a) {
+    const char* names[4];
+    if (a.empty() || a.size() > 4) {
+        return debugsrv::err("usage: take map|compass ...");
+    }
+    for (size_t i = 0; i < a.size(); i++) {
+        names[i] = a[i].c_str();
+    }
+    if (!pc_debug_take(names, (int)a.size())) {
+        return debugsrv::err("usage: take map|compass ... (mapa, brujula)");
+    }
+    fprintf(stderr, "[cos] debug server: take requested\n");
+    return debugsrv::ok("take requested (the log says what is left)");
+}
+
 // "audio": a line the game thread writes at its next frame end
 debugsrv::Reply audio(const debugsrv::Args&) {
     const unsigned int ticket = pc_debug_audio_request();
@@ -211,6 +240,8 @@ extern "C" void cos_switch_debug_start(void) {
     debugsrv::add_command("warp", "warp <n> | warp <stage> [room] [point] [layer]", warp);
     debugsrv::add_command("event", "event <name>           order an event of the stage's event list", event);
     debugsrv::add_command("give", "give <name|item> ...   items through the game's item-get (grapple, baton, ballad, bombs, ...)", give);
+    debugsrv::add_command("time", "time <hour>            the time of day, 0-24 (e.g. 17.5)", timeCmd);
+    debugsrv::add_command("take", "take map|compass ...   the stage's dungeon map / compass taken away", takeCmd);
     debugsrv::add_command("audio", "audio                  what JAudio plays: sound effects, SE tracks, BGM, audio thread", audio);
     debugsrv::add_command("shot", "shot [game]            PNG of the next frame (game: without the panel and menu)", shot);
     debugsrv::add_command("reload", "reload                 restart: the forwarder loads the NRO again (put it first)", reload);

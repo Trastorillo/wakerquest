@@ -1702,6 +1702,12 @@ struct DebugGive {
     int count = 0;
     u8 items[16] = {};
 } sDebugGive;
+// "time": the hour (0-24) set at the next frame end of a file being played (< 0: none); "take": the
+// dungeon items taken away there (bit 0 the map, bit 1 the compass)
+struct DebugTime {
+    float hour = -1.0f;
+    unsigned take = 0;
+} sDebugTime;
 // "audio": a pc_audio_state.cpp line taken by the game thread at its next frame end (ticket = the request
 // count, done = the last request answered).
 struct DebugAudio {
@@ -1774,6 +1780,24 @@ void debugFrameEnd(unsigned int frame) {
                    (unsigned)dComIfGs_getBombMax());
         }
         sDebugGive.count = 0;
+    }
+    if (sDebugTime.hour >= 0.0f && play) {
+        // the save's time, which dScnKy_env_light_c::setDaytime copies to mCurTime every frame (15 degrees an hour)
+        dComIfGs_setTime(sDebugTime.hour * 15.0f);
+        writef(STDERR_FILENO, "[cos] debug server: time set to %.2f h\n", sDebugTime.hour);
+        sDebugTime.hour = -1.0f;
+    }
+    if (sDebugTime.take != 0 && play) {
+        if (sDebugTime.take & 1) {
+            dComIfGs_offDungeonItemMap();
+        }
+        if (sDebugTime.take & 2) {
+            dComIfGs_offDungeonItemCompass();
+        }
+        writef(STDERR_FILENO, "[cos] debug server: took the stage's%s%s; map %d compass %d\n",
+               (sDebugTime.take & 1) ? " map" : "", (sDebugTime.take & 2) ? " compass" : "",
+               (int)dComIfGs_isDungeonItemMap(), (int)dComIfGs_isDungeonItemCompass());
+        sDebugTime.take = 0;
     }
     if (sDebugAudio.requested != sDebugAudio.done) {
         audioStateLine(sDebugAudio.line, sizeof(sDebugAudio.line));
@@ -1905,6 +1929,34 @@ extern "C" int pc_debug_give(const char* const* names, int count, char* done, si
     for (int i = 0; i < n && pc::sDebugGive.count < (int)sizeof(pc::sDebugGive.items); i++) {
         pc::sDebugGive.items[pc::sDebugGive.count++] = items[i];
     }
+    return 1;
+}
+
+// "time": the hour of the day (0-24, decimals allowed), set once a file is being played; 0: out of range.
+extern "C" int pc_debug_time(float hour) {
+    if (!(hour >= 0.0f && hour <= 24.0f)) {
+        return 0;
+    }
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    pc::sDebugTime.hour = hour;
+    return 1;
+}
+
+// "take": the current stage's dungeon map and/or compass (the save bits "give map"/"give compass" set),
+// taken once a file is being played; 0: an unknown name.
+extern "C" int pc_debug_take(const char* const* names, int count) {
+    unsigned take = 0;
+    for (int i = 0; i < count; i++) {
+        if (strcasecmp(names[i], "map") == 0 || strcasecmp(names[i], "mapa") == 0) {
+            take |= 1;
+        } else if (strcasecmp(names[i], "compass") == 0 || strcasecmp(names[i], "brujula") == 0) {
+            take |= 2;
+        } else {
+            return 0;
+        }
+    }
+    std::lock_guard<std::mutex> lk(pc::sDebugMu);
+    pc::sDebugTime.take |= take;
     return 1;
 }
 
