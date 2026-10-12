@@ -22,6 +22,9 @@
 #include "m_Do/m_Do_audio.h"
 #include "m_Do/m_Do_controller_pad.h"
 #include <stdio.h>
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 dMd_HIO_c g_mdHIO;
 
@@ -567,7 +570,13 @@ void dMenu_Dmap_c::treasureSet() {
             for (int i = 0; i < tinfo->num; tentry++, i++) {
                 int tboxNo = (tentry->base.parameters >> 7) & 0x1F;
                 if (mCurFloor == dMap_GetFloorNo(&dComIfGp_getStage(), tentry->base.position.y)) {
+#if TARGET_PC
+                    // QoL "Cofres de Tingle sin Tingle Tuner" (pc_qol.h; BetterWW tingle_chests_without_tuner.asm):
+                    // the current floor's Tingle chests (opened flag 0xF or 0x10) show with the compass too
+                    if (!dComIfGs_isTbox(tboxNo) && (pc_qol(PC_QOL_TINGLE_CHESTS) || (tboxNo != 0xF && tboxNo != 0x10))) {
+#else
                     if (!dComIfGs_isTbox(tboxNo) && tboxNo != 0xF && tboxNo != 0x10) {
+#endif
                         treasure_p[no].exists = 1;
                         treasure_p[no].ppane->setWhite(g_mdHIO.mTreasureWhite);
                         treasure_p[no].ppane->setBlack(g_mdHIO.mTreasureBlack);

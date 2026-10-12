@@ -2,15 +2,20 @@
 // docs/QOL_PLAN.md) change, for their Mac checks: run the same input with an option off and on and
 // compare. Not a test by itself (no exit code); any boot or input script.
 //   [cos] qol-probe f=<frame> <stage>:<room> pos=(x,y,z) spd=<speedF> ang=<shape_angle.y>
-//     roll=<checkFrontRoll> ev=<event id> "<event name>" msg=<talk message number>:<status> eye=(x,y,z)
-//     ship=<boat speedF, -1 without boat> do=<the A button's action, dActStts_*> [act=<name>:(x,y,z)]
-// COS_QOL_PROBE_ACTOR=<process name number> adds the first actor of that name (e.g. a block or the
-// grappling hook) to each line. COS_QOL_PROBE_MSG=<frame>:<message number> shows that message
-// (fopMsgM_messageSet, as a talk does) at that frame. COS_QOL_PROBE_SPAWN=<frame>:<process name>:
-// <parameters>[:<distance>] creates that actor (angle z 0xFFFF) <distance> (150) in front of the
-// player at that frame, and is the probed actor unless COS_QOL_PROBE_ACTOR says otherwise.
-// COS_QOL_PROBE_BALLAD=<frame>:<destination> starts the boat's Ballad of Gales warp (a cyclone and
-// daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat. COS_QOL_PROBE_FROM=<frame> / COS_QOL_PROBE_TO=<frame> limit the lines.
+//     roll=<checkFrontRoll> ev=<event id> "<event name>" msg=<message number>:<status> eye=(x,y,z)
+//     ship=<boat speedF, -1 without boat> do=<the A button's action, dActStts_*> sw=<switch, -1>
+//     [act=<name>:(x,y,z)]
+// Variables:
+//   COS_QOL_PROBE_FROM=<frame>, COS_QOL_PROBE_TO=<frame>   only the lines of those frames;
+//   COS_QOL_PROBE_ACTOR=<process name>   the first actor of that name (a block, the grappling hook);
+//   COS_QOL_PROBE_SWITCH=<n>             the player's room's switch n;
+//   COS_QOL_PROBE_SPAWN=<frame>:<process name>:<parameters>[:<distance>[:<angle z>]][;...] (up to 4)
+//       creates that actor <distance> (150) in front of the player (angle z default 0xFFFF) at that
+//       frame, from the player's layer; the first is the probed actor unless COS_QOL_PROBE_ACTOR says
+//       otherwise;
+//   COS_QOL_PROBE_MSG=<frame>:<message number>   shows that message (fopMsgM_messageSet) at that frame;
+//   COS_QOL_PROBE_BALLAD=<frame>:<destination>   starts the boat's Ballad of Gales warp (a cyclone and
+//       daShip_c::setTactWarp, as the song does) at that frame; the player must be on the boat.
 #include "pc_internal.h"
 
 #include "d/actor/d_a_player.h"
@@ -43,10 +48,16 @@ unsigned int sMsgNo = 0;
 fpc_ProcID sMsgId = fpcM_ERROR_PROCESS_ID_e;
 unsigned int sBalladFrame = 0;
 int sBalladTo = 0;
-unsigned int sSpawnFrame = 0;
-int sSpawnName = -1;
-u32 sSpawnParam = 0;
-float sSpawnDistance = 150.0f;
+struct Spawn {
+    unsigned int frame;
+    int name;
+    u32 param;
+    float distance;
+    s16 angleZ;
+};
+Spawn sSpawns[4];
+int sSpawnCount = 0;
+int sSwitch = -1;
 
 void* isPlayScene(void* proc, void*) {
     return fpcM_GetName(proc) == fpcNm_PLAY_SCENE_e ? proc : nullptr;
@@ -75,21 +86,30 @@ void qolProbeFrame(unsigned int frames) {
         if (const char* v = getenv("COS_QOL_PROBE_TO"); v != nullptr) {
             sTo = (unsigned int)strtoul(v, nullptr, 0);
         }
-        if (const char* v = getenv("COS_QOL_PROBE_SPAWN"); v != nullptr) {
+        for (const char* v = getenv("COS_QOL_PROBE_SPAWN"); v != nullptr && *v != '\0' && sSpawnCount < 4;) {
+            Spawn s = {0, -1, 0, 150.0f, (s16)0xFFFF};
             char* end = nullptr;
-            sSpawnFrame = (unsigned int)strtoul(v, &end, 0);
-            if (end != nullptr && *end == ':') {
-                sSpawnName = (int)strtol(end + 1, &end, 0);
+            s.frame = (unsigned int)strtoul(v, &end, 0);
+            if (*end == ':') {
+                s.name = (int)strtol(end + 1, &end, 0);
             }
-            if (end != nullptr && *end == ':') {
-                sSpawnParam = (u32)strtoul(end + 1, &end, 0);
+            if (*end == ':') {
+                s.param = (u32)strtoul(end + 1, &end, 0);
             }
-            if (end != nullptr && *end == ':') {
-                sSpawnDistance = strtof(end + 1, &end);
+            if (*end == ':') {
+                s.distance = strtof(end + 1, &end);
             }
+            if (*end == ':') {
+                s.angleZ = (s16)strtol(end + 1, &end, 0);
+            }
+            sSpawns[sSpawnCount++] = s;
             if (sActorName < 0) {
-                sActorName = sSpawnName;
+                sActorName = s.name;
             }
+            v = *end == ';' ? end + 1 : nullptr;
+        }
+        if (const char* v = getenv("COS_QOL_PROBE_SWITCH"); v != nullptr) {
+            sSwitch = (int)strtol(v, nullptr, 0);
         }
         if (const char* v = getenv("COS_QOL_PROBE_BALLAD"); v != nullptr) {
             char* end = nullptr;
@@ -113,15 +133,19 @@ void qolProbeFrame(unsigned int frames) {
     // Made from the player's layer, as the player's own requests are (pc_actor_sweep.cpp).
     layer_class* savedLayer = fpcLy_CurrentLayer();
     fpcLy_SetCurrentLayer(static_cast<base_process_class*>(player)->mLyTg.mpLayer);
-    if (sSpawnName >= 0 && frames == sSpawnFrame) {
+    for (int i = 0; i < sSpawnCount; i++) {
+        const Spawn& s = sSpawns[i];
+        if (s.name < 0 || frames != s.frame) {
+            continue;
+        }
         const s16 yaw = player->shape_angle.y;
         cXyz pos = player->current.pos;
-        pos.x += sSpawnDistance * cM_ssin(yaw);
-        pos.z += sSpawnDistance * cM_scos(yaw);
-        csXyz angle(0, (s16)(yaw + 0x8000), (s16)0xFFFF);
-        fpc_ProcID id = fopAcM_create((s16)sSpawnName, sSpawnParam, &pos, fopAcM_GetRoomNo(player), &angle);
+        pos.x += s.distance * cM_ssin(yaw);
+        pos.z += s.distance * cM_scos(yaw);
+        csXyz angle(0, (s16)(yaw + 0x8000), s.angleZ);
+        fpc_ProcID id = fopAcM_create((s16)s.name, s.param, &pos, fopAcM_GetRoomNo(player), &angle);
         writef(STDERR_FILENO, "[cos] qol-probe: actor %d (0x%08X) spawned at frame %u at (%.1f,%.1f,%.1f) (process %d)\n",
-               sSpawnName, sSpawnParam, frames, pos.x, pos.y, pos.z, (int)id);
+               s.name, s.param, frames, pos.x, pos.y, pos.z, (int)id);
     }
     if (sBalladFrame != 0 && frames == sBalladFrame) {
         // What the Ballad of Gales does on the boat once a destination is chosen
@@ -175,11 +199,12 @@ void qolProbeFrame(unsigned int frames) {
     }
     writef(STDERR_FILENO,
            "[cos] qol-probe f=%u %s:%d pos=(%.1f,%.1f,%.1f) spd=%.2f ang=%04x roll=%d ev=%d \"%s\" msg=%u:%u "
-           "eye=(%.1f,%.1f,%.1f) ship=%.2f do=%u%s\n",
+           "eye=(%.1f,%.1f,%.1f) ship=%.2f do=%u sw=%d%s\n",
            frames, dComIfGp_getStartStageName(), (int)fopAcM_GetRoomNo(player), player->current.pos.x,
            player->current.pos.y, player->current.pos.z, player->speedF, (unsigned)(u16)player->shape_angle.y,
            player->checkFrontRoll() ? 1 : 0, ev->mEventId, evName, msgNo, msgStatus, eye.x, eye.y,
-           eye.z, ship != nullptr ? ship->speedF : -1.0f, (unsigned)dComIfGp_getDoStatus(), act);
+           eye.z, ship != nullptr ? ship->speedF : -1.0f, (unsigned)dComIfGp_getDoStatus(),
+           sSwitch >= 0 ? (int)dComIfGs_isSwitch(sSwitch, fopAcM_GetRoomNo(player)) : -1, act);
 }
 
 } // namespace pc

@@ -20,6 +20,9 @@
 #include "d/actor/d_a_npc_md.h"
 #include "d/actor/d_a_npc_cb1.h"
 #include "d/actor/d_a_boko.h"
+#if TARGET_PC
+#include "pc/pc_qol.h"
+#endif
 
 static dCcD_SrcCyl l_cyl_src = {
     // dCcD_SrcGObjInf
@@ -1150,11 +1153,24 @@ BOOL daAgbsw0_c::ExeSubT() {
         return true;
     }
     else {
+#if TARGET_PC
+        // QoL "Cofres de Tingle sin Tingle Tuner" (pc_qol.h; BetterWW tingle_chests_without_tuner.asm):
+        // no GBA link needed, and any bomb reveals the chest, not only a Tingle Bomb
+        const bool qolTingle = pc_qol(PC_QOL_TINGLE_CHESTS) != 0;
+        if(qolTingle || mDoGaC_GbaLink()) {
+            if(qolTingle || mDoGac_SendStatusCheck(0xF)) {
+                if(mCyl.ChkTgHit() && mCyl.GetTgHitAc() && fopAcM_GetName(mCyl.GetTgHitAc()) == fpcNm_BOMB_e && (qolTingle || ((daBomb_c*)mCyl.GetTgHitAc())->chk_state(daBomb_c::STATE_8))) {
+                    mSE = BigLittleChange(0x12);
+                    if(!qolTingle || mDoGaC_GbaLink()) {
+                        mDoGac_SendDataSet(&mSE, 4, 0xF, 0);
+                    }
+#else
         if(mDoGaC_GbaLink()) {
             if(mDoGac_SendStatusCheck(0xF)) {
                 if(mCyl.ChkTgHit() && mCyl.GetTgHitAc() && fopAcM_GetName(mCyl.GetTgHitAc()) == fpcNm_BOMB_e && ((daBomb_c*)mCyl.GetTgHitAc())->chk_state(daBomb_c::STATE_8)) {
                     mSE = BigLittleChange(0x12);
                     mDoGac_SendDataSet(&mSE, 4, 0xF, 0);
+#endif
                     fopAcM_onSwitch(this, sw0);
                     if(getMsgNo() == 0xFFFF) {
                         fopAcM_delete(this);
