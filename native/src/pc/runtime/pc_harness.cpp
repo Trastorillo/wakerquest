@@ -218,7 +218,8 @@ void pc_harness_init(int argc, char* argv[]) {
     // until its pipeline is compiled, so what a shot shows would depend on how busy the machine
     // is (render audit A3: Orca's text missing in parallel boot-sweep runs).
     // COS_SMOKE=telescope-demo (bug B6), shore-foam (bug B7), npc-variants (bug B9), sailing and rope read
-    // the picture back too.
+    // the picture back too, and so does dmap (issue #6: a cold pipeline cache left the map panel
+    // blank at its shot in the first uncapped run of a build directory).
     const bool capturing = loadShots() ||
                            (gConfig.smoke != nullptr && (strcmp(gConfig.smoke, "telescope-demo") == 0 ||
                                                          strcmp(gConfig.smoke, "shore-foam") == 0 ||
@@ -228,7 +229,8 @@ void pc_harness_init(int argc, char* argv[]) {
                                                          strcmp(gConfig.smoke, "wind-screen") == 0 ||
                                                          strcmp(gConfig.smoke, "sun-glare") == 0 ||
                                                          strcmp(gConfig.smoke, "ky-procs") == 0 ||
-                                                         strcmp(gConfig.smoke, "chest") == 0));
+                                                         strcmp(gConfig.smoke, "chest") == 0 ||
+                                                         strcmp(gConfig.smoke, "dmap") == 0));
     gConfig.syncPipelines = envFlag("COS_SYNC_PIPELINES", capturing);
     perfOpen();
 
