@@ -4,6 +4,11 @@
  */
 
 #include "d/dolzel_rel.h" // IWYU pragma: keep
+#if VERSION == VERSION_PAL
+// SwitchWaker (docs/PAL_DISC_PLAN.md): zeldaret's unit below has no PAL branches; the PAL build
+// compiles snrubrm b09eebc's, which has them, with our host hunks (src/pal/d/actor/d_a_bst.inc).
+#include "pal/d/actor/d_a_bst.inc"
+#else // VERSION != VERSION_PAL
 #include "d/actor/d_a_bst.h"
 #include "d/actor/d_a_bomb.h"
 #include "d/actor/d_a_player.h"
@@ -3207,3 +3212,4 @@ actor_process_profile_definition g_profile_BST = {
     /* Group        */ fopAc_ENEMY_e,
     /* Cull Type    */ fopAc_CULLBOX_0_e,
 };
+#endif // VERSION != VERSION_PAL

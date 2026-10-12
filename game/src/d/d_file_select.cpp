@@ -4,6 +4,11 @@
 //
 
 #include "d/dolzel.h" // IWYU pragma: keep
+#if VERSION == VERSION_PAL
+// SwitchWaker (docs/PAL_DISC_PLAN.md): zeldaret's unit below has no PAL branches; the PAL build
+// compiles snrubrm b09eebc's, which has them, with our host hunks (src/pal/d/d_file_select.inc).
+#include "pal/d/d_file_select.inc"
+#else // VERSION != VERSION_PAL
 #include "d/d_file_select.h"
 #include "JSystem/J2DGraph/J2DScreen.h"
 #include "JSystem/J2DGraph/J2DOrthoGraph.h"
@@ -3839,3 +3844,4 @@ void dFile_select_c::ExErrorMsgPaneMove2() {
         field_0x392b = 0x18;
     }
 }
+#endif // VERSION != VERSION_PAL

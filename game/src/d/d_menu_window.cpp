@@ -4,6 +4,11 @@
 //
 
 #include "d/dolzel.h" // IWYU pragma: keep
+#if VERSION == VERSION_PAL
+// SwitchWaker (docs/PAL_DISC_PLAN.md): zeldaret's unit below has no PAL branches; the PAL build
+// compiles snrubrm b09eebc's, which has them, with our host hunks (src/pal/d/d_menu_window.inc).
+#include "pal/d/d_menu_window.inc"
+#else // VERSION != VERSION_PAL
 #include "d/d_menu_window.h"
 
 #include "JSystem/JKernel/JKRExpHeap.h"
@@ -1558,3 +1563,4 @@ msg_process_profile_definition g_profile_MENUWINDOW = {
     /* Draw Prio    */ fpcDwPi_MENUWINDOW_e,
     /* Msg SubMtd   */ &l_dMs_Method,
 };
+#endif // VERSION != VERSION_PAL
