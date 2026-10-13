@@ -122,7 +122,7 @@ Then, as on the Mac but in `build/native-linux`:
 git clone https://github.com/centollOS/SwitchWaker switchwaker && cd switchwaker
 export COS_DISC=/path/to/GZLE01.iso
 native/tools/fetch_recompcore.sh
-native/tools/gen_assets.sh --out build/native-linux/assets/GZLE01
+native/tools/gen_assets.sh --out "$PWD/build/native-linux/assets/GZLE01"   # absolute: the script works in build/decomp
 CC=clang CXX=clang++ cmake -S native -B build/native-linux -G Ninja
 ninja -C build/native-linux switchwaker        # build/native-linux/switchwaker
 build/native-linux/switchwaker
@@ -134,6 +134,9 @@ packages, SDL 3 is built from source. The regression runs with
 `COS_BUILD_DIR=build/native-linux native/tools/regress.sh` (the link census and the duplicate
 symbol census are Mac-only and skipped). Headless (no display, no GPU, e.g. in a container):
 `COS_ALLOW_CPU_ADAPTER=1 xvfb-run -a native/tools/run.sh title` uses Mesa's software Vulkan.
+
+Fullscreen (Linux and the Mac): `COS_FULLSCREEN=1` starts fullscreen, and **F11** or **Alt+Enter**
+switches between fullscreen and the window while the game runs.
 
 ## Build with Docker (any OS)
 
