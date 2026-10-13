@@ -1031,6 +1031,16 @@ void pumpEvents() {
         } else if (event->type == AURORA_DISPLAY_SCALE_CHANGED) {
             pc_fps60_hold("display scale changed");
         }
+#if !defined(__SWITCH__)
+        // F11 or Alt+Enter toggles fullscreen (COS_FULLSCREEN=1 starts in it; pc_main.cpp).
+        if (event->type == AURORA_SDL_EVENT && event->sdl.type == SDL_EVENT_KEY_DOWN && !event->sdl.key.repeat) {
+            const SDL_KeyboardEvent& key = event->sdl.key;
+            const bool altEnter = (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER) && (key.mod & SDL_KMOD_ALT) != 0;
+            if (key.key == SDLK_F11 || altEnter) {
+                VISetWindowFullscreen(!VIGetWindowFullscreen());
+            }
+        }
+#endif
         if (event->type == AURORA_EXIT) {
             const bool expected = gConfig.milestone != nullptr || gConfig.frames != 0;
             writef(STDERR_FILENO, "[cos] quit requested (window closed) at frame %u%s\n",
