@@ -3896,10 +3896,14 @@ void fopMsgM_msgDataProc_c::stringSet() {
             } else if (
                 // QoL "Texto instantáneo" (pc_qol.h; wwrando make_all_text_instant removes these tags from
                 // every message): the waits UNK03 and WAIT, and UNK04 except in messages 7726 (Maggie's
-                // father's rupees) and 2488 (Orca after the Hurricane Spin), are skipped
+                // father's rupees) and 2488 (Orca after the Hurricane Spin), are skipped. UNK04 (wait, then
+                // close by itself) also stays while Link looks through the Telescope: a scope message closes
+                // only that way, and the scene behind it moves on only when it closes (Aryll's postbox lines
+                // in the prologue stayed up for good, issue #10; wwrando skips that scene)
                 pc_qol(PC_QOL_INSTANT_TEXT) && (u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 &&
                 ((u8)bmgData[count + 4] == MsgCtrlCode_UNK03 || (u8)bmgData[count + 4] == MsgCtrlCode_WAIT ||
-                 ((u8)bmgData[count + 4] == MsgCtrlCode_UNK04 && mesgEntry->mMsgNo != 7726 && mesgEntry->mMsgNo != 2488))
+                 ((u8)bmgData[count + 4] == MsgCtrlCode_UNK04 && mesgEntry->mMsgNo != 7726 && mesgEntry->mMsgNo != 2488 &&
+                  !dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e)))
             ) {
                 count += bmgData[count + 1];
 #endif
