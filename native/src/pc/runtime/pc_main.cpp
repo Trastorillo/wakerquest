@@ -232,6 +232,11 @@ void pc_aurora_init(int argc, char* argv[]) {
     // 960x720, or as wide as COS_ASPECT at that height (1280x720 at 16:9, 1152x720 at 16:10).
     config.windowWidth = (int)(480 * 3 / 2 * pc_aspect_ratio() + 0.5f);
     config.windowHeight = 480 * 3 / 2;
+    // COS_FULLSCREEN=1: open fullscreen (borderless at the desktop's resolution). F11 or Alt+Enter
+    // toggles it at run time (pc_frame.cpp, pumpEvents).
+    if (const char* fs = getenv("COS_FULLSCREEN"); fs != nullptr && strcmp(fs, "1") == 0) {
+        config.startFullscreen = true;
+    }
     config.logLevel = LOG_INFO;
     config.allowTextureDumps = false;
     config.mem1Size = kMem1Size;

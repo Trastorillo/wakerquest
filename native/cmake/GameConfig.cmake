@@ -92,6 +92,15 @@ set(COS_GAME_INCLUDE_DIRS
 
 set(COS_PC_CONFIG_HEADER ${COS_NATIVE_ROOT}/include/pc/cos_pc_config.h)
 
+# -fno-lifetime-dse (see COS_GAME_COMPILE_OPTIONS) only where the compiler accepts it.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(-fno-lifetime-dse COS_HAVE_NO_LIFETIME_DSE)
+if(COS_HAVE_NO_LIFETIME_DSE)
+    set(COS_NO_LIFETIME_DSE $<$<COMPILE_LANGUAGE:CXX>:-fno-lifetime-dse>)
+else()
+    set(COS_NO_LIFETIME_DSE "")
+endif()
+
 set(COS_GAME_COMPILE_OPTIONS
         # Force-included first in every unit: what Metrowerks and MSL provided implicitly.
         "SHELL:-include ${COS_PC_CONFIG_HEADER}"
@@ -119,6 +128,14 @@ set(COS_GAME_COMPILE_OPTIONS
         # NULL check is deleted (daWarphr_c::_draw dereferenced a NULL demo camera). Give every
         # automatic variable defined contents so the branches stay as written. GCC 12+ accepts it.
         -ftrivial-auto-var-init=zero
+        # The game ends an object's life with an explicit destructor call and then reuses it in
+        # place: dRes_control_c::deleteRes calls resInfo->~dRes_info_c(), and newResInfo hands the
+        # same slot to the next archive. Recent clang (seen with 23.1) treats every store a
+        # destructor makes to its own object as dead and drops it, so ~dRes_info_c no longer clears
+        # mpArchive or mpDMCommand. The next archive in that slot then looks loaded while its mRes
+        # is still NULL (SIGSEGV addr=0x0 in dRes_control_c::getRes for Demo51/title.stb at the
+        # title screen). -fno-lifetime-dse keeps those stores; GCC has had the same flag.
+        ${COS_NO_LIFETIME_DSE}
         # Diagnostics only (no code change). Same set as Dusklight, plus the MWCC-isms clang
         # rejects by default but can accept with identical meaning.
         -Wno-multichar                       # 'ABCD' constants: identical big-endian encoding

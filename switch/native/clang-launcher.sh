@@ -34,7 +34,9 @@ args=()
 for arg in "$@"; do
     case $arg in
         # GCC-only code generation options; the target is set below.
-        -mtp=*|-ftls-model=*|-march=*|-mtune=*|-fmax-errors=*) ;;
+        # -fno-lifetime-dse: CMake checks it with devkitA64's GCC (GameConfig.cmake); clang 19
+        # rejects it, and does not drop a destructor's stores, so the flag is not needed here.
+        -mtp=*|-ftls-model=*|-march=*|-mtune=*|-fmax-errors=*|-fno-lifetime-dse) ;;
         *) args+=("$arg") ;;
     esac
 done
