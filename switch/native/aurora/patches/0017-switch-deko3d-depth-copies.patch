@@ -1,0 +1,28 @@
+Switch: depth EFB copies on the deko3d NRO (AURORA_GFX_DEKO3D; issue #9, the depth of field)
+
+The deko3d NRO leaves CoreFeaturesAndLimits off (as the GL NRO's adapter did), and tex_copy_conv only made
+its depth conversions with it: needs_conversion(GX_TF_Z16) was false, so GXCopyTex gave the depth of
+field's Z16 copy an RGBA8 colour texture and switch/deko/aurora blitted the depth view into it as colour.
+The composite read no depth and the effect never showed. With AURORA_GFX_DEKO3D the depth formats are
+registered without the core features (the deko3d encoder converts them with its own fixed shaders).
+
+--- a/lib/gfx/tex_copy_conv.cpp	2026-10-17 16:19:30
++++ b/lib/gfx/tex_copy_conv.cpp	2026-10-17 16:19:30
+@@ -526,6 +526,17 @@
+     }
+   }
+   // Skip depth copies in compatibility mode
++#if defined(AURORA_GFX_DEKO3D)
++  // the deko3d NRO: switch/deko/aurora/dk_encode.cpp converts depth copies with its own shaders (tex_copy_conv_z8,
++  // _z16); registering these formats makes GXCopyTex give them a conversion texture instead of an RGBA8 colour copy
++  // (the depth of field's Z16 copy). g_hasCoreFeatures stays off: the GX pipeline configs, and so the pipeline
++  // cache, are unchanged.
++  if (!webgpu::g_hasCoreFeatures) {
++    for (const auto& conv : DepthConvPipelines) {
++      g_pipelines[conv.fmt] = create_pipeline(conv, DepthShaderPreamble, g_depthBindGroupLayout);
++    }
++  }
++#endif
+   if (webgpu::g_hasCoreFeatures) {
+     for (const auto& conv : DepthConvPipelines) {
+       g_pipelines[conv.fmt] = create_pipeline(conv, DepthShaderPreamble, g_depthBindGroupLayout);
