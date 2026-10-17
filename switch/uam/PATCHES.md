@@ -66,6 +66,14 @@ Every change to upstream files is marked `SwitchWakerHD patch N`.
    instruction now gets stall 2, as with Mesa. The DKSH compiler name gains "SwitchWaker patch 8", so every
    cached DKSH is rebuilt.
 
+9. **Free a compile's memory** (`source/glsl_frontend.cpp`, `glsl_program_free`; `source/compiler_iface.cpp`,
+   `~DekoCompiler`; marked `SwitchWaker patch 9`, from SwitchWakerHD `61b7c17`): uam freed the program but not its
+   linked shaders (each its own ralloc tree: the linked IR), their programs' parameter lists (malloc, not ralloc)
+   or nv50's binary (`m_info.bin.code`, MALLOC). Freed now as Mesa's `_mesa_delete_linked_shader` and
+   `_mesa_delete_program` do. In SwitchWakerHD's first start (~7,800 compiles) this was ~130 MiB that stayed in
+   use; here it is every shader compiled on the console (the ones the bundled DKSH cache lacks). The DKSH bytes do
+   not change, so the compiler name does not either.
+
 Check: `uam_dksh_test` (`-DCOS_UAM_TEST=ON`) compiles a directory of GLSL files in one process and
 compares the DKSH bytes with reference files written by the `uam` tool (target `uam_tool`), one
 process per shader.
