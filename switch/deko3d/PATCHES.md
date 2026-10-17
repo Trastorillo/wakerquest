@@ -2,8 +2,8 @@
 
 Copied from SwitchWakerHD (`runtime/third_party/deko3d` at `bed2af7`, centollOS/SwitchWakerHD), patches
 included; the markers keep their name `SwitchWakerHD patch N`. Before, this port linked devkitPro's
-`libdeko3d.a` 0.5.0-1 (the same version). Patch 1 makes `split_alpha` (switch/deko/aurora/dk_pipeline.cpp)
-unnecessary; it stays for now (its two passes give the same result).
+`libdeko3d.a` 0.5.0-1 (the same version). Patch 1 replaced the renderer's `split_alpha` workaround (alpha
+drawn in a second pass, removed 2026-10-17).
 
 deko3d 0.5.0, https://github.com/devkitPro/deko3d at `5cc144d` (tag v0.5.0, the version of devkitPro's
 `libdeko3d.a` SwitchWakerHD linked before; LICENSE: zlib). Built by `CMakeLists.txt` (no Makefile) as the

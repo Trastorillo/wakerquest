@@ -789,6 +789,8 @@ expected here; a leak per draw or per frame is not).
   (`Pipe::alphaPass`, `dk_pipeline.cpp` `split_alpha`; logged per module). Vendoring a patched deko3d
   was dropped: the image has no `dekodef`/`dekomme`, and MME macros generated from v0.5.0 could not be
   checked against the packaged library.
+  2026-10-17: deko3d is now built from source (`switch/deko3d`, SwitchWakerHD's copy with its generated
+  files and patch 1 for this bug), so `split_alpha` and `Pipe::alphaPass` were removed.
 - Shader code loaded during a frame: the shader caches are now invalidated before the next shader
   bind (`code_take_written`).
 - The deko3d NRO pruned GL's Dawn blob cache (2.5-minute shader screen on the next GL start): its own

@@ -505,10 +505,6 @@ void draw_gx(const DrawCommand& cmd) {
     }
     bind_pipe(main);
     draw();
-    if (main->alphaPass) {
-        bind_pipe(main->alphaPass);
-        draw();
-    }
     g_stats.draws++;
     g_frame.workSinceTransfer = true;
     maybe_submit();
