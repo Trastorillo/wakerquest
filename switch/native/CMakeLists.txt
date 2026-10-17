@@ -306,10 +306,13 @@ target_include_directories(cos_switch_deko PRIVATE "${dawn_SOURCE_DIR}" "${dawn_
 target_compile_definitions(cos_switch_deko PRIVATE "COS_SWITCH_NRO_DIR=\"${_nro_dir}\""
         "COS_SWITCH_DATA_DIR=\"/switch/switchwaker/native\""
         $<$<BOOL:${COS_DK_DEBUG_LIB}>:COS_DK_DEBUG_LIB=1>)
+# deko3d 0.5.0 built from source (switch/deko3d, from SwitchWakerHD with its PATCHES.md: the command
+# buffer's control memory no longer leaks on clear) in place of devkitPro's libdeko3d / libdeko3dd
+add_subdirectory("${COS_REPO_ROOT}/switch/deko3d" "${CMAKE_BINARY_DIR}/deko3d" EXCLUDE_FROM_ALL)
 if (COS_DK_DEBUG_LIB)
-    set(_dk_lib deko3dd)
+    set(_dk_lib deko3d_debug)
 else ()
-    set(_dk_lib deko3d)
+    set(_dk_lib deko3d_release)
 endif ()
 target_link_libraries(cos_switch_deko PRIVATE cos_switch_deko_shaders imgui ZLIB::ZLIB xxHash::xxhash uamlib
         tint_api tint_lang_glsl_writer tint_lang_wgsl_reader tint_lang_wgsl_inspector
