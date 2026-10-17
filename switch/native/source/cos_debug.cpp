@@ -16,6 +16,7 @@
 //                      end of the process with the game and its audio running (cos_switch.cpp's reaper)
 // Paths of get / put / ls are relative to /switch/switchwaker (the NRO; native/ holds user/settings.ini and logs/).
 #include <arpa/inet.h>
+#include <malloc.h>
 #include <switch.h>
 #include <unistd.h>
 
@@ -65,12 +66,17 @@ debugsrv::Reply info(const debugsrv::Args&) {
     u64 total = 0, used = 0;
     svcGetInfo(&total, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
     svcGetInfo(&used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
+    // newlib's heap (Aurora, deko3d, uam, the C++ runtime): the process's used memory is the whole heap
+    // reserved at start, so a leak only shows here (mallinfo locks malloc and walks its free lists)
+    const struct mallinfo heap = mallinfo();
     const AppletType type = appletGetAppletType();
-    char b[704];
+    char b[768];
     // "game": the disc this NRO runs, whatever its file name on the card (the European build is installed
     // as switchwaker.nro too): deploy refuses to replace it with the other region's NRO
-    snprintf(b, sizeof(b), "version %s\ngame %s (%s, build " COS_SWITCH_NRO_NAME ")\n%smemory used %llu MiB of %llu MiB\nrunning as %s\naddress %s:%d\n",
+    snprintf(b, sizeof(b), "version %s\ngame %s (%s, build " COS_SWITCH_NRO_NAME ")\n%smemory used %llu MiB of %llu MiB\n"
+             "malloc heap in use %.1f MiB (arena %.1f MiB, %zu free chunks)\nrunning as %s\naddress %s:%d\n",
              COS_SWITCH_VERSION_STR, COS_GAME_ID_STR, PC_GAME_REGION_EN, status, (unsigned long long)(used >> 20), (unsigned long long)(total >> 20),
+             heap.uordblks / 1048576.0, heap.arena / 1048576.0, (size_t)heap.ordblks,
              type == AppletType_Application ? "application (the HOME menu forwarder: reload works)"
                                             : "applet or hbmenu (reload does not work: quit, then start it again)",
              ipText().c_str(), gPort);
