@@ -63,6 +63,8 @@ extern "C" void pc_settings_load_early(void); // native/src/pc/features/pc_setti
 extern "C" int pc_settings_migrate_env_file(const char* envPath, const char* oldPath);
 // mode: PcOperationMode (pc_settings.h), 0 handheld, 1 docked
 extern "C" void pc_settings_set_mode_default(const char* key, int mode, const char* value);
+void JKRPcBeginHostAlloc(); // JKRHeap.cpp host allocation scope (pc_jkr_heap.cpp)
+void JKRPcEndHostAlloc();
 
 namespace {
 
@@ -169,7 +171,13 @@ void writerMain(void*) {
 void queueBytes(const char* data, size_t size) {
     usb_log_write(data, size);
     if (!gCrashing.load(std::memory_order_relaxed)) {
-        debugsrv::log_tap(data, size); // (it takes a lock: not after a crash)
+        // (it takes a lock: not after a crash) Host memory: any thread logs, and the game thread's
+        // current JKRHeap would hold the server's log buffer; another thread growing it then freed
+        // that block into the game's heap while the game used it (JKRExpHeap::joinTwoBlocks crash
+        // on the render worker, 2026-10-17, a [dk] line during a warp tour)
+        JKRPcBeginHostAlloc();
+        debugsrv::log_tap(data, size);
+        JKRPcEndHostAlloc();
     }
     if (gLogFile == nullptr) {
         return;
