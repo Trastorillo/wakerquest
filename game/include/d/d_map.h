@@ -52,17 +52,22 @@ struct dMap_CollectPoint {
     u8 field_0x17;
 };
 
+// The sea chart's island check points, read as they are from /res/FmapDat/FmapDat.bin (issue #14).
+// TARGET_PC the count and the positions are BE(T), and the sectors s8: char is unsigned on ARM, so
+// the western and northern sectors (-3..-1) matched no grid. With the count read in host order (0)
+// no sector found its island: the 1000 x 1000 zoom stayed empty and the 200 x 200 one kept the
+// screen's first island (Forsaken Fortress). On the GameCube BE(T) is T and char is signed.
 struct FmapChkPnt {
-    /* 0x0 */ char mSectorX;
-    /* 0x1 */ char mSectorY;
-    /* 0x2 */ s16 field_0x2;
-    /* 0x4 */ s16 field_0x4;
+    /* 0x0 */ s8 mSectorX;
+    /* 0x1 */ s8 mSectorY;
+    /* 0x2 */ BE(s16) field_0x2;
+    /* 0x4 */ BE(s16) field_0x4;
     /* 0x6 */ u8 field_0x6;
 }; // Size: 0x8
 
 // fake name
 struct dMap_FmapChkPnt {
-    u32 field_0x0;
+    BE(u32) field_0x0;
     FmapChkPnt field_0x4[];
 };
 

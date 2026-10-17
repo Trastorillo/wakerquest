@@ -221,3 +221,7 @@ event-sweep 0 --stage Pjavdou:0:1:8 --preset sailing --env COS_EVENT_SWEEP=64 --
 # the rooms: the floor TLUT's palette lookup read the big-endian dmap%d.bti palette in host order, so the
 # TLUT stayed transparent and the map showed its grid alone
 dmap 0 --stage M_NewD2:0:0
+# COS_SMOKE=sea-chart (issue #14): the sea chart's island check points (FmapDat.bin) were read in host order
+# (count 0) with char sectors (unsigned on ARM), so no sector found its island: every zoom showed an empty
+# sector, then Forsaken Fortress
+sea-chart 0 --stage sea:44:206
