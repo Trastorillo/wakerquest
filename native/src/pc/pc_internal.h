@@ -342,6 +342,8 @@ void chestFrame(unsigned int frames);
 void dmapFrame(unsigned int frames);
 // COS_SMOKE=sea-chart (pc_sea_chart.cpp, issue #14): the sea chart finds each island from its sector.
 void seaChartFrame(unsigned int frames);
+// COS_SMOKE=mail-sort (pc_mail_sort.cpp, issue #19): each sorting-game letter is drawn with its own image.
+void mailSortFrame(unsigned int frames);
 // COS_SMOKE=item-sweep (pc_item_sweep.cpp): every item through a chest's item-get demo.
 void itemSweepFrame(unsigned int frames);
 // Save/load sweep (pc_save_sweep.cpp): COS_SMOKE=save-sweep saves through the save screen's steps,

@@ -225,3 +225,6 @@ dmap 0 --stage M_NewD2:0:0
 # (count 0) with char sectors (unsigned on ARM), so no sector found its island: every zoom showed an empty
 # sector, then Forsaken Fortress
 sea-chart 0 --stage sea:44:206
+# COS_SMOKE=mail-sort (issue #19): the draw buffer merged the sorting game's letters, one material with
+# six images, by a hash slot the host's image addresses share, so a letter showed another letter's image
+mail-sort 0 --stage Atorizk:0:0

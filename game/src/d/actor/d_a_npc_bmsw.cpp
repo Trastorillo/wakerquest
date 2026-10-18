@@ -6,6 +6,9 @@
 #include "d/dolzel_rel.h" // IWYU pragma: keep
 #include "d/actor/d_a_npc_bmsw.h"
 #include "res/Object/Bmsw.h"
+#if TARGET_PC
+#include "pc/game_hooks.h"
+#endif
 #include "d/d_shop.h"
 #include "d/d_snap.h"
 #include "d/d_com_inf_game.h"
@@ -764,6 +767,12 @@ void daNpc_Bmsw_c::talk01() {
 
 /* 00001A84-00001BA4       .text wait_action__12daNpc_Bmsw_cFPv */
 BOOL daNpc_Bmsw_c::wait_action(void*) {
+#if TARGET_PC
+    if (mActionStatus == ACTION_STARTING && pc_mail_sort_start()) {
+        setAction(&daNpc_Bmsw_c::shiwake_game_action, NULL);
+        return TRUE;
+    }
+#endif
     if (mActionStatus == ACTION_STARTING) {
         field_0x9DA = 1;
         field_0x9D6 = 1;
@@ -954,7 +963,11 @@ BOOL daNpc_Bmsw_c::shiwake_game_action(void*) {
             }
 
             if (field_0x930[field_0x93C]->CheckProc(&SwMail_c::Wait)
+#if TARGET_PC
+                        && dComIfG_getTimerPtr()->getStatus() != 1 && (CPad_CHECK_TRIG_A(0) || pc_mail_sort_throw())
+#else
                         && dComIfG_getTimerPtr()->getStatus() != 1 && CPad_CHECK_TRIG_A(0)
+#endif
                         && checkNextMailThrowOK()) {
 
                 s32 row = field_0x9B0 + 1;

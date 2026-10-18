@@ -1719,6 +1719,7 @@ void pc_frame_end(void) {
     chestFrame(frames);
     dmapFrame(frames);
     seaChartFrame(frames);
+    mailSortFrame(frames);
     itemSweepFrame(frames);
     saveSweepFrame(frames);
     eventSweepFrame(frames);
