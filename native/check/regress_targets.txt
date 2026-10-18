@@ -228,3 +228,7 @@ sea-chart 0 --stage sea:44:206
 # COS_SMOKE=mail-sort (issue #19): the draw buffer merged the sorting game's letters, one material with
 # six images, by a hash slot the host's image addresses share, so a letter showed another letter's image
 mail-sort 0 --stage Atorizk:0:0
+# COS_SMOKE=menu-backdrop (issue #20): with depth of field off the frame buffer copy was left out, so the
+# pause menu opened over black or an old frame (its backdrop, the game over screen and the heat haze read it)
+menu-backdrop 0 --stage Asoko:0:0:2 --env COS_DOF=0
+menu-backdrop 0 --stage Asoko:0:0:2

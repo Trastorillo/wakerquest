@@ -344,6 +344,8 @@ void dmapFrame(unsigned int frames);
 void seaChartFrame(unsigned int frames);
 // COS_SMOKE=mail-sort (pc_mail_sort.cpp, issue #19): each sorting-game letter is drawn with its own image.
 void mailSortFrame(unsigned int frames);
+// COS_SMOKE=menu-backdrop (pc_menu_backdrop.cpp, issue #20): the pause menu opens over the current frame.
+void menuBackdropFrame(unsigned int frames);
 // COS_SMOKE=item-sweep (pc_item_sweep.cpp): every item through a chest's item-get demo.
 void itemSweepFrame(unsigned int frames);
 // Save/load sweep (pc_save_sweep.cpp): COS_SMOKE=save-sweep saves through the save screen's steps,

@@ -695,8 +695,10 @@ void drawDepth(view_class* view, view_port_class* viewport, int depth) {
 
 #if TARGET_PC
     // COS_DOF=0 (pc_gpu_opts.h): no depth of field while neither the monotone effect nor the
-    // motion blur (motionBlure reads the colour copy) needs it. The copies and the composite quad
-    // are left out; the letterbox bars and the scissor/projection at the end are not.
+    // motion blur needs it. The depth copy and the composite quad are left out; the colour copy is
+    // not (issue #20): the pause menus' backdrop (d_menu_capture.inc), the game over screen, fade2
+    // and the heat haze sample it too, and without it they showed black or an old frame. The
+    // letterbox bars and the scissor/projection at the end stay as well.
     const bool dof = pc_dof_enabled() || mDoGph_gInf_c::isMonotone() || mDoGph_gInf_c::isBlure();
     if (dof)
 #endif
@@ -704,11 +706,11 @@ void drawDepth(view_class* view, view_port_class* viewport, int depth) {
     GXSetTexCopySrc(x, y, w, h);
     GXSetTexCopyDst(hw, hh, GX_TF_Z16, GX_TRUE);
     GXCopyTex(zbuf, GX_FALSE);
+    }
 
     GXSetTexCopySrc(x, y, w, h);
     GXSetTexCopyDst(hw, hh, (GXTexFmt)mDoGph_gInf_c::getFrameBufferTimg()->format, GX_TRUE);
     GXCopyTex(fbbuf, GX_FALSE);
-    }
 
     GXInitTexObj(mDoGph_gInf_c::getZbufferTexObj(), zbuf, hw, hh, GX_TF_IA8, GX_CLAMP, GX_CLAMP, GX_FALSE);
     GXInitTexObjLOD(mDoGph_gInf_c::getZbufferTexObj(), GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
