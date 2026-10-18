@@ -725,8 +725,10 @@ struct Row {
     const PcSettingDesc* desc = nullptr;
 };
 
-const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Calidad de vida", "Depuración"};
-const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Quality of life", "Debug"};
+const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Calidad de vida", "Depuración",
+                                                "Controles"};
+const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Quality of life", "Debug",
+                                                  "Controls"};
 
 struct Menu {
     bool initialized = false;
@@ -779,7 +781,9 @@ std::vector<Row> rowsOf(int tab) {
     }
     for (int i = 0; i < pc_settings_count(); i++) {
         const PcSettingDesc* d = pc_settings_at(i);
-        if (d != nullptr && d->tab == tab) {
+        // Issue #15: a button remap action (PC_SETTING_REMAP) is not a row that cycles its choices;
+        // its own "press a button" row comes with the remap rows.
+        if (d != nullptr && d->tab == tab && !(d->flags & PC_SETTING_REMAP)) {
             rows.push_back({RowKind::Setting, d});
         }
     }

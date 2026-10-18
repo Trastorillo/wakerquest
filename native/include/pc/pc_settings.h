@@ -46,7 +46,8 @@ typedef enum PcSettingTab {
     PC_SETTING_TAB_PERFORMANCE = 1, /* "Rendimiento" */
     PC_SETTING_TAB_QOL = 2,         /* "Calidad de vida" (pc_qol.h) */
     PC_SETTING_TAB_DEBUG = 3,       /* "Depuración" */
-    PC_SETTING_TABS = 4
+    PC_SETTING_TAB_CONTROLS = 4,    /* "Controles" (pc_button_remap.h, issue #15) */
+    PC_SETTING_TABS = 5
 } PcSettingTab;
 
 typedef enum PcOperationMode {
@@ -60,6 +61,8 @@ typedef enum PcOperationMode {
 #define PC_SETTING_PER_MODE 0x2u  /* one value per operation mode */
 #define PC_SETTING_NO_SAVE 0x4u   /* a value for this run only, never written to the file */
 #define PC_SETTING_SWITCH_ONLY 0x8u /* shown on the Mac, but only the Switch acts on it */
+#define PC_SETTING_REMAP 0x10u     /* a button remap action (pc_button_remap.h): the menu shows it as a
+                                      "press a button" row, not a row that cycles its choices */
 
 typedef struct PcSettingChoice {
     const char* value; /* as in the environment variable, e.g. "1.5" */
@@ -99,6 +102,11 @@ const char* pc_settings_get_mode(const char* key, PcOperationMode mode);
    -1 if the key is unknown or locked. */
 int pc_settings_set_mode(const char* key, PcOperationMode mode, const char* value);
 int pc_settings_set(const char* key, const char* value); /* for the current mode */
+/* Drops the stored value(s) of a registered key (every mode's), so it is back to its default (the
+   platform's or the description's), saves the file, and when the value in effect changes calls the
+   apply function and the subscribers. -1 if the key is unknown or locked. (Issue #15: a remapped
+   action back on its default input leaves the file.) */
+int pc_settings_clear(const char* key);
 /* 1 if the environment fixed the value at start (the Mac's and Linux's; never on the Switch). */
 int pc_settings_locked(const char* key);
 /* 1 if a PC_SETTING_RESTART setting now differs from the value this run started with. */

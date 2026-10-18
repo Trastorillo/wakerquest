@@ -1,0 +1,47 @@
+PAD: a trigger axis as a digital button (PAD_NATIVE_TRIGGER_LEFT / _RIGHT)
+
+Button remapping (issue #15, docs/BUTTON_REMAP_DESIGN.md) lets ZL or ZR drive a digital GameCube
+action (e.g. ZL as Start). SDL reports the triggers as axes, not buttons, so a PADButtonMapping could
+not name them: its nativeButton now takes PAD_NATIVE_TRIGGER_LEFT or PAD_NATIVE_TRIGGER_RIGHT, and
+PADRead's button loop counts such a mapping as pressed while SDL_GetGamepadAxis of that trigger is
+above 16000 (about half way) instead of calling SDL_GetGamepadButton. Nothing else changes: the
+analog L/R still come from the axis mappings (PAD_AXIS_TRIGGER_L/R), and a trigger that drives a
+digital action is simply left out of them by the caller.
+
+diff --git a/include/dolphin/pad.h b/include/dolphin/pad.h
+index 252fca7..7a6c4d3 100644
+--- a/include/dolphin/pad.h
++++ b/include/dolphin/pad.h
+@@ -88,6 +88,10 @@ extern "C" {
+ #endif
+ 
+ #define PAD_NATIVE_BUTTON_INVALID 0xFFFFFFFF
++/* A PADButtonMapping's nativeButton that is a trigger axis instead of an SDL gamepad button: pressed past
++   half way (SDL_GetGamepadAxis > 16000), e.g. ZL given a digital action. */
++#define PAD_NATIVE_TRIGGER_LEFT 0x10000u
++#define PAD_NATIVE_TRIGGER_RIGHT 0x10001u
+ 
+ typedef struct PADStatus {
+   u16 button;
+diff --git a/lib/dolphin/pad/pad.cpp b/lib/dolphin/pad/pad.cpp
+index 4e135d2..ffc16fa 100644
+--- a/lib/dolphin/pad/pad.cpp
++++ b/lib/dolphin/pad/pad.cpp
+@@ -805,7 +805,16 @@ u32 PADRead(PADStatus* status) {
+       bool rightTriggerSet = false;
+       std::ranges::for_each(controller->m_buttonMapping, [&controller, &i, &status, &leftTriggerSet,
+                                                           &rightTriggerSet](const auto& mapping) {
+-        if (SDL_GetGamepadButton(controller->m_controller, static_cast<SDL_GamepadButton>(mapping.nativeButton))) {
++        bool pressed = false;
++        if (mapping.nativeButton == PAD_NATIVE_TRIGGER_LEFT || mapping.nativeButton == PAD_NATIVE_TRIGGER_RIGHT) {
++          // A trigger axis as a digital button (PAD_NATIVE_TRIGGER_*).
++          const auto axis = mapping.nativeButton == PAD_NATIVE_TRIGGER_LEFT ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER
++                                                                            : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
++          pressed = SDL_GetGamepadAxis(controller->m_controller, axis) > 16000;
++        } else {
++          pressed = SDL_GetGamepadButton(controller->m_controller, static_cast<SDL_GamepadButton>(mapping.nativeButton));
++        }
++        if (pressed) {
+           status[i].button |= mapping.padButton;
+         }
+ 
