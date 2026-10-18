@@ -14,6 +14,7 @@
 #include "JSystem/JKernel/JKRHeap.h"
 #include "dolphin/types.h"
 #if TARGET_PC
+#include "pc/game_hooks.h"
 #include "pc/pc_gpu_opts.h"
 #endif
 
@@ -88,7 +89,17 @@ int J3DDrawBuffer::entryMatSort(J3DMatPacket* pMatPacket) {
         return 1;
     } else {
         for (J3DMatPacket* pkt = (J3DMatPacket*)mpBuffer[slot]; pkt != NULL; pkt = (J3DMatPacket*)pkt->getNextPacket()) {
+#if TARGET_PC
+            // Issue #19: a merged packet is drawn with the list (and the textures) of the packet it
+            // joins. The GameCube merges in a slot only what isSame finds alike, relying on the slot
+            // (a hash of the image's address) to keep different images apart; the host's addresses
+            // do not: the post office's letters (d_a_npc_bmsw, six images on one material, one per
+            // box) fall in two slots, so a letter was drawn with another letter's image.
+            if (pkt->isSame(pMatPacket) && pkt->isSameTexture(pMatPacket->getMaterial()->getTevBlock(), texture)) {
+                pc_mail_sort_merged(pkt, pMatPacket);
+#else
             if (pkt->isSame(pMatPacket)) {
+#endif
                 pkt->addShapePacket(pMatPacket->getShapePacket());
                 return 0;
             }

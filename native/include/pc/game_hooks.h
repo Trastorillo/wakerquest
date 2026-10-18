@@ -272,4 +272,16 @@ namespace JAInter { namespace BankWave { struct initOnCode_s; } }
    the number of list words before the list's own terminator. */
 JAInter::BankWave::initOnCode_s* JAIPcMakeInitOnCodeTable(BE(u32)* list, int* words);
 
+/* ---- Letter sorting smoke (d_a_npc_bmsw.cpp, J3DDrawBuffer.cpp), native/src/pc/harness/smokes/
+   pc_mail_sort.cpp (COS_SMOKE=mail-sort, issue #19) ----------------------------------------- */
+
+class J3DMatPacket;
+
+/* daNpc_Bmsw_c::wait_action: start the letter game at once (no talk), once. */
+bool pc_mail_sort_start();
+/* daNpc_Bmsw_c::shiwake_game_action: throw the waiting letter now (as A would). */
+bool pc_mail_sort_throw();
+/* J3DDrawBuffer::entryMatSort: `joined` is about to be drawn with `into`'s list. */
+void pc_mail_sort_merged(J3DMatPacket* into, J3DMatPacket* joined);
+
 #endif /* PC_GAME_HOOKS_H */

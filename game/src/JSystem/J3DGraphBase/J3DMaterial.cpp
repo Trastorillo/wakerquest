@@ -6,6 +6,7 @@
 #include "JSystem/JSystem.h" // IWYU pragma: keep
 
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include <string.h>
 #include "JSystem/J3DGraphBase/J3DGD.h"
 #include "JSystem/J3DGraphBase/J3DPacket.h"
 #include "dolphin/types.h"
@@ -226,6 +227,15 @@ void J3DMatPacket::loadTexture(J3DTevBlock* pTevBlock) {
     } else {
         pTevBlock->loadTexture();
     }
+}
+
+bool J3DMatPacket::isSameTexture(J3DTevBlock* pTevBlock, J3DTexture* pTexture) const {
+    if (mTexNoRecNum == 0) {
+        return true;
+    }
+    u16 texNo[8];
+    return mpTexture == pTexture && pTevBlock->getTexNoArray(texNo) == mTexNoRecNum &&
+           memcmp(texNo, mTexNoRec, mTexNoRecNum * sizeof(u16)) == 0;
 }
 #endif
 

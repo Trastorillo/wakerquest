@@ -226,6 +226,9 @@ public:
     // with its later numbers against the earlier table (an index past the table's end).
     void recordTexture(J3DTevBlock* pTevBlock);
     void loadTexture(J3DTevBlock* pTevBlock);
+    // Issue #19: whether this packet's list was built with the textures pTevBlock has now in the
+    // texture table pTexture (see J3DDrawBuffer::entryMatSort).
+    bool isSameTexture(J3DTevBlock* pTevBlock, J3DTexture* pTexture) const;
 #else
     void setTexture(J3DTexture* pTexture) { mpTexture = pTexture; }
 #endif
