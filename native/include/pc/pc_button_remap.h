@@ -7,7 +7,8 @@
  * PC_SETTING_REMAP), whose value names the physical input by the letter printed on a Switch
  * controller: a (East), b (South), x (North), y (West), l, r, zl, zr, plus, up, down, left, right,
  * lstick, rstick (native/src/pc/features/pc_button_remap_map.h). The settings file holds a line only
- * for an action that differs from the default (today's mapping); a set that is not valid (an unknown
+ * for an action that differs from the default (today's mapping: by position on the Mac and Linux, by
+ * printed label on the Switch, pc::remap::defaultMap); a set that is not valid (an unknown
  * value, an input used twice) applies the whole default map, with one "[cos] button-remap:" line.
  *
  * The map in effect is written into Aurora's per-controller button and axis mappings of every

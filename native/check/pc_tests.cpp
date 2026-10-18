@@ -782,6 +782,26 @@ void testButtonRemapMap() {
     CHECK(d[(size_t)Action::Left] == Input::Left);
     CHECK(d[(size_t)Action::Right] == Input::Right);
     CHECK(isValid(d));
+    // The host build is the Mac/Linux one: its default is the positional table.
+    CHECK(d == defaultMapFor(false));
+
+    // Both platform tables explicitly: positional (Mac/Linux) and by label (the Switch's SDL shim).
+    {
+        const Map pos = defaultMapFor(false);
+        const Map lab = defaultMapFor(true);
+        const Input wantPos[(size_t)Action::Count] = {Input::B,  Input::A,  Input::Y,  Input::X,
+                                                      Input::R,  Input::ZL, Input::ZR, Input::Plus,
+                                                      Input::Up, Input::Down, Input::Left, Input::Right};
+        const Input wantLab[(size_t)Action::Count] = {Input::A,  Input::B,  Input::X,  Input::Y,
+                                                      Input::R,  Input::ZL, Input::ZR, Input::Plus,
+                                                      Input::Up, Input::Down, Input::Left, Input::Right};
+        for (size_t i = 0; i < (size_t)Action::Count; ++i) {
+            CHECK(pos[i] == wantPos[i]);
+            CHECK(lab[i] == wantLab[i]);
+        }
+        CHECK(isValid(pos));
+        CHECK(isValid(lab));
+    }
 
     // Taking an input another action holds swaps the two.
     {

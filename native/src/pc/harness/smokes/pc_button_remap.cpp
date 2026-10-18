@@ -8,7 +8,8 @@
 //      its Aurora button and axis mappings copied, before any remap;
 //   then each check presses, waits kHoldFrames, reads, releases and waits kHoldFrames, and logs
 //   "[cos] button-remap: <name>: ok|FAIL":
-//   1. default: East (the A label) gives the game's B, South (B label) its A;
+//   1. default: East (the A label) gives the game's B, South (B label) its A (the Mac's positional default,
+//      defaultMapFor(false); the Switch's is by label and is checked by hand on the console);
 //   2. swap: A given the A label (pc_button_remap_assign) swaps with B: East gives A, South B, and
 //      the settings file has COS_PAD_A=a and COS_PAD_B=b;
 //   3. trigger as button: Start given ZL (L takes Plus): the left trigger axis pressed fully gives

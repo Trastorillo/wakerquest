@@ -7,7 +7,9 @@
 // controller and gives a new one its type's default table, so a controller connected later gets the
 // remap on the frame it appears. Each controller of a standard type (see isStandard) gets:
 //   - the map is the default: Aurora's own default table back (PADRestoreDefaultMapping, buttons and
-//     axes), so a player who never remaps plays exactly as before;
+//     axes), so a player who never remaps plays exactly as before. The default map (defaultMap) is that
+//     table read through nativeButton below: by position on the Mac and Linux (the GameCube's A on the
+//     south button, labelled B), by label on the Switch (A on A), so the two always agree;
 //   - otherwise one PADButtonMapping per action (the input's SDL gamepad button, or
 //     PAD_NATIVE_TRIGGER_LEFT/RIGHT for ZL/ZR: Aurora patch 0022 reads the trigger axis as a button).
 //     L and R are analog too: on ZL/ZR their button entry is empty and PAD_AXIS_TRIGGER_L/R reads that
@@ -83,7 +85,8 @@ const ActionInfo kActionInfo[kActions] = {
 // The SDL gamepad button (or Aurora's trigger-as-button value) behind each input. The face buttons
 // are named by their printed letter: SDL 3 on the Mac and Linux reports them by position (a Switch
 // controller's A is east), Aurora's SDL shim on the Switch by label (the Switch's A is south: it maps
-// HidNpadButton_A to SDL_GAMEPAD_BUTTON_SOUTH, switch/aurora/sdl3_shim).
+// HidNpadButton_A to SDL_GAMEPAD_BUTTON_SOUTH, switch/aurora/sdl3_shim). defaultMapFor follows the same
+// split, so the default map always names the buttons Aurora's Pro Controller table uses.
 u32 nativeButton(Input in) {
     switch (in) {
 #if defined(__SWITCH__)

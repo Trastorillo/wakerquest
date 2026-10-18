@@ -4,7 +4,8 @@
 // cos_pc_tests checks it on the host; the SDL side (reading inputs, config, menu) builds on it.
 //
 // Input::A..Y are the printed Switch letters (A = East, B = South, X = North, Y = West). The
-// default map is the one the port always used: the GC A button on the south face button, and so on.
+// default map is the one the port always used (defaultMapFor: by position on the Mac, by label on the
+// Switch).
 // A valid map gives every action its own input, so assigning an input another action holds swaps
 // the two instead of leaving one action without a button.
 
@@ -24,12 +25,17 @@ enum class Input : uint8_t {
 
 using Map = std::array<Input, (size_t)Action::Count>;
 
-inline Map defaultMap() {
+// The default map: what Aurora's Pro Controller table gives today. labelLayout false (the Mac and
+// Linux: SDL 3 reports the face buttons by position) puts the GameCube's A on the south button, the
+// one labelled B on a Switch controller, and so on by position. labelLayout true (the Switch: the
+// libnx SDL shim maps HidNpadButton_A to SDL's south button, so Aurora's table works by label)
+// puts each GameCube face button on the Switch button printed with the same letter.
+inline Map defaultMapFor(bool labelLayout) {
     Map m{};
-    m[(size_t)Action::A] = Input::B;
-    m[(size_t)Action::B] = Input::A;
-    m[(size_t)Action::X] = Input::Y;
-    m[(size_t)Action::Y] = Input::X;
+    m[(size_t)Action::A] = labelLayout ? Input::A : Input::B;
+    m[(size_t)Action::B] = labelLayout ? Input::B : Input::A;
+    m[(size_t)Action::X] = labelLayout ? Input::X : Input::Y;
+    m[(size_t)Action::Y] = labelLayout ? Input::Y : Input::X;
     m[(size_t)Action::Z] = Input::R;
     m[(size_t)Action::L] = Input::ZL;
     m[(size_t)Action::R] = Input::ZR;
@@ -39,6 +45,15 @@ inline Map defaultMap() {
     m[(size_t)Action::Left] = Input::Left;
     m[(size_t)Action::Right] = Input::Right;
     return m;
+}
+
+// This platform's default map.
+inline Map defaultMap() {
+#if defined(__SWITCH__)
+    return defaultMapFor(true);
+#else
+    return defaultMapFor(false);
+#endif
 }
 
 // The config key of an action.
