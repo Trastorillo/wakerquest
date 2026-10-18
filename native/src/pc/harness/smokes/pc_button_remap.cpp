@@ -27,7 +27,9 @@
 //  10. capture swallows navigation: on row B, confirm, then D-pad Down: B = down (Down takes B's old
 //      input, a), the menu still open on row B;
 //  11. cancel minus: confirm, then Minus: the map unchanged, the menu still open;
-//  12. cancel timeout: confirm, then nothing for 330 frames: the capture ends, the map unchanged;
+//  12. cancel timeout: confirm, then nothing: the capture ends on its own within 8 s of wall time
+//      (the frame rate may be uncapped, as in regress.sh) and no sooner than 4.9 s after it was
+//      seen open, the map unchanged;
 //  13. restore row: up twice to the last row, "Restaurar controles por defecto", confirm: the default
 //      map and no COS_PAD_ line; South (B) closes the menu.
 // Started with an invalid set (e.g. --env COS_PAD_A=b --env COS_PAD_B=b) the remap applies the
@@ -404,7 +406,8 @@ bool closed() {
 }
 
 // One press on the Pro Controller: `button` (or -1) and, with `combo`, both triggers and Minus too;
-// held `hold` frames, released, `wait` frames more, then `verify`.
+// held `hold` frames, released, `wait` frames more (with `timeout`, then until the capture ended on
+// wall time, see runMenu), then `verify`.
 struct MenuOp {
     const char* check;
     void (*before)();
@@ -413,7 +416,14 @@ struct MenuOp {
     unsigned int hold, wait;
     bool (*verify)();
     bool last;
+    bool timeout = false;
 };
+
+// The capture's timeout (pc_menu.cpp, 5000 ms) is wall time: the smoke waits on wall time too.
+constexpr uint64_t kTimeoutMinNs = 4900ull * 1000000ull; // no sooner than this after it was seen open
+constexpr uint64_t kTimeoutMaxNs = 8000ull * 1000000ull; // ended by then (from the press)
+uint64_t sOpStartNs = 0;      // the press of the current op
+uint64_t sCaptureSeenNs = 0;  // the first frame of the current op with the capture open (0: not yet)
 const MenuOp kMenuOps[] = {
     {"confirm not captured", nullptr, -1, true, 4, 8, menuOpened, false},
     {"confirm not captured", nullptr, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, false, 4, 8, onRowA, false},
@@ -424,7 +434,7 @@ const MenuOp kMenuOps[] = {
     {"capture swallows navigation", nullptr, SDL_GAMEPAD_BUTTON_DPAD_DOWN, false, 4, 8, swallowed, true},
     {"cancel minus", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, capturingB, false},
     {"cancel minus", nullptr, SDL_GAMEPAD_BUTTON_BACK, false, 4, 8, unchanged, true},
-    {"cancel timeout", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 330, unchanged, true},
+    {"cancel timeout", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, unchanged, true, true},
     {"restore row", nullptr, SDL_GAMEPAD_BUTTON_DPAD_UP, false, 4, 8, nullptr, false},
     {"restore row", nullptr, SDL_GAMEPAD_BUTTON_DPAD_UP, false, 4, 8, onRestoreRow, false},
     {"restore row", nullptr, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, restored, false},
@@ -575,8 +585,13 @@ void runMenu(unsigned int frames) {
         setMenuInput(op, true);
         sPhase = kRead;
         sSince = 0;
+        sOpStartNs = monotonicNs();
+        sCaptureSeenNs = 0;
         return;
     case kRead:
+        if (sCaptureSeenNs == 0 && menuSeen().capture >= 0) {
+            sCaptureSeenNs = monotonicNs();
+        }
         if (++sSince < op.hold) {
             return;
         }
@@ -587,6 +602,26 @@ void runMenu(unsigned int frames) {
     case kRelease:
         if (++sSince < op.wait) {
             return;
+        }
+        if (op.timeout) {
+            const uint64_t now = monotonicNs();
+            const int capture = menuSeen().capture;
+            if (sCaptureSeenNs == 0 && capture >= 0) {
+                sCaptureSeenNs = now;
+            }
+            if (capture >= 0 && now - sOpStartNs < kTimeoutMaxNs) {
+                return; // still open: wait on
+            }
+            const double openMs = sCaptureSeenNs != 0 ? (double)(now - sCaptureSeenNs) / 1e6 : -1.0;
+            writef(STDERR_FILENO, "[cos] button-remap: %s: the capture was open %.0f ms after it was seen (%u frames)\n",
+                   op.check, openMs, sSince);
+            if (capture >= 0) {
+                failNote("the capture did not end within 8 s");
+            } else if (sCaptureSeenNs == 0) {
+                failNote("the capture was never seen open");
+            } else if (now - sCaptureSeenNs < kTimeoutMinNs) {
+                failNote("the capture ended before its 5 s timeout");
+            }
         }
         if (op.verify != nullptr && !op.verify()) {
             sCheckFailed = true;
