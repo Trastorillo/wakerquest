@@ -20,6 +20,16 @@
 //      A on its port (Aurora's PADStatus for that port, the game reads port 0 only);
 //   7. gc adapter untouched: the GameCube adapter's mappings still equal the copy of step 0;
 //   8. restore: pc_button_remap_restore_defaults leaves no COS_PAD_ line in the file; East gives B.
+// Then the options menu (pc_menu.cpp), driven by the same Pro Controller (SDL's labels are the
+// Switch's: East = A, South = B): ZL+ZR+Minus opens it, R moves to Controles (the A row), and:
+//   9. confirm not captured: East (confirm) held 30 frames opens the capture of A and is not taken;
+//      West then gives A the Y button (A = y), and X takes A's old input (b);
+//  10. capture swallows navigation: on row B, confirm, then D-pad Down: B = down (Down takes B's old
+//      input, a), the menu still open on row B;
+//  11. cancel minus: confirm, then Minus: the map unchanged, the menu still open;
+//  12. cancel timeout: confirm, then nothing for 330 frames: the capture ends, the map unchanged;
+//  13. restore row: up twice to the last row, "Restaurar controles por defecto", confirm: the default
+//      map and no COS_PAD_ line; South (B) closes the menu.
 // Started with an invalid set (e.g. --env COS_PAD_A=b --env COS_PAD_B=b) the remap applies the
 // default map with one log line: the smoke runs check 1 only (the environment locks the keys, so
 // the later checks cannot assign) and exits after it.
@@ -58,6 +68,7 @@ State sState = kOff;
 #if !defined(__SWITCH__)
 
 namespace remap = pc::remap;
+using Input = remap::Input;
 
 constexpr unsigned int kHoldFrames = 3;
 constexpr unsigned int kAttachFrames = 120; // a virtual pad must reach Aurora (and get a port) by then
@@ -288,6 +299,139 @@ const Step kSteps[] = {
 };
 constexpr size_t kStepCount = sizeof(kSteps) / sizeof(kSteps[0]);
 
+// ---- the options menu stage (checks 9-13) ----
+
+remap::Map sSnapshot; // the map before a capture that must change nothing
+
+// The menu's state: open, its tab, the selected row and the action being captured (-1: none).
+struct MenuSeen {
+    bool open;
+    int tab, row, capture;
+};
+MenuSeen menuSeen() {
+    MenuSeen s{menuOpen(), -1, -1, -1};
+    menuSmokeState(&s.tab, &s.row, &s.capture);
+    return s;
+}
+
+remap::Map currentMap() {
+    remap::Map m{};
+    for (size_t i = 0; i < m.size(); i++) {
+        m[i] = (remap::Input)pc_button_remap_current((int)i);
+    }
+    return m;
+}
+
+Input inputOf(remap::Action a) {
+    return (Input)pc_button_remap_current((int)a);
+}
+
+bool expectMenu(bool open, int row, int capture) {
+    const MenuSeen s = menuSeen();
+    writef(STDERR_FILENO, "[cos] button-remap: menu open %d tab %d row %d capture %d\n", (int)s.open, s.tab, s.row,
+           s.capture);
+    bool ok = s.open == open;
+    if (open) {
+        ok = ok && s.tab == PC_SETTING_TAB_CONTROLS && (row < 0 || s.row == row) && s.capture == capture;
+    }
+    if (!ok) {
+        failNote("the menu is not where it should be");
+    }
+    return ok;
+}
+
+bool expectMap(const remap::Map& want, const char* what) {
+    const bool ok = currentMap() == want;
+    if (!ok) {
+        failNote(what);
+    }
+    return ok;
+}
+
+void snapshot() {
+    sSnapshot = currentMap();
+}
+bool menuOpened() {
+    const bool ok = menuOpen();
+    if (!ok) {
+        failNote("ZL+ZR+Minus did not open the menu");
+    }
+    return ok;
+}
+bool onRowA() {
+    return expectMenu(true, 0, -1);
+}
+bool capturingA() {
+    return expectMenu(true, 0, (int)remap::Action::A) &&
+           expectMap(remap::defaultMap(), "the confirm press was taken by the capture");
+}
+bool confirmNotCaptured() {
+    const bool ok = inputOf(remap::Action::A) == Input::Y && inputOf(remap::Action::X) == Input::B;
+    if (!ok) {
+        failNote("A is not on y with X on b");
+    }
+    return expectMenu(true, 0, -1) && ok;
+}
+bool onRowB() {
+    return expectMenu(true, 1, -1);
+}
+bool capturingB() {
+    return expectMenu(true, 1, (int)remap::Action::B);
+}
+bool swallowed() {
+    const bool ok = inputOf(remap::Action::B) == Input::Down && inputOf(remap::Action::Down) == Input::A;
+    if (!ok) {
+        failNote("B is not on down with Down on a");
+    }
+    return expectMenu(true, 1, -1) && ok;
+}
+bool unchanged() {
+    return expectMenu(true, 1, -1) && expectMap(sSnapshot, "a cancelled capture changed the map");
+}
+bool onRestoreRow() {
+    return expectMenu(true, (int)remap::Action::Count, -1);
+}
+bool restored() {
+    const bool ok = !fileHasRemapLine();
+    if (!ok) {
+        failNote("a COS_PAD_ line is still in the settings file");
+    }
+    return expectMenu(true, (int)remap::Action::Count, -1) && expectMap(remap::defaultMap(), "not the default map") &&
+           ok;
+}
+bool closed() {
+    return expectMenu(false, -1, -1);
+}
+
+// One press on the Pro Controller: `button` (or -1) and, with `combo`, both triggers and Minus too;
+// held `hold` frames, released, `wait` frames more, then `verify`.
+struct MenuOp {
+    const char* check;
+    void (*before)();
+    int button;
+    bool combo;
+    unsigned int hold, wait;
+    bool (*verify)();
+    bool last;
+};
+const MenuOp kMenuOps[] = {
+    {"confirm not captured", nullptr, -1, true, 4, 8, menuOpened, false},
+    {"confirm not captured", nullptr, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, false, 4, 8, onRowA, false},
+    {"confirm not captured", nullptr, SDL_GAMEPAD_BUTTON_EAST, false, 30, 8, capturingA, false},
+    {"confirm not captured", nullptr, SDL_GAMEPAD_BUTTON_WEST, false, 4, 8, confirmNotCaptured, true},
+    {"capture swallows navigation", nullptr, SDL_GAMEPAD_BUTTON_DPAD_DOWN, false, 4, 8, onRowB, false},
+    {"capture swallows navigation", nullptr, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, capturingB, false},
+    {"capture swallows navigation", nullptr, SDL_GAMEPAD_BUTTON_DPAD_DOWN, false, 4, 8, swallowed, true},
+    {"cancel minus", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, capturingB, false},
+    {"cancel minus", nullptr, SDL_GAMEPAD_BUTTON_BACK, false, 4, 8, unchanged, true},
+    {"cancel timeout", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 330, unchanged, true},
+    {"restore row", nullptr, SDL_GAMEPAD_BUTTON_DPAD_UP, false, 4, 8, nullptr, false},
+    {"restore row", nullptr, SDL_GAMEPAD_BUTTON_DPAD_UP, false, 4, 8, onRestoreRow, false},
+    {"restore row", nullptr, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, restored, false},
+    {"restore row", nullptr, SDL_GAMEPAD_BUTTON_SOUTH, false, 4, 8, closed, true},
+};
+constexpr size_t kMenuOpCount = sizeof(kMenuOps) / sizeof(kMenuOps[0]);
+
 // Per step: kBefore (run `before`), kPort (wait for the pad's port), kPress, kRead (after
 // kHoldFrames), kRelease (kHoldFrames more), then the next step.
 enum Phase { kBefore, kPort, kPress, kRead, kRelease };
@@ -296,6 +440,8 @@ Phase sPhase = kBefore;
 unsigned int sSince = 0;
 unsigned int sAttachSince = 0;
 bool sInvalidStart = false;
+bool sInMenu = false;   // the step table is done: the menu ops run
+size_t sMenuOp = 0;
 
 void setInput(const Step& s, bool down) {
     if (s.pad == nullptr) {
@@ -397,6 +543,61 @@ void runSteps(unsigned int frames) {
         sStep++;
         sPhase = kBefore;
         if (sStep >= kStepCount) {
+            sInMenu = true; // checks 9-13: the options menu
+        }
+        return;
+    }
+}
+
+void setMenuInput(const MenuOp& op, bool down) {
+    if (op.combo) {
+        const int value = down ? SDL_JOYSTICK_AXIS_MAX : SDL_JOYSTICK_AXIS_MIN;
+        SDL_SetJoystickVirtualAxis(sPro.joy, sPro.axis[SDL_GAMEPAD_AXIS_LEFT_TRIGGER], value);
+        SDL_SetJoystickVirtualAxis(sPro.joy, sPro.axis[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER], value);
+        SDL_SetJoystickVirtualButton(sPro.joy, sPro.button[SDL_GAMEPAD_BUTTON_BACK], down);
+    }
+    if (op.button >= 0) {
+        SDL_SetJoystickVirtualButton(sPro.joy, sPro.button[op.button], down);
+    }
+}
+
+// Per op: kBefore (run `before`, press), kRead (held `hold` frames: release), kRelease (`wait` frames
+// more: verify), then the next op.
+void runMenu(unsigned int frames) {
+    const MenuOp& op = kMenuOps[sMenuOp];
+    switch (sPhase) {
+    case kBefore:
+    case kPort:
+    case kPress:
+        if (op.before != nullptr) {
+            op.before();
+        }
+        setMenuInput(op, true);
+        sPhase = kRead;
+        sSince = 0;
+        return;
+    case kRead:
+        if (++sSince < op.hold) {
+            return;
+        }
+        setMenuInput(op, false);
+        sPhase = kRelease;
+        sSince = 0;
+        return;
+    case kRelease:
+        if (++sSince < op.wait) {
+            return;
+        }
+        if (op.verify != nullptr && !op.verify()) {
+            sCheckFailed = true;
+        }
+        if (op.last) {
+            writef(STDERR_FILENO, "[cos] button-remap: %s: %s\n", op.check, sCheckFailed ? "FAIL" : "ok");
+            sAllOk = sAllOk && !sCheckFailed;
+            sCheckFailed = false;
+        }
+        sPhase = kBefore;
+        if (++sMenuOp >= kMenuOpCount) {
             finish(frames, sAllOk);
         }
         return;
@@ -482,7 +683,11 @@ void buttonRemapFrame(unsigned int frames) {
         return;
     }
     case kRun:
-        runSteps(frames);
+        if (sInMenu) {
+            runMenu(frames);
+        } else {
+            runSteps(frames);
+        }
         return;
     }
 #else

@@ -42,23 +42,23 @@ using remap::Input;
 constexpr size_t kActions = (size_t)Action::Count;
 constexpr size_t kInputs = (size_t)Input::Count;
 
-// The menu's values, named as printed on a Switch controller (Task 3 shows them on the remap rows).
+// The menu's values (the Controles rows, pc_menu.cpp), named as printed on a Switch controller.
 const PcSettingChoice kChoices[kInputs] = {
-    {"a", "A", nullptr},
-    {"b", "B", nullptr},
-    {"x", "X", nullptr},
-    {"y", "Y", nullptr},
+    {"a", "botón A", "A button"},
+    {"b", "botón B", "B button"},
+    {"x", "botón X", "X button"},
+    {"y", "botón Y", "Y button"},
     {"l", "L", nullptr},
     {"r", "R", nullptr},
     {"zl", "ZL", nullptr},
     {"zr", "ZR", nullptr},
     {"plus", "+", nullptr},
-    {"up", "Cruceta arriba", "D-pad up"},
-    {"down", "Cruceta abajo", "D-pad down"},
-    {"left", "Cruceta izquierda", "D-pad left"},
-    {"right", "Cruceta derecha", "D-pad right"},
-    {"lstick", "L3 (stick izquierdo)", "L3 (left stick)"},
-    {"rstick", "R3 (stick derecho)", "R3 (right stick)"},
+    {"up", "cruceta arriba", "D-pad up"},
+    {"down", "cruceta abajo", "D-pad down"},
+    {"left", "cruceta izquierda", "D-pad left"},
+    {"right", "cruceta derecha", "D-pad right"},
+    {"lstick", "clic stick izq.", "left stick click"},
+    {"rstick", "clic stick der.", "right stick click"},
 };
 
 // The GameCube actions as the rows name them, and the PADStatus bit each one sets.
@@ -114,6 +114,9 @@ u32 nativeButton(Input in) {
     default: return PAD_NATIVE_BUTTON_INVALID;
     }
 }
+
+// A trigger axis past this counts as pressed (the capture of ZL/ZR; the options menu's ZL+ZR uses the same).
+constexpr Sint16 kTriggerPressed = 16000;
 
 struct Remap {
     bool initialized = false;
@@ -380,6 +383,27 @@ void pc_button_remap_restore_defaults(void) {
         pc_settings_clear(remap::actionKey((Action)i));
     }
     pc::writef(STDERR_FILENO, "[cos] button-remap: defaults restored\n");
+}
+
+int pc_button_remap_held_input(struct SDL_Gamepad* gamepad) {
+    if (gamepad == nullptr) {
+        return -1;
+    }
+    for (size_t i = 0; i < kInputs; i++) {
+        const u32 native = nativeButton((Input)i);
+        bool down;
+        if (native == PAD_NATIVE_TRIGGER_LEFT || native == PAD_NATIVE_TRIGGER_RIGHT) {
+            const SDL_GamepadAxis axis =
+                native == PAD_NATIVE_TRIGGER_LEFT ? SDL_GAMEPAD_AXIS_LEFT_TRIGGER : SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+            down = SDL_GetGamepadAxis(gamepad, axis) > kTriggerPressed;
+        } else {
+            down = SDL_GetGamepadButton(gamepad, (SDL_GamepadButton)native);
+        }
+        if (down) {
+            return (int)i;
+        }
+    }
+    return -1;
 }
 
 int pc_button_remap_current(int action) {

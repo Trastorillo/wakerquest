@@ -101,6 +101,12 @@ R → Z, ZL → L (analog), ZR → R (analog), Plus → Start, D-pad → D-pad. 
 against the running Switch build (the Pro Controller table in `aurora-src/lib/dolphin/pad/pad.cpp`
 plus anything `cos_switch.cpp` sets) before treating it as the default.
 
+*Builder's note:* that positional table is the Mac's and Linux's default. On the Switch the libnx SDL
+shim maps the face buttons by printed label (HidNpadButton_A to SDL's south button), so the same
+Aurora table gives each GameCube face button the Switch button with the same letter there: the
+Switch's default is label identity (A → A, B → B, X → X, Y → Y), the rest as above
+(`pc::remap::defaultMapFor`).
+
 ## Menu (where and how it looks)
 
 - A new tab **"Controles"** in the options menu, after Gráficos (or, if a new tab is awkward, a block

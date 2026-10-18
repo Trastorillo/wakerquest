@@ -7,12 +7,13 @@
 // and gets no controller input (Aurora's PADBlockInput; the buttons still held when it closes are
 // ignored until released). Other scenes (title, name entry) keep running behind it, without input.
 //
-// One ImGui window with three tabs, Gráficos, Rendimiento and Depuración, navigated by the
-// controller (D-pad or stick: row and value; A: change / confirm; B: back / close; L/R: tab), the
-// keyboard (arrows, Enter, Esc, Q/E) or the mouse (click a tab, a row, a value). The menu reads the
-// controllers itself (SDL gamepads, labels of the face buttons respected, so A is A on a Switch-style
-// layout too), plus the COS_INPUT script in COS_SMOKE=options-menu (only there: other scripts press
-// L+R+Z for the game).
+// One ImGui window with five tabs, Gráficos, Controles, Rendimiento, Calidad de vida and Depuración
+// (in that order on screen, kTabOrder), navigated by the controller (D-pad or stick: row and value;
+// A: change / confirm; B: back / close; L/R: tab), the keyboard (arrows, Enter, Esc, Q/E) or the mouse
+// (click a tab, a row, a value). The menu reads the controllers itself (SDL gamepads, labels of the
+// face buttons respected, so A is A on a Switch-style layout too), plus the COS_INPUT script in
+// COS_SMOKE=options-menu (only there: other scripts press L+R+Z for the game); so the button remap of
+// the Controles tab (pc_button_remap.h, issue #15) never changes the menu's own buttons.
 //
 // Every row is a setting of pc_settings.h (the environment variable it already had) or an action
 // (warp, screenshot, reload). Settings with PC_SETTING_RESTART apply at the next start; the others
@@ -34,8 +35,10 @@
 
 #include "pc_internal.h"
 
+#include "pc/pc_button_remap.h"
 #include "pc/pc_controls.h"
 #include "pc/pc_qol.h"
+#include "features/pc_button_remap_map.h"
 
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
@@ -718,17 +721,44 @@ const PcSettingDesc kBuiltins[] = {
 
 // ---- menu state ----------------------------------------------------------------------------------
 
-enum class RowKind { EditMode, Setting, Warp, Sailing, Screenshot, Reload, QolBetterWW, QolOriginal };
+// Remap: a button remap action (PC_SETTING_REMAP, pc_button_remap.h), whose confirm opens the capture;
+// RemapRestore: "Restaurar controles por defecto", the Controles tab's last row.
+enum class RowKind {
+    EditMode,
+    Setting,
+    Warp,
+    Sailing,
+    Screenshot,
+    Reload,
+    QolBetterWW,
+    QolOriginal,
+    Remap,
+    RemapRestore
+};
 
 struct Row {
     RowKind kind;
     const PcSettingDesc* desc = nullptr;
+    int action = -1; // RowKind::Remap: the pc::remap::Action of desc
 };
 
+// Indexed by PcSettingTab; kTabOrder is the order on screen (and of L/R).
 const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Calidad de vida", "Depuración",
                                                 "Controles"};
 const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Quality of life", "Debug",
                                                   "Controls"};
+const int kTabOrder[PC_SETTING_TABS] = {PC_SETTING_TAB_GRAPHICS, PC_SETTING_TAB_CONTROLS, PC_SETTING_TAB_PERFORMANCE,
+                                        PC_SETTING_TAB_QOL, PC_SETTING_TAB_DEBUG};
+
+// The position on screen of a tab.
+int tabPosition(int tab) {
+    for (int i = 0; i < PC_SETTING_TABS; i++) {
+        if (kTabOrder[i] == tab) {
+            return i;
+        }
+    }
+    return 0;
+}
 
 struct Menu {
     bool initialized = false;
@@ -747,6 +777,13 @@ struct Menu {
     bool pendingShot = false;
     std::string toast;
     unsigned int toastUntil = 0;
+    // The Controles tab's capture (issue #15): the action waiting for a button (-1: none), armed once
+    // every button and trigger was released, started at captureStartMs (monotonic). After it ends,
+    // captureRelease makes waitRelease wait for the directions too (a captured D-pad must not move).
+    int captureAction = -1;
+    bool captureArmed = false;
+    uint64_t captureStartMs = 0;
+    bool captureRelease = false;
 } m;
 
 void toast(const std::string& text) {
@@ -781,11 +818,22 @@ std::vector<Row> rowsOf(int tab) {
     }
     for (int i = 0; i < pc_settings_count(); i++) {
         const PcSettingDesc* d = pc_settings_at(i);
-        // Issue #15: a button remap action (PC_SETTING_REMAP) is not a row that cycles its choices;
-        // its own "press a button" row comes with the remap rows.
-        if (d != nullptr && d->tab == tab && !(d->flags & PC_SETTING_REMAP)) {
+        if (d == nullptr || d->tab != tab) {
+            continue;
+        }
+        if (d->flags & PC_SETTING_REMAP) {
+            // Issue #15: a button remap action is not a row that cycles its choices: confirm captures.
+            for (int a = 0; a < (int)pc::remap::Action::Count; a++) {
+                if (strcmp(d->key, pc::remap::actionKey((pc::remap::Action)a)) == 0) {
+                    rows.push_back({RowKind::Remap, d, a});
+                }
+            }
+        } else {
             rows.push_back({RowKind::Setting, d});
         }
+    }
+    if (tab == PC_SETTING_TAB_CONTROLS) {
+        rows.push_back({RowKind::RemapRestore});
     }
     return rows;
 }
@@ -833,6 +881,7 @@ void setOpen(bool open) {
     m.open = open;
     m.warpPage = false;
     m.waitRelease = true;
+    m.captureAction = -1;
     PADBlockInput(open);
     if (open) {
         m.opened++;
@@ -943,7 +992,100 @@ void applyQolPreset(bool betterww) {
                    : T("Calidad de vida: juego original", "Quality of life: the original game"));
 }
 
+// ---- the Controles tab's capture (issue #15, docs/BUTTON_REMAP_DESIGN.md) ------------------------
+
+constexpr uint64_t kCaptureMs = 5000;
+constexpr Sint16 kCaptureTrigger = 16000; // a trigger axis past this is held
+
+uint64_t nowMs() {
+    return monotonicNs() / 1000000u;
+}
+
+// The label of a remap action's row.
+const char* remapActionLabel(int action) {
+    const char* key = pc::remap::actionKey((pc::remap::Action)action);
+    for (int i = 0; i < pc_settings_count(); i++) {
+        const PcSettingDesc* d = pc_settings_at(i);
+        if (d != nullptr && strcmp(d->key, key) == 0) {
+            return settingLabel(d);
+        }
+    }
+    return key;
+}
+
+void startCapture(const Row& r) {
+    if (pc_settings_locked(r.desc->key)) {
+        toast(std::string(settingLabel(r.desc)) + T(": fijado por el entorno", ": set by the environment"));
+        return;
+    }
+    m.captureAction = r.action;
+    m.captureArmed = false;
+    m.captureStartMs = nowMs();
+    writef(STDERR_FILENO, "[cos] menu: capture for %s\n", r.desc->key);
+}
+
+void endCapture(const char* why) {
+    writef(STDERR_FILENO, "[cos] menu: capture for %s %s\n", pc::remap::actionKey((pc::remap::Action)m.captureAction),
+           why);
+    m.captureAction = -1;
+    // The button just pressed (or still held) does nothing to the menu until every key is released.
+    m.waitRelease = true;
+    m.captureRelease = true;
+}
+
+// Once per menu frame while a capture runs, before handleInput (which then does nothing else): every
+// controller read as readGamepads does. Not armed until no button and no trigger is held (the confirm
+// that started it is not taken); then Minus (BACK) cancels and the first assignable input is given to
+// the action (pc_button_remap_assign, which swaps with the action that held it); kCaptureMs without a
+// press cancels it. Runs in menuFrame, inside pc_frame_end's host-allocation scope (the assignment's
+// strings stay off the game's heaps).
+void captureFrame() {
+    if (m.captureAction < 0) {
+        return;
+    }
+    bool anyHeld = false;
+    bool back = false;
+    int input = -1;
+    for (u32 port = 0; port < 4; port++) {
+        SDL_Gamepad* gp = PADGetSDLGamepadForIndex(port);
+        if (gp == nullptr) {
+            continue;
+        }
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
+            anyHeld = anyHeld || SDL_GetGamepadButton(gp, (SDL_GamepadButton)b);
+        }
+        anyHeld = anyHeld || SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kCaptureTrigger ||
+                  SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kCaptureTrigger;
+        back = back || SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK);
+        if (input < 0) {
+            input = pc_button_remap_held_input(gp);
+        }
+    }
+    if (!m.captureArmed) {
+        m.captureArmed = !anyHeld;
+    } else if (back) {
+        endCapture("cancelled (Minus)");
+        return;
+    } else if (input >= 0) {
+        const int action = m.captureAction;
+        int swapped = -1;
+        if (pc_button_remap_assign(action, input, &swapped) != 0) {
+            toast(T("No se pudo cambiar el botón", "Could not change the button"));
+        } else if (swapped >= 0) {
+            toast(std::string(T("Intercambiado con ", "Swapped with ")) + remapActionLabel(swapped));
+        }
+        endCapture("done");
+        return;
+    }
+    if (nowMs() - m.captureStartMs >= kCaptureMs) {
+        endCapture("cancelled (no press)");
+    }
+}
+
 void activate(const Row& r, int dir) {
+    if (m.captureAction >= 0) {
+        return;
+    }
     switch (r.kind) {
     case RowKind::EditMode:
         m.editMode = m.editMode == PC_MODE_HANDHELD ? PC_MODE_DOCKED : PC_MODE_HANDHELD;
@@ -979,6 +1121,17 @@ void activate(const Row& r, int dir) {
             toast(std::string(T("Ajustes recargados de ", "Settings reloaded from ")) + pc_settings_path());
         }
         break;
+    case RowKind::Remap:
+        if (dir == 0) {
+            startCapture(r);
+        }
+        break;
+    case RowKind::RemapRestore:
+        if (dir == 0) {
+            pc_button_remap_restore_defaults();
+            toast(T("Controles por defecto restaurados", "Default controls restored"));
+        }
+        break;
     }
 }
 
@@ -1001,9 +1154,13 @@ uint32_t pressed(uint32_t keys) {
 
 void handleInput(uint32_t keys) {
     const uint32_t p = pressed(keys);
+    if (m.captureAction >= 0) {
+        return; // captureFrame reads the controllers
+    }
     if (m.waitRelease) {
-        if ((keys & ~(kUp | kDown | kLeft | kRight)) == 0) {
+        if ((keys & ~(m.captureRelease ? 0u : (kUp | kDown | kLeft | kRight))) == 0) {
             m.waitRelease = false;
+            m.captureRelease = false;
         }
         return;
     }
@@ -1039,7 +1196,7 @@ void handleInput(uint32_t keys) {
         return;
     }
     if (p & (kTabLeft | kTabRight)) {
-        m.tab = (m.tab + ((p & kTabRight) ? 1 : PC_SETTING_TABS - 1)) % PC_SETTING_TABS;
+        m.tab = kTabOrder[(tabPosition(m.tab) + ((p & kTabRight) ? 1 : PC_SETTING_TABS - 1)) % PC_SETTING_TABS];
         m.scrollToRow = true;
         writef(STDERR_FILENO, "[cos] menu: tab %s\n", kTabNames[m.tab]);
     }
@@ -1083,6 +1240,8 @@ std::string rowLabel(const Row& r) {
     case RowKind::Reload: return T("Recargar ajustes del archivo", "Reload settings from the file");
     case RowKind::QolBetterWW: return T("Experiencia BetterWW", "BetterWW experience");
     case RowKind::QolOriginal: return T("Valores originales", "Original values");
+    case RowKind::RemapRestore: return T("Restaurar controles por defecto", "Restore default controls");
+    case RowKind::Remap: return settingLabel(r.desc);
     case RowKind::Setting: break;
     }
     std::string s = settingLabel(r.desc);
@@ -1102,13 +1261,26 @@ std::string rowValue(const Row& r) {
     case RowKind::Reload: return T("A: recargar", "A: reload");
     case RowKind::QolBetterWW:
     case RowKind::QolOriginal: return T("A: aplicar", "A: apply");
+    case RowKind::RemapRestore: return T("A: restaurar", "A: restore");
+    case RowKind::Remap: {
+        if (r.action == m.captureAction) {
+            const uint64_t elapsed = std::min<uint64_t>(nowMs() - m.captureStartMs, kCaptureMs);
+            // "-" for Minus: the menu's font (ImGui's default, Latin-1) has no U+2212.
+            char text[96];
+            snprintf(text, sizeof(text), T("Pulsa un botón... (- cancela) %d s", "Press a button... (- cancels) %d s"),
+                     (int)((kCaptureMs - elapsed + 999) / 1000));
+            return text;
+        }
+        const int input = pc_button_remap_current(r.action);
+        return choiceLabel(r.desc, pc::remap::inputValue((pc::remap::Input)input));
+    }
     case RowKind::Setting: break;
     }
     return choiceLabel(r.desc, pc_settings_get_mode(r.desc->key, rowMode(r.desc)));
 }
 
 std::string rowNote(const Row& r) {
-    if (r.kind != RowKind::Setting) {
+    if (r.kind != RowKind::Setting && r.kind != RowKind::Remap) {
         return "";
     }
     const PcSettingDesc* d = r.desc;
@@ -1161,10 +1333,26 @@ std::string rowHelp(const Row& r) {
     case RowKind::QolOriginal:
         return T("Desactiva todas las opciones de esta pestaña: el juego original.",
                  "Turns every option of this tab off: the original game.");
+    case RowKind::RemapRestore:
+        return T("Vuelve a poner cada acción en su botón de siempre. Fuera del juego: borrar las líneas COS_PAD_ "
+                 "de settings.ini hace lo mismo.",
+                 "Puts every action back on its usual button. Outside the game: deleting the COS_PAD_ lines of "
+                 "settings.ini does the same.");
+    case RowKind::Remap:
+        if (r.action == m.captureAction) {
+            return T("Pulsa el botón que hará esta acción; si ya hacía otra, se intercambian. Menos cancela.",
+                     "Press the button that will do this action; if it already did another, the two swap. Minus "
+                     "cancels.");
+        }
+        break;
     case RowKind::Setting: break;
     }
     const char* descHelp = settingHelp(r.desc);
     std::string help = descHelp != nullptr ? descHelp : "";
+    if (r.kind == RowKind::Remap) {
+        help += T(" A y luego el botón nuevo; si ya tenía otra acción, se intercambian.",
+                  " A, then the new button; an action already on it swaps.");
+    }
     if (pc_settings_locked(r.desc->key)) {
         // Only the Mac's and Linux's process environment locks a setting (pc_settings.h).
         help += T(" Fijado por una variable de entorno de esta ejecución.",
@@ -1203,14 +1391,24 @@ void drawMenu() {
     ImGui::TextColored(kDim, "%s", mode.c_str());
 
     // Tabs.
-    const float tabW = (ImGui::GetContentRegionAvail().x - 2 * ImGui::GetStyle().ItemSpacing.x) / PC_SETTING_TABS;
+    // Each tab as wide as its name, the rest of the row shared out evenly (five names in a narrow 4:3 window).
+    float namesW = 0.0f;
     for (int t = 0; t < PC_SETTING_TABS; t++) {
-        if (t > 0) {
+        namesW += ImGui::CalcTextSize(T(kTabNames[t], kTabNamesEn[t])).x;
+    }
+    const float tabSpare = std::max(0.0f, (ImGui::GetContentRegionAvail().x - namesW -
+                                           (PC_SETTING_TABS - 1) * ImGui::GetStyle().ItemSpacing.x) /
+                                              PC_SETTING_TABS);
+    for (int pos = 0; pos < PC_SETTING_TABS; pos++) {
+        const int t = kTabOrder[pos];
+        if (pos > 0) {
             ImGui::SameLine();
         }
         const bool sel = t == m.tab;
+        const char* name = T(kTabNames[t], kTabNamesEn[t]);
         ImGui::PushStyleColor(ImGuiCol_Button, sel ? ImVec4(0.20f, 0.42f, 0.70f, 1.0f) : ImVec4(0.16f, 0.18f, 0.22f, 1.0f));
-        if (ImGui::Button(T(kTabNames[t], kTabNamesEn[t]), ImVec2(tabW, 0)) && !m.warpPage) {
+        if (ImGui::Button(name, ImVec2(ImGui::CalcTextSize(name).x + tabSpare, 0)) && !m.warpPage &&
+            m.captureAction < 0) {
             m.tab = t;
         }
         ImGui::PopStyleColor();
@@ -1260,7 +1458,8 @@ void drawMenu() {
             row = rows.empty() ? 0 : std::min(row, (int)rows.size() - 1);
             for (int i = 0; i < (int)rows.size(); i++) {
                 const Row& r = rows[i];
-                const bool locked = r.kind == RowKind::Setting && pc_settings_locked(r.desc->key);
+                const bool locked =
+                    (r.kind == RowKind::Setting || r.kind == RowKind::Remap) && pc_settings_locked(r.desc->key);
                 ImGui::PushID(i);
                 if (locked) {
                     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
@@ -1656,6 +1855,12 @@ bool menuOpen() {
     return m.open;
 }
 
+void menuSmokeState(int* tab, int* row, int* captureAction) {
+    *tab = m.tab;
+    *row = m.row[m.tab];
+    *captureAction = m.captureAction;
+}
+
 void menuFrame() {
     if (!m.initialized || ImGui::GetCurrentContext() == nullptr) {
         return;
@@ -1671,7 +1876,9 @@ void menuFrame() {
     }
     // The COS_INPUT script drives the menu only in its own smoke test: other scripts press L+R+Z
     // for the game (pad-echo).
-    handleInput((sSmoke.on ? readScript() : 0) | readGamepads() | readKeyboard());
+    const uint32_t keys = (sSmoke.on ? readScript() : 0) | readGamepads() | readKeyboard();
+    captureFrame();
+    handleInput(keys);
     if (!m.open) {
         return;
     }

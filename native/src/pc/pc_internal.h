@@ -453,6 +453,9 @@ bool menuSmokeWantsRunCard();
 bool menuBuiltinSetting(const char* key);
 void menuFrame();
 bool menuOpen();
+// pc_menu.cpp, for COS_SMOKE=button-remap: the menu's tab (PcSettingTab), the selected row of that
+// tab and the action being captured on the Controles tab (pc::remap::Action; -1: none).
+void menuSmokeState(int* tab, int* row, int* captureAction);
 // pc_menu.cpp: after aurora_end_frame of game frame `frame` (the screenshot action, and
 // COS_SMOKE=options-menu's checks).
 void menuFrameEnd(unsigned int frame);

@@ -13,6 +13,8 @@
 # frame buttons stickX stickY
 400 L+R+Z 0 0
 403 - 0 0
+406 R 0 0
+408 - 0 0
 410 R 0 0
 412 - 0 0
 416 R 0 0
