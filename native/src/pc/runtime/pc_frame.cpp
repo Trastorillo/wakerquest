@@ -1720,6 +1720,7 @@ void pc_frame_end(void) {
     dmapFrame(frames);
     seaChartFrame(frames);
     mailSortFrame(frames);
+    menuBackdropFrame(frames);
     itemSweepFrame(frames);
     saveSweepFrame(frames);
     eventSweepFrame(frames);
