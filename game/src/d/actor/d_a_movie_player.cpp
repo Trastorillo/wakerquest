@@ -3495,7 +3495,12 @@ static BOOL daMP_THPPlayerOpen(const char* filename, BOOL onMemory) {
 
     if (daMP_ActivePlayer.open) {
 #if VERSION > VERSION_DEMO
+#if TARGET_PC
+        // The original passes no argument for %s; a 64-bit host's vfprintf would read whatever pointer it finds.
+        OSReport("Can't open %s. Because thp file have already opened.\n", filename);
+#else
         OSReport("Can't open %s. Because thp file have already opened.\n");
+#endif
 #endif
         return FALSE;
     }
