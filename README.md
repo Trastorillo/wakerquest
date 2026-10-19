@@ -294,7 +294,8 @@ The previous renderer, OpenGL ES on Mesa (`switchwaker_gl.nro`, "SwitchWaker (GL
 - Button remapping: options menu > *Controles* (*Controls*): pick a GameCube button, press the controller
   button you want for it (two actions swap buttons); Minus cancels and can never be assigned.
   "Restaurar controles por defecto" puts them all back, as does deleting the `COS_PAD_` lines of
-  `native/user/settings.ini`.
+  `native/user/settings.ini`. On the Mac and Linux, Xbox controllers and GameCube adapters keep their
+  usual mapping.
 - Language: the options menu and the shader loading screen are in Spanish or English, following the
   console's language (on the Mac and Linux, `LANG`); `COS_LANG=es` or `COS_LANG=en` forces one.
 - `COS_*` variables (environment on the Mac and Linux; on the Switch the options menu, and for

@@ -527,7 +527,8 @@ open the PLAY scene is paused (hit-stop pause timer) and the game gets no pad in
   por defecto", puts every action back. Saved as `COS_PAD_A` ... `COS_PAD_RIGHT` lines, written only for
   an action off its default (by position on the Mac and Linux, by label on the Switch); deleting the
   `COS_PAD_*` lines of `settings.ini` restores the defaults too. Applies to every controller with a
-  standard layout (Pro Controller, Joy-Cons, Xbox, PlayStation); a GameCube adapter keeps its own.
+  standard layout (Pro Controller, Joy-Cons, PlayStation, generic); a GameCube adapter and Xbox
+  controllers (whose Aurora table differs) keep their own, unremapped.
   Regression target: `button-remap` (`native/src/pc/harness/smokes/pc_button_remap.cpp`).
 - Calidad de vida (`native/include/pc/pc_qol.h`, `docs/QOL_PLAN.md`, issue #4): BetterWW's and wwrando's
   quality-of-life patches redone in the game's code, one row each (`COS_QOL_*`), all off by default

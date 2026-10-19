@@ -160,7 +160,9 @@ bool readSettings(remap::Map& out, std::string& what) {
 
 // The controller types whose Aurora default is the standard (Pro Controller-shaped) table. The
 // GameCube adapter, the NSO GameCube controller (Pro type, product 0x2073), a single Joy-Con and
-// unknown types keep Aurora's own table: theirs already match the GameCube's buttons.
+// unknown types keep Aurora's own table: theirs already match the GameCube's buttons. So do the
+// Xbox 360 and Xbox One pads: Aurora's table for them is not Pro-shaped (East gives the GameCube's X,
+// West its B; aurora-src/lib/dolphin/pad/pad.cpp), so the default map would not describe them.
 bool isStandard(u32 port, SDL_Gamepad* gp) {
     if (gp == nullptr || PADIsGCAdapter(port)) {
         return false;
@@ -170,8 +172,6 @@ bool isStandard(u32 port, SDL_Gamepad* gp) {
     (void)vid;
     switch (SDL_GetGamepadType(gp)) {
     case SDL_GAMEPAD_TYPE_STANDARD:
-    case SDL_GAMEPAD_TYPE_XBOX360:
-    case SDL_GAMEPAD_TYPE_XBOXONE:
     case SDL_GAMEPAD_TYPE_PS3:
     case SDL_GAMEPAD_TYPE_PS4:
     case SDL_GAMEPAD_TYPE_PS5:
@@ -385,9 +385,20 @@ void pc_button_remap_restore_defaults(void) {
     pc::writef(STDERR_FILENO, "[cos] button-remap: defaults restored\n");
 }
 
-int pc_button_remap_held_input(struct SDL_Gamepad* gamepad) {
-    if (gamepad == nullptr) {
-        return -1;
+int pc_button_remap_port_input(int port, int* backHeld) {
+    if (backHeld != nullptr) {
+        *backHeld = 0;
+    }
+    if (port < 0 || port >= PAD_MAX_CONTROLLERS) {
+        return -2;
+    }
+    const s32 index = PADGetIndexForPort((u32)port);
+    SDL_Gamepad* gamepad = index >= 0 ? PADGetSDLGamepadForIndex((u32)index) : nullptr;
+    if (!isStandard((u32)port, gamepad)) {
+        return -2;
+    }
+    if (backHeld != nullptr) {
+        *backHeld = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) ? 1 : 0;
     }
     for (size_t i = 0; i < kInputs; i++) {
         const u32 native = nativeButton((Input)i);

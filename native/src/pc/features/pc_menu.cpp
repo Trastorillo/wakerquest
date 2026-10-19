@@ -995,7 +995,6 @@ void applyQolPreset(bool betterww) {
 // ---- the Controles tab's capture (issue #15, docs/BUTTON_REMAP_DESIGN.md) ------------------------
 
 constexpr uint64_t kCaptureMs = 5000;
-constexpr Sint16 kCaptureTrigger = 16000; // a trigger axis past this is held
 
 uint64_t nowMs() {
     return monotonicNs() / 1000000u;
@@ -1033,36 +1032,30 @@ void endCapture(const char* why) {
     m.captureRelease = true;
 }
 
-// Once per menu frame while a capture runs, before handleInput (which then does nothing else): every
-// controller read as readGamepads does. Not armed until no button and no trigger is held (the confirm
-// that started it is not taken); then Minus (BACK) cancels and the first assignable input is given to
-// the action (pc_button_remap_assign, which swaps with the action that held it); kCaptureMs without a
-// press cancels it. Runs in menuFrame, inside pc_frame_end's host-allocation scope (the assignment's
+// Once per menu frame while a capture runs, before handleInput (which then does nothing else): the
+// controllers the remap covers (pc_button_remap_port_input; a GameCube adapter or an Xbox pad keeps
+// Aurora's own table, so a press there would not mean the input it names). Not armed until none of
+// them holds an assignable input or Minus (the confirm that started it is not taken; a control stuck
+// elsewhere cannot keep it from arming); then Minus (BACK) cancels and the first assignable input is
+// given to the action (pc_button_remap_assign, which swaps with the action that held it); kCaptureMs
+// without a press cancels it. Runs in menuFrame, inside pc_frame_end's host-allocation scope (the assignment's
 // strings stay off the game's heaps).
 void captureFrame() {
     if (m.captureAction < 0) {
         return;
     }
-    bool anyHeld = false;
     bool back = false;
     int input = -1;
-    for (u32 port = 0; port < 4; port++) {
-        SDL_Gamepad* gp = PADGetSDLGamepadForIndex(port);
-        if (gp == nullptr) {
-            continue;
-        }
-        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++) {
-            anyHeld = anyHeld || SDL_GetGamepadButton(gp, (SDL_GamepadButton)b);
-        }
-        anyHeld = anyHeld || SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kCaptureTrigger ||
-                  SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > kCaptureTrigger;
-        back = back || SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK);
-        if (input < 0) {
-            input = pc_button_remap_held_input(gp);
+    for (int port = 0; port < 4; port++) {
+        int portBack = 0;
+        const int held = pc_button_remap_port_input(port, &portBack);
+        back = back || portBack != 0;
+        if (input < 0 && held >= 0) {
+            input = held;
         }
     }
     if (!m.captureArmed) {
-        m.captureArmed = !anyHeld;
+        m.captureArmed = !back && input < 0;
     } else if (back) {
         endCapture("cancelled (Minus)");
         return;

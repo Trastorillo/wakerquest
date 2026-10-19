@@ -436,7 +436,9 @@ void pc_settings_load_early(void) {
         if (!devVariable(line, name, value)) {
             continue;
         }
-        if (name.find('@') != std::string::npos || isMenuSetting(name)) {
+        // COS_PAD_* (the button remap, pc_button_remap.h) is registered only after this runs: set
+        // here it would lock the keys, so the menu's capture and restore could never change them.
+        if (name.find('@') != std::string::npos || isMenuSetting(name) || name.rfind("COS_PAD_", 0) == 0) {
             pc::writef(STDERR_FILENO, "[cos] settings: [dev] %s ignored: %s\n", name.c_str(),
                        name.find('@') != std::string::npos ? "no per-mode values in [dev]"
                                                            : "an options menu setting (set it in the menu)");

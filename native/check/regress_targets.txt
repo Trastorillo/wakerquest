@@ -236,6 +236,7 @@ menu-backdrop 0 --stage Asoko:0:0:2
 # swap, ZL as a digital button (patch 0022), a button as L with a full analog L, a free input, a controller
 # connected later, a GameCube adapter keeping its own table, and restore; an invalid set (two actions on one
 # input) applies the default map with one log line; then the options menu's Controles tab: the capture (the
-# confirm not taken, D-pad navigation swallowed, Minus and the timeout cancel) and its restore row
+# confirm not taken, D-pad navigation swallowed, Minus and the timeout cancel, a button held on the GameCube
+# adapter ignored) and its restore row
 button-remap 0 --stage Asoko:0:0:2
 button-remap 0 --stage Asoko:0:0:2 --env COS_PAD_A=b --env COS_PAD_B=b

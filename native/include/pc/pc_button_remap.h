@@ -13,8 +13,9 @@
  *
  * The map in effect is written into Aurora's per-controller button and axis mappings of every
  * controller whose type uses the standard (Pro Controller-shaped) table: Pro Controller, Joy-Con
- * pair, Xbox, PlayStation, generic. The GameCube adapter, the NSO GameCube controller, a single
- * Joy-Con and unknown types keep Aurora's own table. While the map is the default every controller
+ * pair, PlayStation, generic. The GameCube adapter, the NSO GameCube controller, Xbox 360 and Xbox
+ * One pads (Aurora's table for them is not Pro-shaped), a single Joy-Con and unknown types keep
+ * Aurora's own table. While the map is the default every controller
  * gets Aurora's own default table back (PADRestoreDefaultMapping). The options menu reads SDL
  * directly (pc_menu.cpp, readGamepads), so the remap never changes its navigation.
  *
@@ -26,8 +27,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-struct SDL_Gamepad;
 
 /* Registers the twelve COS_PAD_* settings and subscribes to them (a change marks the map dirty).
    Once, after the options menu's built-in settings (pc_main.cpp). */
@@ -43,10 +42,12 @@ void pc_button_remap_frame(void);
 int pc_button_remap_assign(int action, int input, int* swappedAction);
 /* Every action back to its default input: the twelve lines leave the settings file. */
 void pc_button_remap_restore_defaults(void);
-/* The first assignable input (pc::remap::Input, in its order) held on `gamepad`: a button, or ZL/ZR
-   when its trigger axis is past 16000, read through the same per-platform table the map is written
-   with; -1 when none is (Minus/BACK is never one). The options menu's capture (pc_menu.cpp). */
-int pc_button_remap_held_input(struct SDL_Gamepad* gamepad);
+/* For the options menu's capture (pc_menu.cpp): the controller on PAD port `port` (0-3), when the
+   remap covers it (see above), and the first assignable input (pc::remap::Input, in its order) held
+   on it: a button, or ZL/ZR when its trigger axis is past 16000, read through the same per-platform
+   table the map is written with. -2: no controller there or one the remap does not cover; -1: none
+   held (Minus/BACK is never one). *backHeld (may be NULL): Minus/BACK is held on it. */
+int pc_button_remap_port_input(int port, int* backHeld);
 /* The input (pc::remap::Input) that drives `action` now; -1 for an action out of range. */
 int pc_button_remap_current(int action);
 

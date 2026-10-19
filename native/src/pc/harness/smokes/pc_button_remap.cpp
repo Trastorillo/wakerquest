@@ -30,7 +30,10 @@
 //  12. cancel timeout: confirm, then nothing: the capture ends on its own within 8 s of wall time
 //      (the frame rate may be uncapped, as in regress.sh) and no sooner than 4.9 s after it was
 //      seen open, the map unchanged;
-//  13. restore row: up twice to the last row, "Restaurar controles por defecto", confirm: the default
+//  13. other pads ignored: START held on the GameCube adapter (a pad the remap does not cover) through
+//      a capture of B: the capture still arms and takes the Pro Controller's North (B = x, Y takes
+//      B's old input, down), not the adapter's button;
+//  14. restore row: up twice to the last row, "Restaurar controles por defecto", confirm: the default
 //      map and no COS_PAD_ line; South (B) closes the menu.
 // Started with an invalid set (e.g. --env COS_PAD_A=b --env COS_PAD_B=b) the remap applies the
 // default map with one log line: the smoke runs check 1 only (the environment locks the keys, so
@@ -390,6 +393,17 @@ bool swallowed() {
 bool unchanged() {
     return expectMenu(true, 1, -1) && expectMap(sSnapshot, "a cancelled capture changed the map");
 }
+void holdAdapterStart() {
+    SDL_SetJoystickVirtualButton(sGc.joy, sGc.button[SDL_GAMEPAD_BUTTON_START], true);
+}
+bool otherPadsIgnored() {
+    SDL_SetJoystickVirtualButton(sGc.joy, sGc.button[SDL_GAMEPAD_BUTTON_START], false);
+    const bool ok = inputOf(remap::Action::B) == Input::X && inputOf(remap::Action::Y) == Input::Down;
+    if (!ok) {
+        failNote("B is not on x with Y on down (the adapter's held button kept the capture from arming?)");
+    }
+    return expectMenu(true, 1, -1) && ok;
+}
 bool onRestoreRow() {
     return expectMenu(true, (int)remap::Action::Count, -1);
 }
@@ -435,6 +449,8 @@ const MenuOp kMenuOps[] = {
     {"cancel minus", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, capturingB, false},
     {"cancel minus", nullptr, SDL_GAMEPAD_BUTTON_BACK, false, 4, 8, unchanged, true},
     {"cancel timeout", snapshot, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, unchanged, true, true},
+    {"other pads ignored", holdAdapterStart, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, capturingB, false},
+    {"other pads ignored", nullptr, SDL_GAMEPAD_BUTTON_NORTH, false, 4, 8, otherPadsIgnored, true},
     {"restore row", nullptr, SDL_GAMEPAD_BUTTON_DPAD_UP, false, 4, 8, nullptr, false},
     {"restore row", nullptr, SDL_GAMEPAD_BUTTON_DPAD_UP, false, 4, 8, onRestoreRow, false},
     {"restore row", nullptr, SDL_GAMEPAD_BUTTON_EAST, false, 4, 8, restored, false},

@@ -5,9 +5,11 @@ Status: design, 2026-10-19. Branch `feature/button-remap`.
 ## Why
 
 Issue #15: a player installed a texture mod that draws the on-screen button prompts with Switch-style
-letters. SwitchWaker maps the controller by **position** (the GameCube layout: the bottom face button,
-labelled B on a Switch controller, is the GameCube's A; the right one, labelled A, is the GameCube's
-B), so the prompt "A" no longer matches the button labelled A. The player asked for button
+letters. On the Mac and Linux SwitchWaker maps the controller by **position** (the GameCube layout:
+the bottom face button, labelled B on a Switch controller, is the GameCube's A; the right one,
+labelled A, is the GameCube's B), so the prompt "A" no longer matches the button labelled A. *(Builder's
+correction:* on the Switch the libnx SDL shim maps by printed label, so there the button labelled A
+is already the GameCube's A and the default is label identity; see "Defaults".) The player asked for button
 remapping. The user (project owner) decided to build a general per-button remapper, not just a
 preset swap.
 
@@ -88,9 +90,11 @@ GameCube adapter has L/R on MISC3/MISC4, the NSO GameCube controller has Z on BA
 stored by **physical position in the Pro Controller layout** (South/East/West/North, shoulders,
 triggers, Plus, D-pad, stick clicks), shown with the letters printed on a Switch controller, and
 applies to every controller whose Aurora type uses the standard Pro Controller-shaped table (on the
-Switch: all of them, the shim reports a Pro Controller; on the Mac: Pro Controller, Joy-Cons, Xbox,
+Switch: all of them, the shim reports a Pro Controller; on the Mac: Pro Controller, Joy-Cons,
 PlayStation, generic). The GameCube adapter and the NSO GameCube controller keep their own tables
-untouched (they already match the GameCube's prompts). "Restore defaults" means each controller's own
+untouched (they already match the GameCube's prompts). *Builder's ruling:* so do Xbox 360 and Xbox One
+pads on the Mac and Linux: Aurora's table for them is not Pro-shaped (East gives the GameCube's X,
+West its B), so the remap's default map would not describe them; they are not remapped. "Restore defaults" means each controller's own
 Aurora table.
 
 ## Defaults
