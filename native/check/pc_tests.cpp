@@ -14,6 +14,8 @@
 //   - JUtility::TColor's u32 form, 0xRRGGBBAA as GX and the disc have it (step 4.5);
 //   - the 60 fps budget guard and its steady-30 fallback (pc_fps60_budget.h) and dynamic
 //     resolution's levels and per-present thresholds (pc_dynres_policy.h), docs/FPS60_PLAN.md step E;
+//   - the button remap's action/input map: defaults, validity, swap-on-assign and the config
+//     strings (pc_button_remap_map.h, issue #15);
 //   - BMG data read in place: JMessage's header, block and INF1 accessors, the JMSMesgEntry_c
 //     fields, and JGadget's TParseValue_endian_big_ for tag parameters (step 4.6).
 // Prints "ok" and exits 0 when every check passes; otherwise prints each failed check and exits 1.
@@ -27,6 +29,7 @@
 #include "f_op/f_op_msg_mng.h"
 #include "../src/pc/features/pc_precompile_gate.h"
 #include "../src/pc/features/pc_dynres_policy.h"
+#include "../src/pc/features/pc_button_remap_map.h"
 #include "../src/pc/runtime/pc_fps60_budget.h"
 
 #include <cmath>
@@ -761,6 +764,97 @@ void testDynresPolicy() {
     }
 }
 
+// ---- button remap: the action/input map and its swap logic (pc_button_remap_map.h) --------------
+
+void testButtonRemapMap() {
+    using namespace pc::remap;
+    const Map d = defaultMap();
+    CHECK(d[(size_t)Action::A] == Input::B);
+    CHECK(d[(size_t)Action::B] == Input::A);
+    CHECK(d[(size_t)Action::X] == Input::Y);
+    CHECK(d[(size_t)Action::Y] == Input::X);
+    CHECK(d[(size_t)Action::Z] == Input::R);
+    CHECK(d[(size_t)Action::L] == Input::ZL);
+    CHECK(d[(size_t)Action::R] == Input::ZR);
+    CHECK(d[(size_t)Action::Start] == Input::Plus);
+    CHECK(d[(size_t)Action::Up] == Input::Up);
+    CHECK(d[(size_t)Action::Down] == Input::Down);
+    CHECK(d[(size_t)Action::Left] == Input::Left);
+    CHECK(d[(size_t)Action::Right] == Input::Right);
+    CHECK(isValid(d));
+    // The host build is the Mac/Linux one: its default is the positional table.
+    CHECK(d == defaultMapFor(false));
+
+    // Both platform tables explicitly: positional (Mac/Linux) and by label (the Switch's SDL shim).
+    {
+        const Map pos = defaultMapFor(false);
+        const Map lab = defaultMapFor(true);
+        const Input wantPos[(size_t)Action::Count] = {Input::B,  Input::A,  Input::Y,  Input::X,
+                                                      Input::R,  Input::ZL, Input::ZR, Input::Plus,
+                                                      Input::Up, Input::Down, Input::Left, Input::Right};
+        const Input wantLab[(size_t)Action::Count] = {Input::A,  Input::B,  Input::X,  Input::Y,
+                                                      Input::R,  Input::ZL, Input::ZR, Input::Plus,
+                                                      Input::Up, Input::Down, Input::Left, Input::Right};
+        for (size_t i = 0; i < (size_t)Action::Count; ++i) {
+            CHECK(pos[i] == wantPos[i]);
+            CHECK(lab[i] == wantLab[i]);
+        }
+        CHECK(isValid(pos));
+        CHECK(isValid(lab));
+    }
+
+    // Taking an input another action holds swaps the two.
+    {
+        const AssignResult r = assign(d, Action::A, Input::A);
+        CHECK(r.map[(size_t)Action::A] == Input::A);
+        CHECK(r.map[(size_t)Action::B] == Input::B);
+        CHECK(r.swapped && r.other == Action::B);
+        CHECK(isValid(r.map));
+    }
+    // A free input just moves; the old one is left unassigned.
+    {
+        const AssignResult r = assign(d, Action::Z, Input::L);
+        CHECK(r.map[(size_t)Action::Z] == Input::L);
+        CHECK(!r.swapped);
+        bool onR = false;
+        for (Input i : r.map) {
+            onR = onR || i == Input::R;
+        }
+        CHECK(!onR);
+        CHECK(isValid(r.map));
+    }
+    // Assigning the input an action already has changes nothing.
+    {
+        const AssignResult r = assign(d, Action::A, Input::B);
+        CHECK(!r.swapped);
+        CHECK(r.map == d);
+    }
+    // Invalid maps: a duplicate input, an unassigned action.
+    {
+        Map dup = d;
+        dup[(size_t)Action::B] = Input::B; // A and B both on Input::B
+        CHECK(!isValid(dup));
+        Map none = d;
+        none[(size_t)Action::Z] = Input::None;
+        CHECK(!isValid(none));
+    }
+    // Config strings.
+    {
+        Input in = Input::None;
+        CHECK(parseInput("zl", &in) && in == Input::ZL);
+        CHECK(!parseInput("minus", &in));
+        CHECK(!parseInput("", &in));
+        CHECK(!parseInput("A", &in));
+        CHECK(!parseInput(nullptr, &in));
+        for (size_t i = 0; i < (size_t)Input::Count; ++i) {
+            Input back = Input::None;
+            CHECK(parseInput(inputValue((Input)i), &back) && back == (Input)i);
+        }
+        CHECK(std::strcmp(actionKey(Action::Start), "COS_PAD_START") == 0);
+        CHECK(std::strcmp(actionKey(Action::Right), "COS_PAD_RIGHT") == 0);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -775,6 +869,7 @@ int main() {
     testLateGate();
     testFps60Budget();
     testDynresPolicy();
+    testButtonRemapMap();
     if (g_failures != 0) {
         std::printf("FAIL: %d checks\n", g_failures);
         return 1;

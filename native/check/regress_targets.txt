@@ -232,3 +232,11 @@ mail-sort 0 --stage Atorizk:0:0
 # pause menu opened over black or an old frame (its backdrop, the game over screen and the heat haze read it)
 menu-backdrop 0 --stage Asoko:0:0:2 --env COS_DOF=0
 menu-backdrop 0 --stage Asoko:0:0:2
+# COS_SMOKE=button-remap (issue #15): per-action button remap through SDL virtual gamepads (Mac and Linux): a
+# swap, ZL as a digital button (patch 0022), a button as L with a full analog L, a free input, a controller
+# connected later, a GameCube adapter keeping its own table, and restore; an invalid set (two actions on one
+# input) applies the default map with one log line; then the options menu's Controles tab: the capture (the
+# confirm not taken, D-pad navigation swallowed, Minus and the timeout cancel, a button held on the GameCube
+# adapter ignored) and its restore row
+button-remap 0 --stage Asoko:0:0:2
+button-remap 0 --stage Asoko:0:0:2 --env COS_PAD_A=b --env COS_PAD_B=b

@@ -24,6 +24,7 @@
 #include "pc/pc_hd_textures.h"
 #include "pc/pc_aspect.h"
 #include "pc/pc_game_id.h"
+#include "pc/pc_button_remap.h"
 
 #include "JSystem/JKernel/JKRHeap.h"
 #include "m_Do/m_Do_audio.h"
@@ -271,6 +272,8 @@ void pc_aurora_init(int argc, char* argv[]) {
            config.blockingPipelines ? "sync" : "async", sUserPath);
     // The options menu's built-in settings (pc_menu.cpp), once Aurora and ImGui exist.
     menuInit();
+    // Issue #15: the button remap's COS_PAD_* settings (pc_button_remap.h), after the menu's own.
+    pc_button_remap_init();
     precompileInit(sCachePath);
     // COS_PRECOMPILE=boot/full: the loading screen, before the game (and its boot logo) starts.
     precompileLoadingScreen();

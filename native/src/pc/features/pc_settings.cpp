@@ -436,7 +436,9 @@ void pc_settings_load_early(void) {
         if (!devVariable(line, name, value)) {
             continue;
         }
-        if (name.find('@') != std::string::npos || isMenuSetting(name)) {
+        // COS_PAD_* (the button remap, pc_button_remap.h) is registered only after this runs: set
+        // here it would lock the keys, so the menu's capture and restore could never change them.
+        if (name.find('@') != std::string::npos || isMenuSetting(name) || name.rfind("COS_PAD_", 0) == 0) {
             pc::writef(STDERR_FILENO, "[cos] settings: [dev] %s ignored: %s\n", name.c_str(),
                        name.find('@') != std::string::npos ? "no per-mode values in [dev]"
                                                            : "an options menu setting (set it in the menu)");
@@ -594,6 +596,32 @@ int pc_settings_set_mode(const char* key, PcOperationMode mode, const char* valu
 
 int pc_settings_set(const char* key, const char* value) {
     return pc_settings_set_mode(key, st().lastMode, value);
+}
+
+int pc_settings_clear(const char* key) {
+    State& s = st();
+    Entry* e = find(key);
+    if (e == nullptr || !e->registered || isLocked(key)) {
+        return -1;
+    }
+    const std::string before = valueFor(key, s.lastMode);
+    bool had = false;
+    for (int i = 0; i < kSlots; i++) {
+        had = had || e->has[i];
+        e->stored[i].clear();
+        e->has[i] = false;
+    }
+    if (had && !(e->desc.flags & PC_SETTING_NO_SAVE)) {
+        writeFile();
+    }
+    // valueFor now gives the platform's or the description's default: a value the file had at start
+    // is also in the environment (pc_settings_load_early), but fileSet keeps it from counting as the
+    // platform default.
+    const std::string now = valueFor(key, s.lastMode);
+    if (now != before) {
+        notify(*e, key, now);
+    }
+    return 0;
 }
 
 int pc_settings_locked(const char* key) {

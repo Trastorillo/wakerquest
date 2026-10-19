@@ -34,6 +34,7 @@
 #include "pc_fps60_budget.h"
 #include "pc/game_hooks.h"
 #include "pc/pc_settings.h"
+#include "pc/pc_button_remap.h"
 #include "SSystem/SComponent/c_API_graphic.h"
 #include "SSystem/SComponent/c_math.h"
 #include "pc/pc_gpu_opts.h"
@@ -1619,6 +1620,9 @@ void pc_frame_end(void) {
         JKRPcHostAllocScope hostAlloc;
         // The options menu (pc_menu.cpp): input, pause and its window, in this frame's ImGui frame.
         menuFrame();
+        // Issue #15: the button remap (pc_button_remap.h) after the menu's settings poll: a changed
+        // setting or a controller connected on a port gets the map before the next PADRead.
+        pc_button_remap_frame();
         // the European build: a log line when the game's language changes (pc_language.cpp)
         languageFrame();
         if (gConfig.fpsOverlay) {
@@ -1719,6 +1723,7 @@ void pc_frame_end(void) {
     chestFrame(frames);
     dmapFrame(frames);
     seaChartFrame(frames);
+    buttonRemapFrame(frames);
     mailSortFrame(frames);
     menuBackdropFrame(frames);
     itemSweepFrame(frames);

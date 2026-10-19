@@ -497,7 +497,7 @@ Exit codes: 0 reached, 1 smoke check failed, 2 usage error, 10 timeout, 11 stall
 `pc_menu.cpp` / `pc_settings.cpp` (API: `native/include/pc/pc_settings.h`): an ImGui options window
 opened with **F1** or **L+R+Z** (a GameCube-style pad; a `COS_INPUT` script only in `COS_SMOKE=options-menu`) on the Mac and
 **Minus** on the Switch (ZL+ZR+Minus elsewhere); **B**/Esc or the same button(s) close it. Tabs *Gráficos*,
-*Rendimiento*, *Calidad de vida* and *Depuración* (*Graphics*, *Performance*, *Quality of life*, *Debug* in English; a help line for the selected row); controller
+*Controles*, *Rendimiento*, *Calidad de vida* and *Depuración* (*Graphics*, *Controls*, *Performance*, *Quality of life*, *Debug* in English; a help line for the selected row); controller
 (D-pad/stick, A change, B back, L/R tab), keyboard (arrows, Enter, Esc, Q/E) or mouse. While it is
 open the PLAY scene is paused (hit-stop pause timer) and the game gets no pad input.
 
@@ -517,6 +517,19 @@ open the PLAY scene is paused (hit-stop pause timer) and the game gets no pad in
 - Gráficos > "Resolución dinámica" (`COS_DYNRES`, per operation mode): "Con 60 fps" / "With 60 fps"
   (`auto`, the default: only while the 60 fps row is on), "Desactivada" / "Off" (`0`: never, even
   with 60 fps) or "Siempre" / "Always" (`1`). Levels down to 2/3 of the internal resolution.
+- Controles (`native/include/pc/pc_button_remap.h`, `docs/BUTTON_REMAP_DESIGN.md`, issue #15): one row per
+  GameCube action (A, B, X, Y, Z, L, R, START, the D-pad) naming the controller button that does it, as
+  printed on a Switch controller ("botón A", "ZL", "+", "cruceta arriba", "clic stick izq."...). A on a
+  row: "Pulsa un botón... (- cancela)"; once every button is released, the next button (or ZL/ZR) pressed
+  is assigned, swapping with the action that had it ("Intercambiado con X"); Minus cancels, and so do 5 s
+  without a press. Minus is never assignable (it opens this menu on the Switch), and the menu reads the
+  controllers itself, so a remap never changes its own navigation. The last row, "Restaurar controles
+  por defecto", puts every action back. Saved as `COS_PAD_A` ... `COS_PAD_RIGHT` lines, written only for
+  an action off its default (by position on the Mac and Linux, by label on the Switch); deleting the
+  `COS_PAD_*` lines of `settings.ini` restores the defaults too. Applies to every controller with a
+  standard layout (Pro Controller, Joy-Cons, PlayStation, generic); a GameCube adapter and Xbox
+  controllers (whose Aurora table differs) keep their own, unremapped.
+  Regression target: `button-remap` (`native/src/pc/harness/smokes/pc_button_remap.cpp`).
 - Calidad de vida (`native/include/pc/pc_qol.h`, `docs/QOL_PLAN.md`, issue #4): BetterWW's and wwrando's
   quality-of-life patches redone in the game's code, one row each (`COS_QOL_*`), all off by default
   (the original game) and live. `COS_TRACE=qol` prints a line per frame for their checks
@@ -530,7 +543,7 @@ open the PLAY scene is paused (hit-stop pause timer) and the game gets no pad in
   stats lines (`COS_HD_STATS_EVERY`), the GPU timers per group (`COS_GPU_GROUPS`), the USB live log
   (`COS_USB_LOG`, Switch), and the debug server (`COS_DEBUG_SERVER`, Switch, at the
   next start).
-  Gráficos, Rendimiento and Calidad de vida keep the options meant for players.
+  Gráficos, Controles, Rendimiento and Calidad de vida keep the options meant for players.
 - Values are saved to `user/settings.ini` next to the executable (Switch:
   `/switch/switchwaker/native/user/settings.ini`; `COS_SETTINGS=<path>` names another file,
   and `run.sh` gives every run its own `<run dir>/settings.ini`). Lines `NAME=value`, or

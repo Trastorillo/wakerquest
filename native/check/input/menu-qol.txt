@@ -1,5 +1,5 @@
 # COS_SMOKE=options-menu (native/src/pc/features/pc_menu.cpp), with --stage sea:11:0 (Windfall). Opens the menu
-# with L+R+Z, R twice to Calidad de vida, down three times (past "Experiencia BetterWW", "Valores originales"
+# with L+R+Z, R three times (past Controles and Rendimiento) to Calidad de vida, down three times (past "Experiencia BetterWW", "Valores originales"
 # and "Texto instantáneo") to "Voltereta más rápida" (COS_QOL_FAST_ROLL), A turns it
 # on, B closes the menu; then a run and a roll (A) two frames in: with COS_TRACE=qol the roll starts at
 # speedF * 6/17 + 20 (docs/QOL_PLAN.md item 2), switched live. Checked at frame 700.
@@ -10,6 +10,8 @@
 # frame buttons stickX stickY
 400 L+R+Z 0 0
 403 - 0 0
+406 R 0 0
+408 - 0 0
 410 R 0 0
 412 - 0 0
 416 R 0 0
