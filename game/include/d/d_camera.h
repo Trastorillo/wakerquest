@@ -573,6 +573,8 @@ public:
     bool SetExtendedPosition(cXyz*);
     bool ScopeViewMsgModeOff();
 
+    // The name/value list ends with NULL, not 0: on 64-bit hosts an int 0 passed on the stack fills
+    // only half of the pointer slot the callee reads (issue #21).
     BOOL StartEventCamera(int, int, ...);
     BOOL EndEventCamera(int);
     int searchEventArgData(char*);

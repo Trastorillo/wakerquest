@@ -789,7 +789,7 @@ void start_bakutsuki_event_camera(fopAc_ac_c* actor) {
         "Center", &ctr_pos,
         "Eye", &cam_pos,
         "Fovy", &cam_fovy,
-        0
+        NULL
     );
 }
 

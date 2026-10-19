@@ -2898,7 +2898,7 @@ BOOL daShip_c::procTactWarp_init() {
 #else
     fopAcM_seStartCurrent(this, 0x186E, 0);
 #endif
-    dCam_getBody()->StartEventCamera(0xe, fopAcM_GetID(this), 0);
+    dCam_getBody()->StartEventCamera(0xe, fopAcM_GetID(this), NULL);
     dKy_get_seacolor(amb, &diff);
     m03BC.x = 0;
     m03BC.y = shape_angle.y + 0x8000;
