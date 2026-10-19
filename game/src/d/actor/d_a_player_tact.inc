@@ -259,7 +259,7 @@ BOOL daPy_lk_c::procTactWait_init(int r30) {
     dComIfGp_setPlayerStatus1(0, daPyStts1_WIND_WAKER_CONDUCT_e);
 
     if (r30 == -1) {
-        dCam_getBody()->StartEventCamera(0xC, fopAcM_GetID(this), 0);
+        dCam_getBody()->StartEventCamera(0xC, fopAcM_GetID(this), NULL);
         seStartSystem(JA_SE_TAKT_USE_BEGIN);
     }
 

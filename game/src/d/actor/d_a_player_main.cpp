@@ -8548,7 +8548,7 @@ BOOL daPy_lk_c::procNotUse_init(int param_1) {
     mGameOverId = fpcM_ERROR_PROCESS_ID_e;
     mProcVar6.m3570 = param_1;
     mProcVar7.m3574 = 5;
-    dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar7.m3574, 0);
+    dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar7.m3574, NULL);
     if (isDaizaItem(mProcVar6.m3570)) {
         m3624 = 0xf0c;
     } else {

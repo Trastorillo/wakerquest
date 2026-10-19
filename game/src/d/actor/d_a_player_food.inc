@@ -98,7 +98,7 @@ BOOL daPy_lk_c::procFoodThrow_init() {
 
     if (checkSpecialDemoMode()) {
         mProcVar6.m3570 = 6;
-        dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, 0);
+        dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, NULL);
     }
 
     initShipRideUseItem(temp, 2);
@@ -188,7 +188,7 @@ BOOL daPy_lk_c::procFoodSet_init() {
 
     if (checkSpecialDemoMode()) {
         mProcVar6.m3570 = 1;
-        dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, 0);
+        dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, NULL);
     }
 
     initShipRideUseItem(temp, 2);

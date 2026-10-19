@@ -968,7 +968,7 @@ void daPy_lk_c::dProcDead_init_sub2() {
     voiceStart(22);
     mDoAud_bgmStop(0);
     mDoAud_bgmStart(JA_BGM_DIE_LINK);
-    dCam_getBody()->StartEventCamera(9, fopAcM_GetID(this), 0);
+    dCam_getBody()->StartEventCamera(9, fopAcM_GetID(this), NULL);
     if (dComIfGp_checkPlayerStatus0(0, daPyStts0_SWIM_e)) {
         dComIfGp_particle_setShipTail(
             dPa_name::ID_IT_JN_WP_HAMON03,

@@ -116,7 +116,7 @@ BOOL daPy_lk_c::procBottleDrink_init(u16 param_0) {
     setBottleModel(param_0);
     dComIfGp_setPlayerStatus1(0, daPyStts1_UNK2000_e);
     mProcVar6.m3570 = 1;
-    dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, 0);
+    dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, NULL);
     initShipRideUseItem(iVar1, 2);
     return true;
 }
@@ -236,7 +236,7 @@ BOOL daPy_lk_c::procBottleOpen_init(u16 param_0) {
         mProcVar6.m3570 = 2;
     }
     if (mDemo.getDemoMode() != daPy_demo_c::DEMO_BO_OPEN_e) {
-        dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, 0);
+        dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, NULL);
     }
     initShipRideUseItem(iVar1, 2);
     mProcVar2.m34D4 = 0;
@@ -547,7 +547,7 @@ BOOL daPy_lk_c::procBottleGet_init() {
     dComIfGp_setPlayerStatus1(0, daPyStts1_UNK1000_e);
     mGameOverId = fpcM_ERROR_PROCESS_ID_e;
     mProcVar6.m3570 = 0;
-    dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, 0);
+    dCam_getBody()->StartEventCamera(0x12, fopAcM_GetID(this), "Type", &mProcVar6.m3570, NULL);
     if (mEquipItem == dItemNo_FOREST_WATER_e) {
         m32F0.makeEmitter(dPa_name::ID_AK_JN_FORESTWATER00, mpEquipItemModel->getBaseTRMtx(), &current.pos, NULL);
     }
