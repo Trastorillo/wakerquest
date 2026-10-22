@@ -33,4 +33,7 @@ apply from: new File(borealisDir, 'platforms/android/gradle/borealis-application
 
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
+    // Meta Quest: the Khronos OpenXR loader (Apache 2.0), packaged into the APK; libmain.so links the
+    // same version (android/CMakeLists.txt)
+    implementation 'org.khronos.openxr:openxr_loader_for_android:1.1.63'
 }

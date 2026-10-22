@@ -73,6 +73,30 @@ target_link_libraries(cos_pc PRIVATE ${AURORA_SDL3_TARGET})
 # logcat for the harness's log lines (pc_harness.cpp, pc_android_log).
 target_link_libraries(switchwaker PRIVATE log android)
 
+# ---- The headset layer (xr/wq_xr.cpp): OpenXR, its own GLES context, Aurora's XR buffers ----------------
+# The Khronos OpenXR loader's headers and library from its Android package on Maven Central; the APK
+# gets the same library through Gradle (app/build.gradle).
+set(COS_ANDROID_OPENXR_VERSION "1.1.63")
+set(_cos_openxr_aar "${CMAKE_BINARY_DIR}/_deps/openxr_loader_for_android-${COS_ANDROID_OPENXR_VERSION}.aar")
+set(_cos_openxr_dir "${CMAKE_BINARY_DIR}/_deps/openxr-loader")
+if (NOT EXISTS "${_cos_openxr_dir}/jni/arm64-v8a/libopenxr_loader.so")
+    file(DOWNLOAD
+            "https://repo1.maven.org/maven2/org/khronos/openxr/openxr_loader_for_android/${COS_ANDROID_OPENXR_VERSION}/openxr_loader_for_android-${COS_ANDROID_OPENXR_VERSION}.aar"
+            "${_cos_openxr_aar}"
+            EXPECTED_HASH SHA256=622419d2f6741c3443a3beb4779af0764318edd01830de967f24c741ebcded73
+            TLS_VERIFY ON)
+    file(ARCHIVE_EXTRACT INPUT "${_cos_openxr_aar}" DESTINATION "${_cos_openxr_dir}"
+            PATTERNS "jni/arm64-v8a/*" "prefab/modules/headers/include/*")
+endif ()
+add_library(cos_openxr_loader SHARED IMPORTED)
+set_target_properties(cos_openxr_loader PROPERTIES
+        IMPORTED_LOCATION "${_cos_openxr_dir}/jni/arm64-v8a/libopenxr_loader.so"
+        IMPORTED_NO_SONAME OFF
+        INTERFACE_INCLUDE_DIRECTORIES "${_cos_openxr_dir}/prefab/modules/headers/include")
+target_sources(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr/wq_xr.cpp")
+target_include_directories(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr")
+target_link_libraries(switchwaker PRIVATE cos_openxr_loader aurora::core ${AURORA_SDL3_TARGET} EGL GLESv3 nativewindow)
+
 # ---- libmain.so for SDL's Java side ---------------------------------------------------------------------
 set_target_properties(switchwaker PROPERTIES OUTPUT_NAME main LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 target_link_options(switchwaker PRIVATE "-Wl,-u,SDL_main" "-Wl,--build-id=sha1")

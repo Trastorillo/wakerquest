@@ -7,6 +7,10 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- Meta Quest: the game on a screen in the headset (OpenXR, android/xr/wq_xr.cpp), over the
+         room when passthrough is on. The Khronos loader's library adds its own permissions and queries. -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="false" android:version="1" />
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -18,7 +22,7 @@
         android:theme="@android:style/Theme.NoTitleBar"
         android:enableOnBackInvokedCallback="false">
 
-        <!-- Quest: a 2D panel for now; the OpenXR phase adds the VR category and the OpenXR loader. -->
+        <!-- Quest: an immersive app (the VR category); without a headset it is a plain window. -->
         <meta-data android:name="com.oculus.supportedDevices" android:value="quest3|quest3s|questpro" />
 
         <activity
@@ -33,6 +37,11 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
             </intent-filter>
         </activity>
     </application>

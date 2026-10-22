@@ -1,0 +1,519 @@
+XR presentation: the frame into AHardwareBuffers for an OpenXR layer (Android)
+
+WakerQuest (android/xr/wq_xr.cpp) shows the game on a screen in the Meta Quest through OpenXR, on its
+own thread and GLES context. While it has enabled it (aurora_xr_present_enable, include/aurora/xr.h),
+present_frame draws the EFB copy and ImGui into one of three AHardwareBuffers (R8G8B8A8_UNORM, a 4:3
+target as tall as the present source) imported with SharedTextureMemoryAHardwareBuffer, instead of
+acquiring and presenting the window surface; begin_frame no longer needs a presentable window then.
+After the submit, EndAccess's SyncFD fence goes with the buffer to the XR layer, which takes the newest
+frame (aurora_xr_present_take) and reports when its GPU has read it (aurora_xr_present_done): the
+render worker never writes the published frame nor the one being read. The device asks for the
+SharedTextureMemoryAHardwareBuffer and SharedFenceSyncFD features on Android when the adapter has
+them; without them, or when anything fails, frames go to the surface as before. Elsewhere nothing
+changes.
+
+diff --git a/cmake/aurora_core.cmake b/cmake/aurora_core.cmake
+index dfeed19..9272c6b 100644
+--- a/cmake/aurora_core.cmake
++++ b/cmake/aurora_core.cmake
+@@ -75,6 +75,7 @@ if (AURORA_ENABLE_GX)
+             lib/webgpu/gpu.cpp
+             lib/webgpu/gpu_cache.cpp
+             lib/webgpu/gpu_prof.cpp
++            lib/webgpu/xr_present.cpp
+             lib/dawn/BackendBinding.cpp
+             lib/dawn/TracyPlatform.cpp
+     )
+@@ -82,6 +83,10 @@ if (AURORA_ENABLE_GX)
+         set_source_files_properties(lib/dawn/TracyPlatform.cpp PROPERTIES COMPILE_FLAGS -fno-rtti)
+     endif ()
+     target_link_libraries(aurora_core PRIVATE dawn::webgpu_dawn)
++    if (ANDROID)
++        # XR presentation (lib/webgpu/xr_present.cpp): AHardwareBuffer
++        target_link_libraries(aurora_core PRIVATE nativewindow)
++    endif ()
+     if (DAWN_ENABLE_VULKAN)
+         target_compile_definitions(aurora_core PRIVATE DAWN_ENABLE_BACKEND_VULKAN)
+     endif ()
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+new file mode 100644
+index 0000000..6ae99a0
+--- /dev/null
++++ b/include/aurora/xr.h
+@@ -0,0 +1,43 @@
++#pragma once
++
++/* XR presentation (centollOS patch 0023), Android only.
++ *
++ * While an XR layer of the application has enabled it, Aurora's present pass draws the frame (the
++ * EFB copy and ImGui) into one of three AHardwareBuffers instead of the window surface, which is
++ * then neither acquired nor presented. The XR layer, on its own thread and graphics context, takes
++ * the newest finished frame and shows it in the headset. Everywhere else these do nothing. */
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct AHardwareBuffer AHardwareBuffer;
++
++typedef struct AuroraXrFrame {
++  /* R8G8B8A8_UNORM, GPU_COLOR_OUTPUT | GPU_SAMPLED_IMAGE; row 0 is the top of the picture, which
++   * holds the game's (sRGB-encoded) colours. Aurora keeps its own reference while the buffer is in
++   * its ring: a consumer that keeps the buffer past aurora_xr_present_done acquires its own. */
++  AHardwareBuffer* buffer;
++  /* A sync file that signals when the frame is written, or -1; the caller owns it (closes it). */
++  int syncFd;
++  uint32_t width;
++  uint32_t height;
++  uint32_t serial; /* counts the frames published */
++} AuroraXrFrame;
++
++/* Starts or stops presenting into the buffers (any thread). Takes effect from the next frame. */
++void aurora_xr_present_enable(bool enable);
++/* Whether the device can present into the buffers (known once Aurora has initialized). */
++bool aurora_xr_present_supported(void);
++/* The newest frame finished since the last take, if any. The buffer is marked as being read and is
++ * not written again until aurora_xr_present_done. */
++bool aurora_xr_present_take(AuroraXrFrame* out);
++/* The last taken buffer is no longer read (the reader's GPU work on it has completed). */
++void aurora_xr_present_done(void);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index 4b30763..a637cdb 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -14,6 +14,7 @@
+ #include "imgui.hpp"
+ #include "webgpu/gpu.hpp"
+ #include "webgpu/gpu_prof.hpp"
++#include "webgpu/xr_present.hpp"
+ #include <webgpu/webgpu_cpp.h>
+ #endif
+ 
+@@ -266,14 +267,16 @@ bool begin_frame() noexcept {
+   ZoneScoped;
+ #ifdef AURORA_ENABLE_GX
+   {
+-    if (!window::is_presentable()) {
++    // XR presentation (patch 0023): the frame goes to the XR layer's buffers, not to the window.
++    const bool xr = webgpu::xr_present::active();
++    if (!xr && !window::is_presentable()) {
+       webgpu::release_surface();
+       return false;
+     }
+     if (window::is_paused()) {
+       return false;
+     }
+-    if (!g_surface) {
++    if (!xr && !g_surface) {
+       webgpu::refresh_surface(true);
+       if (!g_surface) {
+         return false;
+@@ -332,6 +335,14 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   const auto viewport = webgpu::calculate_present_viewport(webgpu::g_graphicsConfig.surfaceConfiguration.width,
+                                                            webgpu::g_graphicsConfig.surfaceConfiguration.height,
+                                                            presentSource.size.width, presentSource.size.height);
++  // XR presentation (patch 0023): a 4:3 target as tall as the present source, for the XR layer's
++  // screen. The surface's viewport stays for a frame that falls back to the surface.
++  const bool xr = webgpu::xr_present::active();
++  const uint32_t xrHeight = xr ? std::max<uint32_t>(presentSource.size.height, 2) & ~1u : 0;
++  const uint32_t xrWidth = (xrHeight * 4 / 3 + 1) & ~1u;
++  const auto xrViewport = xr ? webgpu::calculate_present_viewport(xrWidth, xrHeight, presentSource.size.width,
++                                                                  presentSource.size.height)
++                             : viewport;
+ 
+   wgpu::BindGroup rmlBindGroup;
+   bool rmlOverlay = false;
+@@ -343,13 +354,21 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   }
+ #endif
+ 
+-  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
+-                  imguiDrawData = std::move(imguiDrawData)](
++  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, surfaceViewport = viewport, xr, xrWidth,
++                  xrHeight, xrViewport, imguiDrawData = std::move(imguiDrawData)](
+                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+-    {
++    // XR presentation (patch 0023): one of the XR layer's buffers; the surface when that fails.
++    if (xr) {
++      currentView = webgpu::xr_present::begin(xrWidth, xrHeight);
++    }
++    const bool xrFrame = static_cast<bool>(currentView);
++    const auto& viewport = xrFrame ? xrViewport : surfaceViewport;
++    const uint32_t targetWidth = xrFrame ? xrWidth : webgpu::g_graphicsConfig.surfaceConfiguration.width;
++    const uint32_t targetHeight = xrFrame ? xrHeight : webgpu::g_graphicsConfig.surfaceConfiguration.height;
++    if (!xrFrame) {
+       window::SurfaceLock surfaceLock;
+       if (window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
+@@ -363,7 +382,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+       }
+     }
+ 
+-    const bool canPresent = currentTexture && currentView;
++    const bool canPresent = xrFrame || (currentTexture && currentView);
+     if (canPresent) {
+       wgpu::BindGroup presentBindGroup;
+       if (rmlBindGroup && !rmlOverlay) {
+@@ -390,8 +409,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+         // Copy EFB -> XFB (swapchain)
+         pass.SetPipeline(webgpu::g_CopyPipeline);
+         pass.SetBindGroup(0, presentBindGroup, 0, nullptr);
+-        set_present_viewport(pass, viewport, webgpu::g_graphicsConfig.surfaceConfiguration.width,
+-                             webgpu::g_graphicsConfig.surfaceConfiguration.height);
++        set_present_viewport(pass, viewport, targetWidth, targetHeight);
+ 
+         pass.Draw(3);
+         if (rmlBindGroup && rmlOverlay) {
+@@ -416,8 +434,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+             .timestampWrites = webgpu::gpu_prof::pass_writes("ImGui"),
+         };
+         const auto pass = encoder.BeginRenderPass(&renderPassDescriptor);
+-        pass.SetViewport(0.f, 0.f, static_cast<float>(webgpu::g_graphicsConfig.surfaceConfiguration.width),
+-                         static_cast<float>(webgpu::g_graphicsConfig.surfaceConfiguration.height), 0.f, 1.f);
++        pass.SetViewport(0.f, 0.f, static_cast<float>(targetWidth), static_cast<float>(targetHeight), 0.f, 1.f);
+         imgui::render(pass, imguiDrawData);
+         pass.End();
+       }
+@@ -432,7 +449,11 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+       g_queue.Submit(1, &buffer);
+     }
+     webgpu::gpu_prof::after_submit();
+-    if (canPresent && g_surface) {
++    if (xrFrame) {
++      // XR presentation (patch 0023): the XR layer shows it; nothing to present here.
++      webgpu::xr_present::end();
++      gfx::after_present();
++    } else if (canPresent && g_surface) {
+       ZoneScopedN("Present");
+       wgpu::ConvertibleStatus status = wgpu::Status::Error;
+       {
+diff --git a/lib/webgpu/gpu.cpp b/lib/webgpu/gpu.cpp
+index b3ae6cd..6de1152 100644
+--- a/lib/webgpu/gpu.cpp
++++ b/lib/webgpu/gpu.cpp
+@@ -24,6 +24,7 @@
+ #include "../internal.hpp"
+ #include "../window.hpp"
+ #include "gpu_prof.hpp"
++#include "xr_present.hpp"
+ 
+ #ifdef WEBGPU_DAWN
+ #include "../dawn/TracyPlatform.hpp"
+@@ -949,8 +950,22 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+       if (feature == wgpu::FeatureName::TimestampQuery) {
+         requiredFeatures.push_back(feature);
+       }
++#endif
++#ifdef __ANDROID__
++      // XR presentation (patch 0023, xr_present.cpp): the frame into AHardwareBuffers, handed over
++      // with sync files.
++      if (feature == wgpu::FeatureName::SharedTextureMemoryAHardwareBuffer ||
++          feature == wgpu::FeatureName::SharedFenceSyncFD) {
++        requiredFeatures.push_back(feature);
++      }
+ #endif
+     }
++#ifdef __ANDROID__
++    xr_present::g_supported =
++        std::count(requiredFeatures.begin(), requiredFeatures.end(),
++                   wgpu::FeatureName::SharedTextureMemoryAHardwareBuffer) != 0 &&
++        std::count(requiredFeatures.begin(), requiredFeatures.end(), wgpu::FeatureName::SharedFenceSyncFD) != 0;
++#endif
+     std::string featureList;
+     for (auto featureName : requiredFeatures) {
+       featureList += "\n  ";
+@@ -1103,6 +1118,7 @@ void shutdown() {
+   g_depthBuffer = {};
+   g_normalBuffer = {};
+   g_graphicsConfig.normalBuffer = false;
++  xr_present::shutdown();
+   g_queue = {};
+   g_surface = {};
+   g_device = {};
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+new file mode 100644
+index 0000000..170b316
+--- /dev/null
++++ b/lib/webgpu/xr_present.cpp
+@@ -0,0 +1,239 @@
++#include "xr_present.hpp"
++
++#include <aurora/xr.h>
++
++#include "gpu.hpp"
++#include "../internal.hpp"
++
++#include <atomic>
++#include <mutex>
++
++#ifdef __ANDROID__
++#include <android/hardware_buffer.h>
++#include <unistd.h>
++#endif
++
++namespace aurora::webgpu::xr_present {
++bool g_supported = false;
++
++namespace {
++std::atomic_bool g_enabled{false};
++
++#ifdef __ANDROID__
++Module Log("aurora::xr");
++
++constexpr int kSlots = 3;
++
++struct Slot {
++  AHardwareBuffer* buffer = nullptr;
++  wgpu::SharedTextureMemory memory;
++  wgpu::Texture texture;
++  wgpu::TextureView view;
++};
++
++// The ring and its hand-over to the XR layer. The render worker writes a slot that is neither the
++// newest published frame (not yet taken) nor the one the XR layer reads; with three slots one is
++// always free.
++std::mutex g_mutex;
++Slot g_slots[kSlots];
++uint32_t g_width = 0, g_height = 0;
++int g_writing = -1;   // render worker: begun, not yet ended
++int g_latest = -1;    // published, not yet taken
++int g_latestFd = -1;  // its sync file
++int g_reading = -1;   // taken, not yet done
++uint32_t g_serial = 0;
++bool g_failed = false;  // creating the buffers failed: the surface for good
++
++void drop_slots_locked() {
++  for (auto& slot : g_slots) {
++    slot.view = {};
++    slot.texture = {};
++    slot.memory = {};
++    if (slot.buffer != nullptr) {
++      AHardwareBuffer_release(slot.buffer);
++      slot.buffer = nullptr;
++    }
++  }
++  if (g_latestFd >= 0) {
++    close(g_latestFd);
++  }
++  g_latest = g_latestFd = g_reading = g_writing = -1;
++  g_width = g_height = 0;
++}
++
++bool create_slot(Slot& slot, uint32_t width, uint32_t height) {
++  AHardwareBuffer_Desc desc{};
++  desc.width = width;
++  desc.height = height;
++  desc.layers = 1;
++  desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
++  desc.usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
++  if (AHardwareBuffer_allocate(&desc, &slot.buffer) != 0 || slot.buffer == nullptr) {
++    Log.error("AHardwareBuffer_allocate {}x{} failed", width, height);
++    slot.buffer = nullptr;
++    return false;
++  }
++  wgpu::SharedTextureMemoryAHardwareBufferDescriptor ahbDesc;
++  ahbDesc.handle = slot.buffer;
++  wgpu::SharedTextureMemoryDescriptor memoryDesc{.nextInChain = &ahbDesc, .label = "XR target"};
++  slot.memory = g_device.ImportSharedTextureMemory(&memoryDesc);
++  if (!slot.memory) {
++    Log.error("ImportSharedTextureMemory failed");
++    return false;
++  }
++  const wgpu::TextureDescriptor textureDesc{
++      .label = "XR target",
++      .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++      .dimension = wgpu::TextureDimension::e2D,
++      .size = {width, height, 1},
++      .format = wgpu::TextureFormat::RGBA8Unorm,
++      .mipLevelCount = 1,
++      .sampleCount = 1,
++  };
++  slot.texture = slot.memory.CreateTexture(&textureDesc);
++  if (!slot.texture) {
++    Log.error("SharedTextureMemory::CreateTexture failed");
++    return false;
++  }
++  slot.view = slot.texture.CreateView();
++  return true;
++}
++#endif
++} // namespace
++
++bool active() noexcept {
++#ifdef __ANDROID__
++  return g_enabled.load(std::memory_order_relaxed) && g_supported && !g_failed &&
++         g_graphicsConfig.surfaceConfiguration.format == wgpu::TextureFormat::RGBA8Unorm;
++#else
++  return false;
++#endif
++}
++
++wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept {
++#ifdef __ANDROID__
++  if (!active() || width == 0 || height == 0) {
++    return {};
++  }
++  std::lock_guard lock{g_mutex};
++  if (width != g_width || height != g_height) {
++    drop_slots_locked();
++    for (auto& slot : g_slots) {
++      if (!create_slot(slot, width, height)) {
++        drop_slots_locked();
++        g_failed = true;
++        Log.error("XR present unavailable; presenting to the window");
++        return {};
++      }
++    }
++    g_width = width;
++    g_height = height;
++    Log.info("XR present: {} buffers of {}x{}", kSlots, width, height);
++  }
++  int index = 0;
++  while (index == g_latest || index == g_reading) {
++    ++index;
++  }
++  Slot& slot = g_slots[index];
++  // The contents are not kept (the pass clears them) and the XR layer only reads the buffer, so
++  // the image starts in an undefined layout with nothing to wait for.
++  wgpu::SharedTextureMemoryVkImageLayoutBeginState layout;
++  layout.oldLayout = 0; // VK_IMAGE_LAYOUT_UNDEFINED
++  layout.newLayout = 0;
++  wgpu::SharedTextureMemoryBeginAccessDescriptor access{
++      .nextInChain = &layout,
++      .concurrentRead = false,
++      .initialized = false,
++      .fenceCount = 0,
++  };
++  if (!slot.memory.BeginAccess(slot.texture, &access)) {
++    Log.error("SharedTextureMemory::BeginAccess failed");
++    return {};
++  }
++  g_writing = index;
++  return slot.view;
++#else
++  (void)width;
++  (void)height;
++  return {};
++#endif
++}
++
++void end() noexcept {
++#ifdef __ANDROID__
++  std::lock_guard lock{g_mutex};
++  if (g_writing < 0) {
++    return;
++  }
++  Slot& slot = g_slots[g_writing];
++  wgpu::SharedTextureMemoryVkImageLayoutEndState layout;
++  wgpu::SharedTextureMemoryEndAccessState state;
++  state.nextInChain = &layout;
++  int fd = -1;
++  if (slot.memory.EndAccess(slot.texture, &state)) {
++    for (size_t i = 0; i < state.fenceCount && fd < 0; ++i) {
++      wgpu::SharedFenceSyncFDExportInfo syncFd;
++      wgpu::SharedFenceExportInfo info{.nextInChain = &syncFd};
++      state.fences[i].ExportInfo(&info);
++      if (info.type == wgpu::SharedFenceType::SyncFD && syncFd.handle >= 0) {
++        fd = dup(syncFd.handle);
++      }
++    }
++  } else {
++    Log.error("SharedTextureMemory::EndAccess failed");
++  }
++  if (g_latestFd >= 0) {
++    close(g_latestFd);
++  }
++  g_latest = g_writing;
++  g_latestFd = fd;
++  g_writing = -1;
++  ++g_serial;
++#endif
++}
++
++void shutdown() noexcept {
++#ifdef __ANDROID__
++  std::lock_guard lock{g_mutex};
++  drop_slots_locked();
++#endif
++}
++
++} // namespace aurora::webgpu::xr_present
++
++using namespace aurora::webgpu::xr_present;
++
++extern "C" {
++
++void aurora_xr_present_enable(bool enable) { g_enabled.store(enable); }
++
++bool aurora_xr_present_supported(void) { return g_supported; }
++
++bool aurora_xr_present_take(AuroraXrFrame* out) {
++#ifdef __ANDROID__
++  std::lock_guard lock{g_mutex};
++  if (g_latest < 0 || out == nullptr) {
++    return false;
++  }
++  out->buffer = g_slots[g_latest].buffer;
++  out->syncFd = g_latestFd;
++  out->width = g_width;
++  out->height = g_height;
++  out->serial = g_serial;
++  g_reading = g_latest;
++  g_latest = g_latestFd = -1;
++  return true;
++#else
++  (void)out;
++  return false;
++#endif
++}
++
++void aurora_xr_present_done(void) {
++#ifdef __ANDROID__
++  std::lock_guard lock{g_mutex};
++  g_reading = -1;
++#endif
++}
++
++} // extern "C"
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+new file mode 100644
+index 0000000..241eaf2
+--- /dev/null
++++ b/lib/webgpu/xr_present.hpp
+@@ -0,0 +1,26 @@
++#pragma once
++
++// XR presentation (centollOS patch 0023, include/aurora/xr.h): the present pass's target when an XR
++// layer has enabled it. Android only; elsewhere active() is always false.
++
++#include <webgpu/webgpu_cpp.h>
++
++#include <cstdint>
++
++namespace aurora::webgpu::xr_present {
++
++// Set by gpu.cpp when the device was created with the features the buffers need.
++extern bool g_supported;
++
++// Whether this frame goes to the XR buffers (enabled, supported, and the copy pipeline's format
++// is the buffers' RGBA8Unorm).
++bool active() noexcept;
++// On the render worker: a target of the given size to draw the frame into, or a null view (the
++// frame then goes to the surface as usual). Each begin() is followed by end() after the submit.
++wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept;
++// On the render worker, after the queue submit: publishes the frame to the XR layer.
++void end() noexcept;
++// Drops the buffers (device shutdown).
++void shutdown() noexcept;
++
++} // namespace aurora::webgpu::xr_present

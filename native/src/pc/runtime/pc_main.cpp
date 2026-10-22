@@ -54,6 +54,9 @@
 
 // Aurora's (include/dolphin/vi.h); the game's <dolphin/vi.h> comes first on the include path.
 extern "C" void VISetFrameBufferScale(float scale);
+#if defined(__ANDROID__)
+extern "C" bool wq_xr_start(void); // android/xr/wq_xr.h, linked into libmain.so
+#endif
 
 namespace pc {
 
@@ -243,6 +246,11 @@ void pc_aurora_init(int argc, char* argv[]) {
     config.mem1Size = kMem1Size;
     config.mem2Size = kMem2Size;
     config.blockingPipelines = gConfig.syncPipelines;
+#if defined(__ANDROID__)
+    // WakerQuest (android/xr/wq_xr.cpp): in a Meta Quest the game goes to a screen in the headset
+    // and the Touch controllers become a gamepad; elsewhere it stays in the window.
+    wq_xr_start();
+#endif
     const AuroraInfo info = aurora_initialize(argc, argv, &config);
     if (info.window == nullptr) {
         writef(STDERR_FILENO, "[cos] aurora_initialize returned no window\n");
