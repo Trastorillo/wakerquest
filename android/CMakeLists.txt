@@ -68,6 +68,14 @@ endif ()
 target_compile_options(cos_sdk PRIVATE -fsigned-char)
 target_compile_options(cos_sdk_gf PRIVATE -fsigned-char)
 
+# The NDK compiles with _FORTIFY_SOURCE=2, so bionic's __*_chk abort the game where the original
+# writes past an array into padding or the next member (d_a_npc_zl1's strcpy of "Zl2" into a char[3]
+# did, on reaching Outset), including copies of a run-time size that no compiler warning shows. The
+# game runs without FORTIFY on the Mac, Linux and the Switch: the same here, for the game units
+# only (cos_game_headers: the modules and the harness that is compiled like them). Aurora, Dawn, the
+# SDK and the headset layer keep it.
+target_compile_options(cos_game_headers INTERFACE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
+
 # pc_harness.cpp asks SDL for the app's external files directory (the data root on Android).
 target_link_libraries(cos_pc PRIVATE ${AURORA_SDL3_TARGET})
 # logcat for the harness's log lines (pc_harness.cpp, pc_android_log).

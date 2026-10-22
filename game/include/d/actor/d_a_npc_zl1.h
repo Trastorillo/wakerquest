@@ -190,7 +190,13 @@ public:
     /* 0x6CE */ u8 field_0x6CE[0x6D0 - 0x6CE];
     /* 0x6D0 */ J3DModel* mpModel;
     /* 0x6D4 */ daNpc_Zl1_matAnm_c* field_0x6D4[2];
+#if TARGET_PC
+    // "Zl2" and its NUL (strcpy in d_a_npc_zl1.cpp) need 4 bytes: the original wrote the NUL into
+    // the padding byte at 0x6DF, which Android's FORTIFY aborts on. Same layout.
+    /* 0x6DC */ char mArcName[4];
+#else
     /* 0x6DC */ char mArcName[3];
+#endif
     /* 0x6E0 */ u32 mShadowId;
     /* 0x6E4 */ u8 field_0x6E4[0x6E8 - 0x6E4];
     /* 0x6E8 */ mDoExt_btkAnm mBtkAnm;
