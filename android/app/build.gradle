@@ -24,7 +24,7 @@ ext.borealisAndroid = [
     namespace: 'io.github.wakerquest',
     applicationId: 'io.github.wakerquest',
     abis: ['arm64-v8a'],
-    compileSdk: 35,
+    compileSdk: 37, // Borealis's okhttp 5.5.0 needs 37 to compile against (targetSdk unchanged)
     targetSdk: 32,
     proguardRules: file('proguard-rules.pro')
 ]

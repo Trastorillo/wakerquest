@@ -21,6 +21,14 @@
 
 #include <stdint.h>
 
+#ifdef __ANDROID__
+/* Bionic's strings.h defines bcopy and bzero as macros, which break JASystem::Calc::bcopy/bzero
+ * (JASCalc.h). Include it once here and drop the macros. */
+#include <strings.h>
+#undef bcopy
+#undef bzero
+#endif
+
 #define COS_PC_INTRINSIC static inline
 
 /* ---- Metrowerks PowerPC intrinsics ------------------------------------------------------- */

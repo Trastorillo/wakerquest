@@ -51,6 +51,10 @@ target_include_directories(cos_dsp_hle PRIVATE
         "${COS_RECOMPCORE_DIR}/Source"
         "${COS_RECOMPCORE_DIR}/Externals"
         "${COS_DSP_HLE_ROOT}/generated")
+if (ANDROID)
+    # Common/FileUtil.h includes jni/AndroidCommon/AndroidCommon.h when ANDROID is defined.
+    target_include_directories(cos_dsp_hle PRIVATE "${COS_RECOMPCORE_DIR}/Source/Android")
+endif ()
 # Dolphin's architecture macros (its CMakeLists sets them per target CPU).
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     set(_cos_dsp_arch _M_X86_64=1 _M_X86=1)
