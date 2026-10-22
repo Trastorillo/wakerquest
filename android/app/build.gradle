@@ -1,0 +1,36 @@
+// WakerQuest's APK: Borealis's Gradle script (Dusklight's Android shell) around libmain.so.
+// Configure and build CMake first (android/README.md); its build directory is build/android, or
+// -PcosBuildDir=<dir> (the directory that holds borealis-android.properties).
+import java.util.Properties
+
+plugins {
+    id 'com.android.application'
+}
+
+def repoDir = rootProject.projectDir.parentFile
+def cosBuildDir = project.hasProperty('cosBuildDir') ? new File(project.property('cosBuildDir').toString())
+        : new File(repoDir, 'build/android')
+def propertiesFile = new File(cosBuildDir, 'borealis-android.properties')
+if (!propertiesFile.isFile()) {
+    throw new GradleException("Missing ${propertiesFile}: configure android/CMakeLists.txt first (android/README.md)")
+}
+def nativeProperties = new Properties()
+propertiesFile.withInputStream { nativeProperties.load(it) }
+def borealisDir = new File(nativeProperties.getProperty('borealis.dir'))
+
+ext.borealisAndroid = [
+    borealisDir: borealisDir,
+    propertiesFile: propertiesFile,
+    namespace: 'io.github.wakerquest',
+    applicationId: 'io.github.wakerquest',
+    abis: ['arm64-v8a'],
+    compileSdk: 35,
+    targetSdk: 32,
+    proguardRules: file('proguard-rules.pro')
+]
+
+apply from: new File(borealisDir, 'platforms/android/gradle/borealis-application.gradle')
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+}

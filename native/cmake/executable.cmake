@@ -170,7 +170,12 @@ foreach (_m IN LISTS COS_MODULES)
     list(APPEND _exe_objects "$<TARGET_OBJECTS:${_m}>")
 endforeach ()
 
-add_executable(switchwaker EXCLUDE_FROM_ALL "${_exe_dir}/cos_exe_stub.c")
+# On Android the game is libmain.so, which SDL's Java side loads (android/CMakeLists.txt).
+if (ANDROID)
+    add_library(switchwaker SHARED EXCLUDE_FROM_ALL "${_exe_dir}/cos_exe_stub.c")
+else ()
+    add_executable(switchwaker EXCLUDE_FROM_ALL "${_exe_dir}/cos_exe_stub.c")
+endif ()
 add_dependencies(switchwaker ${COS_MODULES})
 target_link_options(switchwaker PRIVATE "@${_exe_rsp}")
 # The process entry point: aurora::main, whose main calls the game's (aurora_main). A platform

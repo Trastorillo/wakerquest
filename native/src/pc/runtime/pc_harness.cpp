@@ -20,6 +20,11 @@
 #include <pthread.h>
 #include <pthread/qos.h>
 #endif
+#if defined(__ANDROID__)
+#include <SDL3/SDL_system.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
 
 namespace pc {
 
@@ -86,6 +91,42 @@ bool envFlag(const char* name, bool fallback) {
              strcmp(v, "no") == 0);
 }
 
+#if defined(__ANDROID__)
+// Android (android/CMakeLists.txt): the app's external files directory,
+// /storage/emulated/0/Android/data/<package>/files, holds what sits next to the executable on the
+// desktop: the disc (GZLE01.iso), user/ (saves, settings, caches) and logs/. adb push or the
+// headset's file manager reach it.
+const char* androidRoot() {
+    static char sRoot[512];
+    if (sRoot[0] == '\0') {
+        const char* dir = SDL_GetAndroidExternalStoragePath();
+        snprintf(sRoot, sizeof(sRoot), "%s", dir != nullptr ? dir : "/sdcard/Android/data/io.github.wakerquest/files");
+        mkdir(sRoot, 0755);
+    }
+    return sRoot;
+}
+
+// Android has no terminal: stdout and stderr (the harness's and the game's log lines) go to
+// <root>/logs/switchwaker.log, replaced at every start. COS_DISC defaults to <root>/<ID>.iso.
+void androidStart() {
+    char path[640];
+    snprintf(path, sizeof(path), "%s/logs", androidRoot());
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/logs/switchwaker.log", androidRoot());
+    const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd >= 0) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+    }
+    if (getenv("COS_DISC") == nullptr) {
+        snprintf(path, sizeof(path), "%s/%s.iso", androidRoot(), COS_GAME_ID_STR);
+        setenv("COS_DISC", path, 1);
+    }
+    writef(STDERR_FILENO, "[cos] android: data in %s, disc %s\n", androidRoot(), getenv("COS_DISC"));
+}
+#endif
+
 } // namespace
 
 void waitForever() {
@@ -113,7 +154,12 @@ bool executablePath(char* out, size_t size) {
         return false;
     }
     out[0] = '\0';
-#if defined(__APPLE__)
+#if defined(__ANDROID__)
+    // Not /proc/self/exe (app_process64): a file name in the data root, so user/ and settings.ini
+    // land there (makeUserPaths, pc_settings.cpp).
+    snprintf(out, size, "%s/switchwaker", androidRoot());
+    return true;
+#elif defined(__APPLE__)
     uint32_t len = (uint32_t)size;
     if (_NSGetExecutablePath(out, &len) != 0) {
         out[0] = '\0';
@@ -143,6 +189,9 @@ void pc_harness_init(int argc, char* argv[]) {
     (void)argc;
     (void)argv;
     sStartNs = monotonicNs();
+#if defined(__ANDROID__)
+    androidStart();
+#endif
     // The options menu's settings file (pc_settings.h) into the environment before anything reads
     // it (on the Switch cos_switch_start did it already, before its defaults).
     pc_settings_load_early();
