@@ -33,6 +33,10 @@ void nav(float stickX, float stickY, float tabX, bool a, bool b, bool* tick);
 // The panel's layer (false while it is closed), redrawn when something on it changed.
 bool layer(XrSpace space, XrCompositionLayerQuad* out);
 
+// A change of one of the game's settings (pc_settings) for the game thread to apply, as the panel's own
+// (wq_xr_panel_take_change); replaces one of the same key not yet applied. Any thread.
+void gameChange(const char* key, const char* value);
+
 // A small label floating at `pose` (the model's size while the two hands scale it); empty: none.
 bool label(const char* text, const XrPosef& pose, XrSpace space, XrCompositionLayerQuad* out);
 

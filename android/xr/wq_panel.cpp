@@ -74,16 +74,20 @@ const Option kResolution[] = {{"540", "0,50"},   {"648", "0,60"},   {"756", "0,7
                               {"972", "0,90"},   {"1080", "1,00"},  {"1188", "1,10"},  {"1296", "1,20"},
                               {"1404", "1,30"},  {"1512", "1,40"},  {"1620", "1,50"},  {"1728", "1,60"},
                               {"1944", "1,80"},  {"2160", "2,00"}};
+// the Rendimiento preset (wq_xr.cpp kPresetKeys): refresh, GPU, resolution, 3D, the bubble's world, the
+// window's horizon, set at once when one is chosen; personal = the values chosen by hand
+const Option kPerfPreset[] = {{"ahorro", "Ahorro"}, {"equilibrado", "Equilibrado"}, {"maximo", "Máximo"},
+                              {"personal", "Personal"}};
 const Option kLanguage[] = {{"auto", "Auto"},       {"es", "Español"}, {"en", "English"},
                             {"fr", "Français"},     {"de", "Deutsch"}, {"it", "Italiano"}};
 
 const Item kGeneral[] = {
+    {kXr, "perf_preset", "Rendimiento", "Ahorro: menos calor; Máximo: más nitidez y 3D", kStepper, OPTS(kPerfPreset)},
     {kXr, "mode", "Modo", "Pantalla gigante, el mundo en una burbuja, o una ventana", kStepper, OPTS(kMode)},
     {kGame, "COS_VR_RESOLUTION", "Resolución", "1,00 = 1080 líneas; más = más nítido y más GPU", kStepper,
      OPTS(kResolution)},
     {kXr, "refresh", "Frecuencia", "72 Hz: menos calor; 90 Hz: más fluido", kStepper, OPTS(kRefresh)},
     {kXr, "gpu_boost", "Más potencia de GPU", "Sube el reloj de la GPU; gasta más batería", kSwitch},
-    {kXr, "passthrough", "Tu habitación", "Alrededor de la pantalla gigante", kSwitch},
     // the giant screen: also moved with the left grip and scaled with both (wq_xr.cpp)
     {kXr, "distance", "Distancia de la pantalla", "O muévela con el grip izquierdo", kStepper, nullptr, 0, 1.0f, 20.0f,
      0.5f, "%.1f m"},
@@ -153,6 +157,7 @@ const Item kGameItems[] = {
     {kXr, "talk_screen", "Pantalla junto a la burbuja", "Los diálogos en 2D, a su izquierda", kSwitch},
     {kXr, "special_window", "Helmaroc por la ventana", "Si no, la burbuja se acerca al pájaro", kSwitch},
     // the giant screen's (General is full)
+    {kXr, "passthrough", "Tu habitación", "Alrededor de la pantalla gigante", kSwitch},
     {kXr, "screen_frame", "Marco", "Madera roja alrededor de la pantalla", kSwitch},
     {kXr, "height", "Altura de la pantalla", "Sobre tus ojos; o con un grip", kStepper, nullptr, 0, -3.0f, 3.0f,
      0.1f, "%.1f m"},
@@ -190,6 +195,16 @@ int gameKeyIndex(const char* key) {
     for (int i = 0; i < kGameKeyCount; i++)
         if (!strcmp(kGameKeys[i], key)) return i;
     return -1;
+}
+
+// A change for the game thread (sGameLock held): one of the same key not yet applied is replaced
+void queueGameChange(const char* key, const std::string& v) {
+    bool queued = false;
+    for (auto& c : sGameChanges)
+        if (c.first == key) c.second = v, queued = true;
+    if (!queued) sGameChanges.emplace_back(key, v);
+    const int i = gameKeyIndex(key);
+    if (i >= 0) sGameValue[i] = v;  // shown at once; the game thread confirms it
 }
 
 // ---- The panel ---------------------------------------------------------------------------------------
@@ -260,9 +275,7 @@ void setValue(const Item& it, const std::string& v) {
         p.host.xrSet(it.key, v.c_str());
     } else if (it.src == kGame) {
         std::lock_guard lock{sGameLock};
-        sGameChanges.emplace_back(it.key, v);
-        const int i = gameKeyIndex(it.key);
-        if (i >= 0) sGameValue[i] = v;  // shown at once; the game thread confirms it
+        queueGameChange(it.key, v);
     }
     char line[160];
     snprintf(line, sizeof line, "%s = %s", it.key, v.c_str());
@@ -682,6 +695,12 @@ bool label(const char* text, const XrPosef& pose, XrSpace space, XrCompositionLa
     out->pose = pose;
     out->size = {0.16f, 0.036f};
     return true;
+}
+
+void gameChange(const char* key, const char* value) {
+    if (key == nullptr || value == nullptr) return;
+    std::lock_guard lock{sGameLock};
+    queueGameChange(key, value);
 }
 
 }  // namespace wqp

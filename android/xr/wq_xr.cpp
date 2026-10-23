@@ -79,6 +79,10 @@ struct Settings {
     float screenYaw = 0.0f;  // degrees, turned to the left (the left grip turns it)
     bool screenFrame = true; // the wooden frame around it (drawn here, procedurally)
     bool passthrough = true; // the room around the screen instead of black
+    // the Rendimiento preset last chosen (kPresetKeys): 0 personal (the values by hand), 1 ahorro,
+    // 2 equilibrado, 3 maximo. Only a label: the values are the other keys', applied when it is chosen
+    // (wq_xr_set), never at start; a file without it (older ones) is personal.
+    int perfPreset = 0;
     int refresh = 72;        // Hz, the headset's nearest at or below; 72 runs cooler (90 shows 30 fps evenly)
     bool gpuBoost = false;   // XR_EXT_performance_settings: the GPU at its sustained high level (heat)
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
@@ -165,6 +169,10 @@ const char kDefaultSettings[] =
     "screen_yaw = 0.0\n"
     "screen_frame = 1\n"
     "passthrough = 1\n"
+    "# perf_preset = ahorro, equilibrado, maximo or personal: the settings panel's Rendimiento, which sets\n"
+    "# refresh, gpu_boost, resolution, stereo, cine_3d, bubble_span and window_draw_distance when chosen\n"
+    "# (changing one of those by hand makes it personal); the values below always win at start.\n"
+    "perf_preset = equilibrado\n"
     "refresh = 72\n"
     "gpu_boost = 0\n"
     "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
@@ -220,6 +228,39 @@ const char kDefaultSettings[] =
     "window_depth_special = 2.0\n"
     "window_popout_special = 1.8\n";
 
+// The Rendimiento presets (perf_preset): the keys each sets when chosen, in xr.ini's form.
+const char* const kPresetNames[] = {"personal", "ahorro", "equilibrado", "maximo"};
+struct PresetKey {
+    const char* key;
+    const char* value[3];  // ahorro, equilibrado, maximo
+};
+const PresetKey kPresetKeys[] = {
+    {"refresh", {"72", "72", "90"}},
+    {"gpu_boost", {"0", "0", "1"}},  // 0: the CPU at its sustained low level too (updatePerformance)
+    {"resolution", {"864", "1080", "1404"}},
+    {"stereo", {"0", "0", "1"}},
+    {"cine_3d", {"0", "1", "1"}},
+    {"bubble_span", {"25", "30", "40"}},
+    {"window_draw_distance", {"300", "400", "800"}},
+};
+
+// 1..3 for a preset's name, 0 (personal) for anything else
+int presetIndex(const char* v) {
+    if (!strcmp(v, "ahorro")) return 1;
+    if (!strcmp(v, "equilibrado")) return 2;
+    if (!strcmp(v, "maximo") || !strcmp(v, "máximo")) return 3;
+    return 0;
+}
+
+// The value preset `preset` (1..3) gives `key`, or nullptr when it does not set it
+const char* presetValue(int preset, const char* key) {
+    if (preset < 1 || preset > 3) return nullptr;
+    for (const PresetKey& k : kPresetKeys)
+        if (!strcmp(k.key, key) || (!strcmp(k.key, "bubble_span") && !strcmp(key, "table_span")))
+            return k.value[preset - 1];
+    return nullptr;
+}
+
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
     const bool on = !(!strcmp(v, "0") || !strcmp(v, "off") || !strcmp(v, "no") || !strcmp(v, "false"));
@@ -230,6 +271,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "screen_yaw")) s.screenYaw = std::remainder(f, 360.0f);  // -180..180
     else if (!strcmp(key, "screen_frame")) s.screenFrame = on;
     else if (!strcmp(key, "passthrough")) s.passthrough = on;
+    else if (!strcmp(key, "perf_preset")) s.perfPreset = presetIndex(v);
     else if (!strcmp(key, "refresh")) s.refresh = int(f);
     else if (!strcmp(key, "stereo")) s.stereo = on;
     else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.10f);
@@ -310,6 +352,7 @@ std::string settingValue(const Settings& s, const char* key) {
     auto flag = [](bool v) { return std::string(v ? "1" : "0"); };
     if (!strcmp(key, "mode")) return s.window ? "ventana" : s.diorama ? "maqueta" : "pantalla";
     if (!strcmp(key, "shape")) return s.sphere ? "esfera" : "caja";
+    if (!strcmp(key, "perf_preset")) return kPresetNames[s.perfPreset];
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
@@ -465,6 +508,7 @@ struct Xr {
     bool comboWas = false, comboHeld = false;  // both triggers + the right grip
     bool hasPerf = false;
     int perfApplied = -1;
+    int refreshAsked = 0;  // the refresh setting last given to the runtime (setRefreshRate)
     XrPath hands[2] = {XR_NULL_PATH, XR_NULL_PATH};
     SDL_JoystickID padId = 0;
     SDL_Joystick* pad = nullptr;
@@ -976,6 +1020,7 @@ bool initActions() {
 }
 
 void setRefreshRate() {
+    s.refreshAsked = s.settings.refresh;
     if (!s.hasRefreshRate || s.settings.refresh <= 0) return;
     PFN_xrEnumerateDisplayRefreshRatesFB enumerate = nullptr;
     PFN_xrRequestDisplayRefreshRateFB request = nullptr;
@@ -995,18 +1040,48 @@ void setRefreshRate() {
     if (ok(request(s.session, best), "xrRequestDisplayRefreshRateFB")) xrlog("refresh rate %.0f Hz", best);
 }
 
-// The GPU's clock (gpu_boost): the runtime keeps it at its sustained high level, or chooses (the
-// game is GPU-bound in the diorama: both eyes and the HUD each frame). Applied when it changes.
+// The GPU's and the CPU's clocks (gpu_boost): both at their sustained high level, or both at the
+// sustained low one, cooler (the game is GPU-bound in the diorama: both eyes and the HUD each frame).
+// Applied when it changes.
+void setPerfLevel(XrPerfSettingsLevelEXT gpu, XrPerfSettingsLevelEXT cpu) {
+    PFN_xrPerfSettingsSetPerformanceLevelEXT setLevel = nullptr;
+    xrGetInstanceProcAddr(s.instance, "xrPerfSettingsSetPerformanceLevelEXT", (PFN_xrVoidFunction*)&setLevel);
+    if (!setLevel) return;
+    auto name = [](XrPerfSettingsLevelEXT l) {
+        return l == XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT ? "sustained high" : "sustained low";
+    };
+    if (ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, gpu), "xrPerfSettingsSetPerformanceLevelEXT (GPU)"))
+        xrlog("GPU level: %s", name(gpu));
+    if (ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, cpu), "xrPerfSettingsSetPerformanceLevelEXT (CPU)"))
+        xrlog("CPU level: %s", name(cpu));
+}
+
 void updatePerformance() {
     const int want = s.settings.gpuBoost ? 1 : 0;
     if (!s.hasPerf || want == s.perfApplied) return;
     s.perfApplied = want;
-    PFN_xrPerfSettingsSetPerformanceLevelEXT setLevel = nullptr;
-    xrGetInstanceProcAddr(s.instance, "xrPerfSettingsSetPerformanceLevelEXT", (PFN_xrVoidFunction*)&setLevel);
-    if (!setLevel) return;
     const XrPerfSettingsLevelEXT level = want ? XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT : XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT;
-    if (ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, level), "xrPerfSettingsSetPerformanceLevelEXT"))
-        xrlog("GPU level: %s", want ? "sustained high" : "sustained low");
+    setPerfLevel(level, level);
+}
+
+// The runtime warns that the headset is getting hot (XR_EXT_performance_settings): both clocks down to
+// their sustained low level, whatever gpu_boost says (until it is changed again).
+void onPerfNotification(const XrEventDataPerfSettingsEXT& e) {
+    const char* domain = e.domain == XR_PERF_SETTINGS_DOMAIN_GPU_EXT ? "GPU" : "CPU";
+    const char* sub = e.subDomain == XR_PERF_SETTINGS_SUB_DOMAIN_COMPOSITING_EXT ? "compositing"
+                      : e.subDomain == XR_PERF_SETTINGS_SUB_DOMAIN_RENDERING_EXT ? "rendering"
+                                                                                 : "thermal";
+    auto level = [](XrPerfSettingsNotificationLevelEXT l) {
+        return l == XR_PERF_SETTINGS_NOTIF_LEVEL_NORMAL_EXT    ? "normal"
+               : l == XR_PERF_SETTINGS_NOTIF_LEVEL_WARNING_EXT ? "warning"
+                                                               : "impaired";
+    };
+    xrlog("performance notification: %s %s %s -> %s", domain, sub, level(e.fromLevel), level(e.toLevel));
+    if (e.subDomain == XR_PERF_SETTINGS_SUB_DOMAIN_THERMAL_EXT && s.hasPerf &&
+        (e.toLevel == XR_PERF_SETTINGS_NOTIF_LEVEL_WARNING_EXT || e.toLevel == XR_PERF_SETTINGS_NOTIF_LEVEL_IMPAIRED_EXT)) {
+        xrlog("the headset is hot: the CPU and the GPU down to sustained low");
+        setPerfLevel(XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT, XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT);
+    }
 }
 
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
@@ -1100,6 +1175,8 @@ void pollEvents() {
                 break;
             }
             s.focused = sc.state == XR_SESSION_STATE_FOCUSED;
+        } else if (ev.type == XR_TYPE_EVENT_DATA_PERF_SETTINGS_EXT) {
+            onPerfNotification(*reinterpret_cast<XrEventDataPerfSettingsEXT*>(&ev));
         } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
             aurora_xr_present_enable(false);
             s.running = false;
@@ -2303,7 +2380,8 @@ void runFrame() {
     XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
     if (!ok(xrBeginFrame(s.session, &bi), "xrBeginFrame")) return;
     readSettings(false);
-    if (s_refreshDirty) {
+    // the refresh changed (the panel, the options menu, a preset or the file): applied now
+    if (s_refreshDirty || (s.refreshAsked != 0 && s.settings.refresh != s.refreshAsked)) {
         s_refreshDirty = false;
         setRefreshRate();
     }
@@ -2593,25 +2671,73 @@ extern "C" void wq_xr_set(const char* key, const char* value) {
         while (fgets(line, sizeof line, f)) lines.emplace_back(line);
         fclose(f);
     }
-    const size_t keyLen = strlen(key);
-    bool replaced = false;
-    for (std::string& l : lines) {
+    // the lines of `k` (the last one counts, as readSettings reads them)
+    auto isKey = [](const std::string& l, const char* k) {
+        const size_t keyLen = strlen(k);
         const char* p = l.c_str();
         while (*p == ' ' || *p == '\t') p++;
-        if (strncmp(p, key, keyLen) != 0) continue;
+        if (strncmp(p, k, keyLen) != 0) return false;
         const char* q = p + keyLen;
         while (*q == ' ' || *q == '\t') q++;
-        if (*q != '=') continue;
-        l = std::string(key) + " = " + value + "\n";
-        replaced = true;
+        return *q == '=';
+    };
+    auto set = [&](const char* k, const char* v) {
+        bool replaced = false;
+        for (std::string& l : lines) {
+            if (!isKey(l, k)) continue;
+            l = std::string(k) + " = " + v + "\n";
+            replaced = true;
+        }
+        if (!replaced) lines.push_back(std::string(k) + " = " + v + "\n");
+    };
+    auto get = [&](const char* k) {
+        std::string v;
+        for (const std::string& l : lines) {
+            if (!isKey(l, k)) continue;
+            v = l.substr(l.find('=') + 1);
+            while (!v.empty() && (v[0] == ' ' || v[0] == '\t')) v.erase(0, 1);
+            while (!v.empty() && strchr(" \t\r\n", v.back()) != nullptr) v.pop_back();
+        }
+        return v;
+    };
+    if (!strcmp(key, "perf_preset")) {
+        // a preset chosen: its values written now; the resolution also through the game's setting
+        // (COS_VR_RESOLUTION, pc_vr_apply_resolution: applied at once, and settings.ini's
+        // COS_FB_SCALE no longer over it at the next start)
+        const int preset = presetIndex(value);
+        set("perf_preset", kPresetNames[preset]);
+        if (preset > 0) {
+            for (const PresetKey& k : kPresetKeys) set(k.key, k.value[preset - 1]);
+            wqp::gameChange("COS_VR_RESOLUTION", presetValue(preset, "resolution"));
+        }
+    } else {
+        set(key, value);
+        // one of a preset's values changed by hand: the preset is personal from now on
+        const char* want = presetValue(presetIndex(get("perf_preset").c_str()), key);
+        if (want != nullptr && std::fabs(atof(want) - atof(value)) > 1e-4) {
+            set("perf_preset", "personal");
+            xrlog("settings: perf_preset = personal (%s changed by hand)", key);
+        }
     }
-    if (!replaced) lines.push_back(std::string(key) + " = " + value + "\n");
     if (FILE* f = fopen(s.settingsPath, "w")) {
         for (const std::string& l : lines) fputs(l.c_str(), f);
         fclose(f);
     }
+    {
+        // the preset at once for wq_xr_perf_preset (the rest when the layer reads the file, next frame)
+        std::lock_guard shared{s_shared};
+        s_sharedSettings.perfPreset = presetIndex(get("perf_preset").c_str());
+    }
     s_settingsDirty = true;
     xrlog("settings: %s = %s (options menu)", key, value);
+}
+
+// The Rendimiento preset in effect (pc_vr_diorama.cpp mirrors it into the options menu's row), or
+// "" without the headset layer.
+extern "C" const char* wq_xr_perf_preset(void) {
+    if (s.settingsPath[0] == '\0') return "";
+    std::lock_guard lock{s_shared};
+    return kPresetNames[s_sharedSettings.perfPreset];
 }
 
 extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue) {

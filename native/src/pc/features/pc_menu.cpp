@@ -455,7 +455,34 @@ void applyFps60(const char*, const char* v, void*) { pc_fps60_set(strcmp(v, "1")
 void applyVr(const char*, const char* v, void* user) { pc_vr_setting((const char*)user, v); }
 void applyVrResolution(const char*, const char* v, void*) {
     pc_vr_setting("resolution", v);
-    setFrameBufferScale((float)atof(v) / 480.0f);
+    const float scale = (float)atof(v) / 480.0f;
+#if defined(__ANDROID__)
+    // In the headset this row is the internal resolution: a Gráficos > Resolución interna saved in
+    // settings.ini would be put over it again at the next start (wq_xr.cpp reads COS_FB_SCALE first).
+    const std::string fbBefore = pc_settings_get("COS_FB_SCALE");
+    pc_settings_clear("COS_FB_SCALE");
+    if (fbBefore != pc_settings_get("COS_FB_SCALE")) {
+        pc_dynres_configure(pc_settings_get("COS_DYNRES"), scale);
+    }
+#endif
+    setFrameBufferScale(scale);
+}
+// The Rendimiento preset (android/xr/wq_xr.cpp kPresetKeys): the headset layer writes its values and
+// sends the resolution back (pc_vr_apply_resolution). The row (not saved) shows xr.ini's perf_preset,
+// mirrored every frame (syncVrPreset: personal once a value is changed by hand), which chooses nothing.
+bool sVrPresetSync = false;
+void applyVrPreset(const char*, const char* v, void*) {
+    if (!sVrPresetSync) {
+        pc_vr_setting("perf_preset", v);
+    }
+}
+void syncVrPreset() {
+    const char* preset = pc_vr_perf_preset();
+    if (preset[0] != '\0' && strcmp(pc_settings_get("COS_VR_PRESET"), preset) != 0) {
+        sVrPresetSync = true;
+        pc_settings_set("COS_VR_PRESET", preset);
+        sVrPresetSync = false;
+    }
 }
 void applyVrReset(const char*, const char* v, void*) {
     if (strcmp(v, "1") == 0) {
@@ -530,6 +557,8 @@ const PcSettingChoice kVrResolution[] = {
     {"1188", "1,10  ·  1188 líneas"}, {"1296", "1,20  ·  1296 líneas"}, {"1404", "1,30  ·  1404 líneas"},
     {"1512", "1,40  ·  1512 líneas"}, {"1620", "1,50  ·  1620 líneas"}, {"1728", "1,60  ·  1728 líneas"},
     {"1944", "1,80  ·  1944 líneas"}, {"2160", "2,00  ·  2160 líneas"}};
+const PcSettingChoice kVrPreset[] = {{"ahorro", "Ahorro", "Saving"}, {"equilibrado", "Equilibrado", "Balanced"},
+                                     {"maximo", "Máximo", "Maximum"}, {"personal", "Personal", "Custom"}};
 const PcSettingChoice kVrRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
 const PcSettingChoice kVrHud[] = {{"0.9", "90 cm"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}, {"2.0", "2 m"}};
 const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
@@ -543,6 +572,13 @@ void applyVrStereo(const char*, const char* v, void*) {
 
 const PcSettingDesc kBuiltins[] = {
     // Realidad virtual (WakerQuest, pc_vr.h): xr.ini through pc_vr_setting
+    {"COS_VR_PRESET", "Rendimiento",
+     "Frecuencia, GPU y CPU, resolución, 3D, mundo de la burbuja y horizonte de la ventana de una vez. Ahorro: "
+     "menos calor y batería; Máximo: 90 Hz, más nitidez y 3D. Cambiar uno de ellos a mano lo deja en Personal.",
+     PC_SETTING_TAB_VR, PC_SETTING_NO_SAVE, CHOICES(kVrPreset), "equilibrado", applyVrPreset, nullptr, 0,
+     "Performance",
+     "Refresh rate, GPU and CPU, resolution, 3D, the bubble's world and the window's horizon at once. Saving: "
+     "less heat and battery; Maximum: 90 Hz, sharper, 3D. Changing one of them by hand makes it Custom."},
     {"COS_VR_MODE", "Modo", "Pantalla gigante delante de ti, o el mundo como una maqueta en tu habitación.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrMode), "pantalla", applyVr, (void*)"mode", 1, "Mode",
      "A giant screen in front of you, or the world as a diorama in your room."},
@@ -2012,6 +2048,7 @@ void menuFrame() {
     // WakerQuest: the headset's own settings panel (pc_vr.h) holds the game while it is open, and its
     // "Más opciones" opens this menu
     const int vrPanel = pc_vr_panel_frame();
+    syncVrPreset();  // the Rendimiento row: xr.ini's preset
     if ((vrPanel & 2) != 0 && !m.open) {
         setOpen(true);
     }
@@ -2210,6 +2247,14 @@ void menuFrameEnd(unsigned int frame) {
 }
 
 } // namespace pc
+
+void pc_vr_apply_resolution(const char* v) {
+    // through the row when it changes (applyVrResolution); applied again when it does not (a preset's,
+    // with settings.ini's COS_FB_SCALE or xr.ini edited by hand in between)
+    if (strcmp(pc_settings_get("COS_VR_RESOLUTION"), v) == 0 || pc_settings_set("COS_VR_RESOLUTION", v) != 0) {
+        pc::applyVrResolution("COS_VR_RESOLUTION", v, nullptr);
+    }
+}
 
 // The warp list, numbered as the menu's Travel page: "n  stage room point  label" lines.
 extern "C" int pc_debug_warp_list(char* out, size_t size) {

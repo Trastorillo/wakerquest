@@ -930,6 +930,7 @@ void pc_vr_sky_end(void) {
 }
 
 void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
+const char* pc_vr_perf_preset(void) { return wq_xr_perf_preset(); }
 void pc_vr_menu_state(bool open, float width, float height, bool hovered) {
     wq_xr_menu_state(open, width, height, hovered);
 }
@@ -942,7 +943,11 @@ int pc_vr_panel_frame(void) {
     }
     char key[64], value[64];
     while (wq_xr_panel_take_change(key, sizeof key, value, sizeof value)) {
-        pc_settings_set(key, value);
+        if (strcmp(key, "COS_VR_RESOLUTION") == 0) {
+            pc_vr_apply_resolution(value);  // a preset's too, applied even when the row holds it
+        } else {
+            pc_settings_set(key, value);
+        }
     }
     return wq_xr_panel_flags();
 }
@@ -999,6 +1004,7 @@ void pc_vr_view_end(void) {}
 void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
+const char* pc_vr_perf_preset(void) { return ""; }
 void pc_vr_menu_state(bool, float, float, bool) {}
 int pc_vr_panel_frame(void) { return 0; }
 int pc_vr_clip_sphere(const f32[3][4], const Vec*, f32) { return -1; }

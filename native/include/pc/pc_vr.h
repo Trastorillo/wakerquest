@@ -25,6 +25,11 @@ void pc_vr_sky_end(void);
 /* The options menu's "Realidad virtual" page (pc_menu.cpp): one xr.ini key set (android/xr/wq_xr.h
    wq_xr_set); nothing elsewhere. */
 void pc_vr_setting(const char* key, const char* value);
+/* xr.ini's Rendimiento preset (perf_preset: "ahorro", "equilibrado", "maximo", "personal"); "" elsewhere. */
+const char* pc_vr_perf_preset(void);
+/* The VR resolution (COS_VR_RESOLUTION, in lines) set and applied at once, also when the row already
+   holds it (pc_menu.cpp; a preset's, from the headset layer through pc_vr_panel_frame). */
+void pc_vr_apply_resolution(const char* lines);
 /* The options menu, every frame (pc_menu.cpp menuFrame): for the headset's laser pointer. */
 void pc_vr_menu_state(bool open, float width, float height, bool hovered);
 /* The headset's settings panel (android/xr/wq_panel.cpp), every frame (pc_menu.cpp menuFrame): its game
