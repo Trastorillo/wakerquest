@@ -931,7 +931,7 @@ void pc_vr_sky_end(void) {
 
 void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
 const char* pc_vr_perf_preset(void) { return wq_xr_perf_preset(); }
-int pc_vr_resolution(void) { return wq_xr_resolution(); }
+int pc_vr_resolution(int* base) { return wq_xr_resolution(base); }
 const char* pc_vr_resolution_key(void) { return wq_xr_resolution_key(); }
 void pc_vr_menu_state(bool open, float width, float height, bool hovered) {
     wq_xr_menu_state(open, width, height, hovered);
@@ -1007,7 +1007,7 @@ void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
 const char* pc_vr_perf_preset(void) { return ""; }
-int pc_vr_resolution(void) { return -1; }
+int pc_vr_resolution(int*) { return -1; }
 const char* pc_vr_resolution_key(void) { return "resolution"; }
 void pc_vr_menu_state(bool, float, float, bool) {}
 int pc_vr_panel_frame(void) { return 0; }

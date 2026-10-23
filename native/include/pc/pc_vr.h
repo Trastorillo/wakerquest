@@ -27,9 +27,10 @@ void pc_vr_sky_end(void);
 void pc_vr_setting(const char* key, const char* value);
 /* xr.ini's Rendimiento preset (perf_preset: "ahorro", "equilibrado", "maximo", "personal"); "" elsewhere. */
 const char* pc_vr_perf_preset(void);
-/* The internal resolution (lines) xr.ini gives the mode in effect (the window, the giant screen in 3D, or
-   the rest), -1 elsewhere; and its xr.ini key ("resolution" elsewhere). */
-int pc_vr_resolution(void);
+/* The internal resolution (lines) xr.ini gives the mode in effect (the window, less as it grows; the giant
+   screen in 3D; or the rest), -1 elsewhere; base: the key's own value. And its xr.ini key ("resolution"
+   elsewhere). Every frame (pc_menu.cpp syncVrResolution). */
+int pc_vr_resolution(int* base);
 const char* pc_vr_resolution_key(void);
 /* The VR resolution (COS_VR_RESOLUTION, in lines) set and applied at once, also when the row already
    holds it (pc_menu.cpp; a preset's, from the headset layer through pc_vr_panel_frame). */

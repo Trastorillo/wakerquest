@@ -66,6 +66,8 @@ struct Item {
     const char* format;     // of the number ("%.1f m"); the decimal point shown as a comma
 };
 
+constexpr int kLabelMaxW = 640;  // the size label's chain (wq_xr.cpp: the window's line is longer)
+
 #define OPTS(o) o, (int)(sizeof(o) / sizeof(o[0]))
 const Option kMode[] = {{"pantalla", "Pantalla"}, {"maqueta", "Maqueta"}, {"ventana", "Ventana"}};
 const Option kShape[] = {{"esfera", "Esfera"}, {"caja", "Caja"}};
@@ -112,8 +114,8 @@ const Item kStereo[] = {
     {kXr, "birds_free", "Aves fuera de la burbuja", "Las gaviotas vuelan por tu habitación", kSwitch},
     {kXr, "bird_range", "Alcance de las aves", "Hasta cuántas veces el radio de la burbuja", kStepper, nullptr, 0, 1.0f,
      8.0f, 0.5f, "%.1f"},
-    {kXr, "window_width", "Tamaño de la ventana", "O agárrala con los dos grips", kStepper, nullptr, 0, 0.3f, 6.0f,
-     0.1f, "%.1f m"},
+    {kXr, "window_width", "Tamaño de la ventana", "Hasta 2,2 m; más de 1,6 m baja la resolución", kStepper, nullptr,
+     0, 0.3f, 2.2f, 0.1f, "%.1f m"},
     {kXr, "window_depth", "Fondo de la ventana", "La cámara del juego delante; tope de lo que sale", kStepper, nullptr, 0, 0.1f, 2.0f,
      0.1f, "%.1f m"},
 };
@@ -251,6 +253,7 @@ struct Panel {
     bool aWas = true, bWas = true;
     // the label
     XrSwapchain labelChain = XR_NULL_HANDLE;
+    int labelW = 320;  // the label's width in its chain (as wide as its text)
     std::vector<XrSwapchainImageOpenGLESKHR> labelImages;
     std::string labelText;
 };
@@ -518,7 +521,7 @@ void init(const Host& host, XrSession session, bool srgb) {
     drawStatic();
     p.canvas.init(kTexW, kTexH);
     p.chain = makeChain(kTexW, kTexH, p.images);
-    p.labelChain = makeChain(320, 72, p.labelImages);
+    p.labelChain = makeChain(kLabelMaxW, 72, p.labelImages);
     p.ready = p.chain != XR_NULL_HANDLE;
     plog(p.ready ? "ready" : "not available");
 }
@@ -680,10 +683,12 @@ bool label(const char* text, const XrPosef& pose, XrSpace space, XrCompositionLa
     if (!p.labelChain || !text || !text[0]) return false;
     if (p.labelText != text) {
         p.labelText = text;
+        // as wide as the text (at least 320), within the chain's width
+        p.labelW = std::min(kLabelMaxW, std::max(320, int(ui::textWidth(kFontLarge, text)) + 72));
         Canvas c;
-        c.init(320, 72);
-        c.roundRect(0, 0, 320, 72, 36.0f, rgb(22, 25, 33, 0.85f));
-        c.text(160, 50, kFontLarge, text, rgb(255, 255, 255), 1);
+        c.init(kLabelMaxW, 72);
+        c.roundRect(0, 0, float(p.labelW), 72, 36.0f, rgb(22, 25, 33, 0.85f));
+        c.text(0.5f * p.labelW, 50, kFontLarge, text, rgb(255, 255, 255), 1);
         uploadTo(p.labelChain, p.labelImages, c);
     }
     *out = {XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -691,9 +696,9 @@ bool label(const char* text, const XrPosef& pose, XrSpace space, XrCompositionLa
     out->space = space;
     out->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
     out->subImage.swapchain = p.labelChain;
-    out->subImage.imageRect = {{0, 0}, {320, 72}};
+    out->subImage.imageRect = {{0, 0}, {p.labelW, 72}};
     out->pose = pose;
-    out->size = {0.16f, 0.036f};
+    out->size = {0.16f * float(p.labelW) / 320.0f, 0.036f};
     return true;
 }
 

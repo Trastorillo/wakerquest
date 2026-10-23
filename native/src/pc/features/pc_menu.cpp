@@ -472,36 +472,46 @@ void setVrScale(const char* v) {
 bool sVrResolutionSync = false;
 int sVrResolutionSeen = 0;     // xr.ini's for the mode in effect, last frame
 int sVrResolutionApplied = 0;  // the lines applied (0: none yet, the start's COS_FB_SCALE)
+int sVrResolutionBase = 0;     // the key's own value, mirrored into the row
 void applyVrResolution(const char*, const char* v, void*) {
     if (sVrResolutionSync) {
         return;
     }
+    // the current mode's key; applied by syncVrResolution once the layer has read it (the window's may
+    // be fewer lines than the row's, as wide as it is)
     pc_vr_setting(pc_vr_resolution_key(), v);
-    setVrScale(v);
-    sVrResolutionApplied = atoi(v);
 }
-// Every frame: the mode's resolution applied when it changes (the mode, the 3D, a preset, xr.ini edited
-// by hand), and mirrored into the row. Not at the first frame: the start set it (COS_FB_SCALE).
+// Every frame: the mode's resolution applied when it changes (the mode, the 3D, a preset, the row, the
+// window's size, xr.ini edited by hand), and the key's value mirrored into the row. Not at the first
+// frame: the start set it (COS_FB_SCALE).
 void syncVrResolution() {
-    const int lines = pc_vr_resolution();
-    if (lines < 0 || lines == sVrResolutionSeen) {
+    int base = 0;
+    const int lines = pc_vr_resolution(&base);
+    if (lines < 0) {
         return;
     }
-    const bool first = sVrResolutionSeen == 0;
-    sVrResolutionSeen = lines;
-    char v[16];
-    snprintf(v, sizeof v, "%d", lines);
-    if (!first && lines > 0 && lines != sVrResolutionApplied) {
-        writef(STDERR_FILENO, "[vr] resolution: %d lines (%s)\n", lines, pc_vr_resolution_key());
-        setVrScale(v);
+    if (lines != sVrResolutionSeen) {
+        const bool first = sVrResolutionSeen == 0;
+        sVrResolutionSeen = lines;
+        if (!first && lines > 0 && lines != sVrResolutionApplied) {
+            char v[16];
+            snprintf(v, sizeof v, "%d", lines);
+            writef(STDERR_FILENO, "[vr] resolution: %d lines (%s %d)\n", lines, pc_vr_resolution_key(), base);
+            setVrScale(v);
+        }
+        if (first || lines > 0) {
+            sVrResolutionApplied = lines;
+        }
     }
-    if (first || lines > 0) {
-        sVrResolutionApplied = lines;
-    }
-    if (lines > 0 && strcmp(pc_settings_get("COS_VR_RESOLUTION"), v) != 0) {
-        sVrResolutionSync = true;
-        pc_settings_set("COS_VR_RESOLUTION", v);
-        sVrResolutionSync = false;
+    if (base > 0 && base != sVrResolutionBase) {
+        sVrResolutionBase = base;
+        char v[16];
+        snprintf(v, sizeof v, "%d", base);
+        if (strcmp(pc_settings_get("COS_VR_RESOLUTION"), v) != 0) {
+            sVrResolutionSync = true;
+            pc_settings_set("COS_VR_RESOLUTION", v);
+            sVrResolutionSync = false;
+        }
     }
 }
 // The Rendimiento preset (android/xr/wq_xr.cpp kPresetKeys): the headset layer writes its values; the

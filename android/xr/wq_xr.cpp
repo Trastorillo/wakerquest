@@ -71,6 +71,16 @@ float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v
 
 // ---- Settings (<files>/user/xr.ini) --------------------------------------------------------------
 
+// The window's size against its cost (windowLines): its eyes are the EFB (lines times the head's aspect)
+// stretched over the window's fitted frustum, and a wider window shows more of the world, so above
+// kWindowRefWidth the internal resolution falls as ref / width, in steps of kWindowStep lines (0.05 of
+// the scale), never below kWindowMinLines (0.60); kWindowMaxWidth is where that floor is reached from
+// the default 864 lines (0.80): 1.6 * 0.80 / 0.60 = 2.13 m.
+constexpr float kWindowRefWidth = 1.6f;
+constexpr float kWindowMaxWidth = 2.2f;
+constexpr int kWindowMinLines = 648;
+constexpr int kWindowStep = 54;
+
 struct Settings {
     float distance = 5.0f;   // m in front of where the player looked at the start
     float width = 4.5f;      // m; the height follows the picture (16:9 widescreen, 4:3 without)
@@ -138,7 +148,7 @@ struct Settings {
     // nearer than that comes out, up to window_popout); each eye looks through it from
     // where it is, and what is near comes out of it toward the player (window_popout)
     bool window = false;
-    float windowWidth = 1.6f;     // m across
+    float windowWidth = 1.6f;     // m across, up to kWindowMaxWidth
     float windowDistance = 2.0f;  // m, its middle in front of the eyes
     float windowHeight = 0.0f;    // m above eye height
     float windowX = 0.0f;         // m to the right (a grip moves it)
@@ -191,6 +201,7 @@ const char kDefaultSettings[] =
     "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
     "# the 3D changes: resolution = the giant screen and the bubble, stereo_resolution = the giant screen\n"
     "# in 3D, window_resolution = the window. The options menu's Resolucion sets the current mode's.\n"
+    "# The window up to 2.2 m wide; past 1.6 m it draws with fewer lines (as 1.6 / width, down to 648).\n"
     "resolution = 1080\n"
     "stereo_resolution = 918\n"
     "window_resolution = 864\n"
@@ -328,7 +339,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
     else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
-    else if (!strcmp(key, "window_width")) s.windowWidth = clampf(f, 0.3f, 6.0f);
+    else if (!strcmp(key, "window_width")) s.windowWidth = clampf(f, 0.3f, kWindowMaxWidth);
     else if (!strcmp(key, "window_distance")) s.windowDistance = clampf(f, 0.3f, 10.0f);
     else if (!strcmp(key, "window_height")) s.windowHeight = clampf(f, -3.0f, 3.0f);
     else if (!strcmp(key, "window_x")) s.windowX = clampf(f, -5.0f, 5.0f);
@@ -360,6 +371,24 @@ void applySetting(Settings& s, const char* key, const char* v) {
     }
 }
 
+// The window's lines for its width (window_resolution `base`), with a hysteresis around the steps'
+// edges (2% of the width) from `current` (0: none), so a width held near an edge does not flip.
+int windowLines(int base, float width, int current) {
+    if (base <= 0) return base;
+    const int lowest = std::min(base, kWindowMinLines);
+    auto step = [&](float target) {  // the highest step at or below target
+        if (target >= float(base)) return base;
+        const int n = int(std::ceil((float(base) - target) / float(kWindowStep) - 1e-4f));
+        return std::max(lowest, base - n * kWindowStep);
+    };
+    const float target = width <= kWindowRefWidth ? float(base) : float(base) * kWindowRefWidth / width;
+    if (current <= 0) return step(target);
+    const int down = step(target * 1.02f), up = step(target / 1.02f);
+    if (down < current) return down;
+    if (up > current) return up;
+    return current;
+}
+
 // The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
 const char* activeResolutionKey(const Settings& s) {
     return s.window ? "window_resolution" : !s.diorama && s.stereo ? "stereo_resolution" : "resolution";
@@ -371,6 +400,8 @@ int resolutionOf(const Settings& s, const char* key) {
     return v < 0 ? s.resolution : v;
 }
 int activeResolution(const Settings& s) { return resolutionOf(s, activeResolutionKey(s)); }
+// The lines the window draws with now (wq_xr_resolution), for the size's label; 0 outside the window
+std::atomic_int s_windowLines{0};
 
 // The value in effect of an xr.ini key (the settings panel's), as the file would hold it.
 std::string settingValue(const Settings& s, const char* key) {
@@ -2090,7 +2121,7 @@ void updateGrips(float gripL, float gripR, bool click) {
             st.windowDistance = std::max(0.3f, s.dragDistance - (at.z - s.dragHand.z));
             st.windowYaw = s.dragYaw - wrapPi(heading - s.dragHandYaw) * 57.2957795f;
             if (hands == 3 && s.dragSpan > 0.05f) {
-                st.windowWidth = clampf(s.dragSize * span / s.dragSpan, 0.3f, 6.0f);
+                st.windowWidth = clampf(s.dragSize * span / s.dragSpan, 0.3f, kWindowMaxWidth);
                 if (std::fabs(st.windowWidth / s.tickSize - 1.0f) >= 0.1f) {
                     s.tickSize = st.windowWidth;
                     pointerHaptic(0, 0.25f);
@@ -2652,8 +2683,14 @@ void runFrame() {
                       : flat    ? onScreen(st, 0.0f, 0.5f * screenH + 0.06f * st.width + 0.1f, 0.0f)
                                 : XrVector3f{st.tableX, midY + r + 0.05f, -st.tableDistance};
         at.orientation = facingPlayer(at.position);
-        char text[32];
-        snprintf(text, sizeof text, "%.2f m", st.window ? st.windowWidth : flat ? st.width : st.tableWidth);
+        char text[64];
+        const int lines = s_windowLines.load();
+        if (st.window && lines > 0)
+            // the window: its resolution (windowLines) and its limit
+            snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 m\xc3\xa1x %.1f m", st.windowWidth,
+                     lines / 1080.0f, kWindowMaxWidth);
+        else
+            snprintf(text, sizeof text, "%.2f m", st.window ? st.windowWidth : flat ? st.width : st.tableWidth);
         for (char* c = text; *c; c++)
             if (*c == '.') *c = ',';
         if (wqp::label(text, at, s.space, &labelQuad)) {
@@ -2777,10 +2814,26 @@ extern "C" const char* wq_xr_perf_preset(void) {
     return kPresetNames[s_sharedSettings.perfPreset];
 }
 
-extern "C" int wq_xr_resolution(void) {
+extern "C" int wq_xr_resolution(int* base) {
     if (s.settingsPath[0] == '\0') return -1;
     std::lock_guard lock{s_shared};
-    return activeResolution(s_sharedSettings);
+    const Settings& st = s_sharedSettings;
+    const int lines = activeResolution(st);
+    if (base != nullptr) *base = lines;
+    if (!st.window) {
+        s_windowLines.store(0);
+        return lines;
+    }
+    // the window: fewer lines as it grows (windowLines), from the lines it has now
+    static int last = 0;
+    const int now = windowLines(lines, st.windowWidth, s_windowLines.load());
+    if (now != last) {
+        xrlog("window: %.2f m wide (limit %.1f m): %d lines of window_resolution %d", st.windowWidth,
+              kWindowMaxWidth, now, lines);
+        last = now;
+    }
+    s_windowLines.store(now);
+    return now;
 }
 
 extern "C" const char* wq_xr_resolution_key(void) {
@@ -2891,7 +2944,11 @@ extern "C" bool wq_xr_start(void) {
     // after aurora_initialize), the mode's (activeResolution), unless the player chose one (the options
     // menu's settings.ini, or the environment): the headset's window is large, and stereo draws every
     // frame twice. Later mode and 3D changes: pc_menu.cpp syncVrResolution.
-    const int lines = activeResolution(s.settings);
+    int lines = activeResolution(s.settings);
+    if (s.settings.window) {
+        lines = windowLines(lines, s.settings.windowWidth, 0);
+        s_windowLines.store(lines);
+    }
     if (lines > 0 && getenv("COS_FB_SCALE") == nullptr) {
         char scale[32];
         snprintf(scale, sizeof scale, "%.4f", lines / 480.0);
