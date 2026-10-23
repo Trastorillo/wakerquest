@@ -531,7 +531,7 @@ const PcSettingChoice kVrResolution[] = {
     {"1512", "1,40  ·  1512 líneas"}, {"1620", "1,50  ·  1620 líneas"}, {"1728", "1,60  ·  1728 líneas"},
     {"1944", "1,80  ·  1944 líneas"}, {"2160", "2,00  ·  2160 líneas"}};
 const PcSettingChoice kVrRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
-const PcSettingChoice kVrHud[] = {{"0.6", "60 cm"}, {"0.9", "90 cm"}, {"1.2", "1,2 m"}, {"1.5", "1,5 m"}};
+const PcSettingChoice kVrHud[] = {{"0.9", "90 cm"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}, {"2.0", "2 m"}};
 const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
 
 void applyVrStereo(const char*, const char* v, void*) {
@@ -583,7 +583,7 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "120", applyVr, (void*)"refresh", 10, "Refresh rate",
      "The headset's refresh rate. 120 Hz shows the game's 30 and 60 fps evenly."},
     {"COS_VR_HUD", "Tamaño del HUD", "El ancho del panel con los corazones y los menús en el modo maqueta.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "0.9", applyVr, (void*)"hud_width", 11, "HUD size",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "1.3", applyVr, (void*)"hud_width", 11, "HUD size",
      "The width of the panel with the hearts and menus in diorama mode."},
     {"COS_VR_RESET", "Restablecer posición", "Devuelve la maqueta a su sitio (también: grip + clic del stick derecho).",
      PC_SETTING_TAB_VR, PC_SETTING_NO_SAVE, CHOICES(kVrReset), "0", applyVrReset, nullptr, 12, "Reset position",
@@ -1993,6 +1993,8 @@ void menuFrame() {
     if (!m.initialized || ImGui::GetCurrentContext() == nullptr) {
         return;
     }
+    // WakerQuest's laser pointer (pc_vr.h): the menu's state and what is under the pointer
+    pc_vr_menu_state(m.open, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y, ImGui::IsAnyItemHovered());
     {
         // 60 fps step E: a docked/handheld change applies the other mode's values (internal
         // resolution, 60 fps, dynres) and resizes the swapchain: presented once around it.

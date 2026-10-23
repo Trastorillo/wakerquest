@@ -25,6 +25,8 @@ void pc_vr_sky_end(void);
 /* The options menu's "Realidad virtual" page (pc_menu.cpp): one xr.ini key set (android/xr/wq_xr.h
    wq_xr_set); nothing elsewhere. */
 void pc_vr_setting(const char* key, const char* value);
+/* The options menu, every frame (pc_menu.cpp menuFrame): for the headset's laser pointer. */
+void pc_vr_menu_state(bool open, float width, float height, bool hovered);
 
 class J3DModel;
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);

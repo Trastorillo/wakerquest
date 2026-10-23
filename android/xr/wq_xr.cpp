@@ -78,7 +78,7 @@ struct Settings {
     bool stereo = true;
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
     float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen
-    float hudWidth = 0.9f;          // the diorama's HUD panel, metres across
+    float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
     int resolution = 1188;  // 1.10 of 1080 lines (the menu's scale)
@@ -220,6 +220,18 @@ struct Xr {
     XrAction rumble = XR_NULL_HANDLE;
     XrAction handPose = XR_NULL_HANDLE, stickClick = XR_NULL_HANDLE;  // the diorama's grip drag
     XrSpace handSpace = XR_NULL_HANDLE;
+    // the options menu's laser pointer
+    XrAction aimPose = XR_NULL_HANDLE;
+    XrSpace aimSpace[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+    float trig[2] = {0.0f, 0.0f};      // the triggers as read this frame
+    bool trigDown[2] = {false, false};
+    int activeHand = 1;                // the hand that last pulled its trigger
+    bool menuWasOpen = false;
+    XrPosef menuPose{};                // the menu's panel, placed when it opens (the diorama)
+    bool clickDown = false;
+    bool hoverWas = false;
+    float mouseX = -1.0f, mouseY = -1.0f;
+    XrSwapchain cursorSwapchain = XR_NULL_HANDLE, raySwapchain = XR_NULL_HANDLE;
     bool dragging = false;
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
@@ -259,6 +271,11 @@ uint32_t s_nextTag = 1;
 std::atomic_int s_rumbleWanted{0};  // set by SDL's thread (the virtual gamepad's Rumble)
 std::atomic<float> s_camHeading{0.0f};  // wq_xr_set_camera_heading (the game thread)
 std::atomic_bool s_camHeadingValid{false};
+std::atomic_bool s_rotateStick{false};   // the player controls Link freely
+std::atomic_bool s_dialogue{false};      // a message box is open
+std::atomic_bool s_menuOpen{false};      // wq_xr_menu_state: the options menu
+std::atomic<float> s_menuW{0.0f}, s_menuH{0.0f};
+std::atomic_bool s_menuHovered{false};
 float s_viewHeading = 0.0f;  // the player's view of the model, smoothed (the layer's thread)
 bool s_viewHeadingValid = false;
 
@@ -655,6 +672,7 @@ bool initActions() {
     s.trigR = makeAction("trigger_r", XR_ACTION_TYPE_FLOAT_INPUT, false);
     s.rumble = makeAction("rumble", XR_ACTION_TYPE_VIBRATION_OUTPUT, true);
     s.handPose = makeAction("hand_pose", XR_ACTION_TYPE_POSE_INPUT, false);
+    s.aimPose = makeAction("aim_pose", XR_ACTION_TYPE_POSE_INPUT, true);
     s.stickClick = makeAction("stick_click", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
 
     const struct {
@@ -674,6 +692,8 @@ bool initActions() {
         {s.rumble, "/user/hand/left/output/haptic"},
         {s.rumble, "/user/hand/right/output/haptic"},
         {s.handPose, "/user/hand/right/input/grip/pose"},
+        {s.aimPose, "/user/hand/left/input/aim/pose"},
+        {s.aimPose, "/user/hand/right/input/aim/pose"},
         {s.stickClick, "/user/hand/right/input/thumbstick/click"},
     };
     std::vector<XrActionSuggestedBinding> suggested;
@@ -692,6 +712,13 @@ bool initActions() {
     asi.action = s.handPose;
     asi.poseInActionSpace.orientation.w = 1.0f;
     ok(xrCreateActionSpace(s.session, &asi, &s.handSpace), "xrCreateActionSpace");
+    for (int h = 0; h < 2; h++) {
+        XrActionSpaceCreateInfo aim{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+        aim.action = s.aimPose;
+        aim.subactionPath = s.hands[h];
+        aim.poseInActionSpace.orientation.w = 1.0f;
+        ok(xrCreateActionSpace(s.session, &aim, &s.aimSpace[h]), "xrCreateActionSpace (aim)");
+    }
     xrlog("Touch controller bindings ready");
     return true;
 }
@@ -958,9 +985,15 @@ void updatePad() {
             x = getBool(s.x);
             y = getBool(s.y);
             start = getBool(s.start);
-            // the diorama: the right grip moves the model (not the game's Z), except with both
-            // triggers held (both triggers + grip open the options menu)
-            if (s.settings.diorama && !(l > 0.5f && r > 0.5f)) {
+            s.trig[0] = l;
+            s.trig[1] = r;
+            if (s_menuOpen.load()) {
+                // the options menu: the triggers are the laser pointer's clicks, not L and R
+                l = r = 0.0f;
+                z = 0.0f;
+            } else if (s.settings.diorama && !(l > 0.5f && r > 0.5f)) {
+                // the diorama: the right grip moves the model (not the game's Z), except with both
+                // triggers held (both triggers + grip open the options menu)
                 updateDrag(z > 0.6f, getBool(s.stickClick));
                 z = 0.0f;
             }
@@ -970,7 +1003,8 @@ void updatePad() {
     // model to the game camera's, so pushing it forward takes Link away from the player whichever way
     // the model or the camera has turned. The player's heading: from the head to the model's middle
     // (the head's own forward when it is nearly above it), smoothed.
-    if (s.settings.diorama && s.settings.viewRelative && s_camHeadingValid.load()) {
+    if (s.settings.diorama && s.settings.viewRelative && s_camHeadingValid.load() && s_rotateStick.load() &&
+        !s_menuOpen.load()) {
         WqXrHead head{};
         {
             std::lock_guard lock{s_shared};
@@ -1031,6 +1065,239 @@ void updateRumble() {
         v.frequency = XR_FREQUENCY_UNSPECIFIED;
         xrApplyHapticFeedback(s.session, &hi, (const XrHapticBaseHeader*)&v);
     }
+}
+
+// ---- The options menu's laser pointer ---------------------------------------------------------------
+
+XrVector3f vadd(XrVector3f a, XrVector3f b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+XrVector3f vsub(XrVector3f a, XrVector3f b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+XrVector3f vscale(XrVector3f a, float k) { return {a.x * k, a.y * k, a.z * k}; }
+float vdot(XrVector3f a, XrVector3f b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+XrVector3f vcross(XrVector3f a, XrVector3f b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+XrVector3f vnorm(XrVector3f a) {
+    const float l = std::sqrt(vdot(a, a));
+    return l > 1e-6f ? vscale(a, 1.0f / l) : XrVector3f{0, 0, -1};
+}
+XrVector3f qrot(const XrQuaternionf& q, XrVector3f v) {
+    const XrVector3f u{q.x, q.y, q.z};
+    const XrVector3f t = vscale(vcross(u, v), 2.0f);
+    return vadd(vadd(v, vscale(t, q.w)), vcross(u, t));
+}
+// a quaternion from orthonormal axes (the columns of a rotation)
+XrQuaternionf qfromAxes(XrVector3f x, XrVector3f y, XrVector3f z) {
+    XrQuaternionf q;
+    const float tr = x.x + y.y + z.z;
+    if (tr > 0.0f) {
+        const float s4 = std::sqrt(tr + 1.0f) * 2.0f;
+        q = {(y.z - z.y) / s4, (z.x - x.z) / s4, (x.y - y.x) / s4, 0.25f * s4};
+    } else if (x.x > y.y && x.x > z.z) {
+        const float s4 = std::sqrt(1.0f + x.x - y.y - z.z) * 2.0f;
+        q = {0.25f * s4, (y.x + x.y) / s4, (z.x + x.z) / s4, (y.z - z.y) / s4};
+    } else if (y.y > z.z) {
+        const float s4 = std::sqrt(1.0f + y.y - x.x - z.z) * 2.0f;
+        q = {(y.x + x.y) / s4, 0.25f * s4, (z.y + y.z) / s4, (z.x - x.z) / s4};
+    } else {
+        const float s4 = std::sqrt(1.0f + z.z - x.x - y.y) * 2.0f;
+        q = {(z.x + x.z) / s4, (z.y + y.z) / s4, 0.25f * s4, (x.y - y.x) / s4};
+    }
+    return q;
+}
+
+// A static swapchain drawn once: the cursor (a soft white disc) or the ray (white, fading along it).
+XrSwapchain makePointerTexture(uint32_t w, uint32_t h, int mode) {
+    static GLuint prog = 0;
+    static GLint uMode = -1;
+    if (!prog) {
+        static const char* vs = R"(#version 300 es
+out vec2 v_uv;
+void main() {
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    v_uv = p;
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+)";
+        static const char* fs = R"(#version 300 es
+precision highp float;
+uniform int u_mode;
+in vec2 v_uv;
+out vec4 o_color;
+void main() {
+    float a;
+    if (u_mode == 0) {
+        float r = length(v_uv - 0.5) * 2.0;
+        a = 1.0 - smoothstep(0.75, 1.0, r);
+    } else {
+        float across = 1.0 - smoothstep(0.3, 1.0, abs(v_uv.y - 0.5) * 2.0);
+        a = across * (1.0 - v_uv.x) * 0.8;
+    }
+    o_color = vec4(a, a, a, a);  // premultiplied white
+}
+)";
+        GLuint v = compile(GL_VERTEX_SHADER, vs), f = compile(GL_FRAGMENT_SHADER, fs);
+        prog = glCreateProgram();
+        glAttachShader(prog, v);
+        glAttachShader(prog, f);
+        glLinkProgram(prog);
+        glDeleteShader(v);
+        glDeleteShader(f);
+        uMode = glGetUniformLocation(prog, "u_mode");
+    }
+    XrSwapchainCreateInfo sc{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    sc.createFlags = XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT;
+    sc.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+    sc.format = s.srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+    sc.sampleCount = 1;
+    sc.width = w;
+    sc.height = h;
+    sc.faceCount = 1;
+    sc.arraySize = 1;
+    sc.mipCount = 1;
+    XrSwapchain chain = XR_NULL_HANDLE;
+    if (!ok(xrCreateSwapchain(s.session, &sc, &chain), "xrCreateSwapchain (pointer)")) return XR_NULL_HANDLE;
+    uint32_t n = 0;
+    xrEnumerateSwapchainImages(chain, 0, &n, nullptr);
+    std::vector<XrSwapchainImageOpenGLESKHR> images(n, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
+    xrEnumerateSwapchainImages(chain, n, &n, (XrSwapchainImageBaseHeader*)images.data());
+    uint32_t idx = 0;
+    XrSwapchainImageAcquireInfo acq{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wait.timeout = XR_INFINITE_DURATION;
+    if (XR_SUCCEEDED(xrAcquireSwapchainImage(chain, &acq, &idx)) && XR_SUCCEEDED(xrWaitSwapchainImage(chain, &wait))) {
+        GLuint fbo = 0;
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, images[idx].image, 0);
+        glViewport(0, 0, GLsizei(w), GLsizei(h));
+        glDisable(GL_BLEND);
+        glUseProgram(prog);
+        glUniform1i(uMode, mode);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &fbo);
+        XrSwapchainImageReleaseInfo rel{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        xrReleaseSwapchainImage(chain, &rel);
+    }
+    return chain;
+}
+
+void pointerHaptic(int hand, float amplitude) {
+    XrHapticActionInfo hi{XR_TYPE_HAPTIC_ACTION_INFO};
+    hi.action = s.rumble;
+    hi.subactionPath = s.hands[hand];
+    XrHapticVibration v{XR_TYPE_HAPTIC_VIBRATION};
+    v.amplitude = amplitude;
+    v.duration = 15000000;  // 15 ms: a tick
+    v.frequency = XR_FREQUENCY_UNSPECIFIED;
+    xrApplyHapticFeedback(s.session, &hi, (const XrHapticBaseHeader*)&v);
+}
+
+void pushMouse(Uint32 type, float x, float y, bool down) {
+    SDL_Event e{};
+    e.type = type;
+    if (type == SDL_EVENT_MOUSE_MOTION) {
+        e.motion.x = x;
+        e.motion.y = y;
+    } else {
+        e.button.x = x;
+        e.button.y = y;
+        e.button.button = SDL_BUTTON_LEFT;
+        e.button.down = down;
+        e.button.clicks = 1;
+    }
+    SDL_PushEvent(&e);
+}
+
+// The pointer this frame: the active hand's ray against the panel (pose, size in metres), the mouse
+// events for ImGui, haptic ticks, and the ray's and the cursor's layers. Returns the layers written.
+int updatePointer(const XrPosef& panel, XrExtent2Df size, XrCompositionLayerQuad* out) {
+    if (!s.cursorSwapchain) s.cursorSwapchain = makePointerTexture(64, 64, 0);
+    if (!s.raySwapchain) s.raySwapchain = makePointerTexture(256, 16, 1);
+    for (int h = 0; h < 2; h++) {
+        const bool down = s.trig[h] > (s.trigDown[h] ? 0.4f : 0.6f);
+        if (down && !s.trigDown[h] && h != s.activeHand) s.activeHand = h;  // the hand that pulls its trigger
+        s.trigDown[h] = down;
+    }
+    const int h = s.activeHand;
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    if (!s.aimSpace[h] || XR_FAILED(xrLocateSpace(s.aimSpace[h], s.space, s.frame.predictedDisplayTime, &loc)) ||
+        !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
+        return 0;
+    const XrVector3f o = loc.pose.position;
+    const XrVector3f d = vnorm(qrot(loc.pose.orientation, {0, 0, -1}));
+    const XrVector3f n = qrot(panel.orientation, {0, 0, 1});
+    float len = 2.0f;
+    bool onPanel = false;
+    XrVector3f hit{};
+    const float dn = vdot(d, n);
+    if (std::fabs(dn) > 1e-4f) {
+        const float t = vdot(vsub(panel.position, o), n) / dn;
+        if (t > 0.0f) {
+            hit = vadd(o, vscale(d, t));
+            const XrQuaternionf inv{-panel.orientation.x, -panel.orientation.y, -panel.orientation.z, panel.orientation.w};
+            const XrVector3f local = qrot(inv, vsub(hit, panel.position));
+            const float u = local.x / size.width + 0.5f, v = 0.5f - local.y / size.height;
+            if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) {
+                onPanel = true;
+                len = t;
+                const float mx = u * s_menuW.load(), my = v * s_menuH.load();
+                if (std::fabs(mx - s.mouseX) > 0.5f || std::fabs(my - s.mouseY) > 0.5f) {
+                    pushMouse(SDL_EVENT_MOUSE_MOTION, mx, my, false);
+                    s.mouseX = mx;
+                    s.mouseY = my;
+                }
+            }
+        }
+    }
+    // the click: the active hand's trigger
+    const bool click = s.trigDown[h];
+    if (click != s.clickDown && (onPanel || s.clickDown)) {
+        pushMouse(click ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP, s.mouseX, s.mouseY, click);
+        if (click) pointerHaptic(h, 0.5f);
+        s.clickDown = click;
+    }
+    const bool hovered = onPanel && s_menuHovered.load();
+    if (hovered && !s.hoverWas) pointerHaptic(h, 0.15f);
+    s.hoverWas = hovered;
+
+    int layers = 0;
+    // the ray: a thin strip from the controller along its aim, turned to face the eyes
+    if (s.raySwapchain) {
+        WqXrHead head{};
+        {
+            std::lock_guard lock{s_shared};
+            head = s_heads[(s_nextTag - 1) % kHeadHistory].head;
+        }
+        const XrVector3f mid = vadd(o, vscale(d, 0.5f * len));
+        const XrVector3f toEye = vsub({head.pos[0], head.pos[1], head.pos[2]}, mid);
+        XrVector3f z = vsub(toEye, vscale(d, vdot(toEye, d)));
+        z = vnorm(z);
+        const XrVector3f y = vcross(z, d);
+        XrCompositionLayerQuad& ray = out[layers++];
+        ray = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        ray.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        ray.space = s.space;
+        ray.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        ray.subImage.swapchain = s.raySwapchain;
+        ray.subImage.imageRect = {{0, 0}, {256, 16}};
+        ray.pose.orientation = qfromAxes(d, y, z);
+        ray.pose.position = mid;
+        ray.size = {len, 0.004f};
+    }
+    // the cursor where it meets the panel, larger over something to press
+    if (onPanel && s.cursorSwapchain) {
+        XrCompositionLayerQuad& cursor = out[layers++];
+        cursor = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        cursor.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        cursor.space = s.space;
+        cursor.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        cursor.subImage.swapchain = s.cursorSwapchain;
+        cursor.subImage.imageRect = {{0, 0}, {64, 64}};
+        cursor.pose.orientation = panel.orientation;
+        cursor.pose.position = vadd(hit, vscale(n, 0.003f));
+        const float c = hovered ? 0.022f : 0.014f;
+        cursor.size = {c, c};
+    }
+    return layers;
 }
 
 // ---- Head poses (the diorama) ----------------------------------------------------------------------
@@ -1184,8 +1451,28 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[4];
+    const XrCompositionLayerBaseHeader* layers[8];
     uint32_t layerCount = 0;
+    XrCompositionLayerQuad pointerQuads[2];
+    // the options menu opens 1 m in front of the player, at eye height, facing them (the diorama)
+    const bool menuOpen = s_menuOpen.load();
+    if (menuOpen && !s.menuWasOpen) {
+        WqXrHead head{};
+        {
+            std::lock_guard lock{s_shared};
+            head = s_heads[(s_nextTag - 1) % kHeadHistory].head;
+        }
+        const XrQuaternionf q{head.rot[0], head.rot[1], head.rot[2], head.rot[3]};
+        XrVector3f f = qrot(q, {0, 0, -1});
+        f.y = 0.0f;
+        f = vnorm(f);
+        const float yaw = std::atan2(-f.x, -f.z);
+        s.menuPose.orientation = {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
+        s.menuPose.position = {head.pos[0] + f.x, head.pos[1] - 0.1f, head.pos[2] + f.z};
+        s.mouseX = s.mouseY = -1.0f;
+        xrlog("options menu: the panel in front of the player, the laser pointer on");
+    }
+    s.menuWasOpen = menuOpen;
     XrCompositionLayerPassthroughFB room{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
     if (s.frame.shouldRender && updatePassthrough()) {  // the room first, the screen over it
         room.layerHandle = s.passthroughLayer;
@@ -1221,28 +1508,42 @@ void runFrame() {
         if (s.hudFrame) proj.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&proj;
         if (s.hudFrame) {
-            // the HUD's panel: over the table's far edge, a little above it, facing the player
             const Settings& st = s.settings;
-            const float w = st.hudWidth;
-            const float h = w * float(s.screenH) / float(eyeW);
+            const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;
+            // the model's middle (the bubble's is 0.35 radii above Link, pc_vr_diorama.cpp)
+            const float midY = st.sphere ? -st.tableHeight + 0.35f * r : -st.tableHeight + 0.1f;
             hud.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
             hud.space = s.space;
             hud.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
             hud.subImage.swapchain = s.swapchain;
-            hud.subImage.imageRect = {{2 * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
-            const float tilt = -0.2f;  // leaning back a little, towards the eyes above it
-            hud.pose.orientation = {std::sin(tilt / 2), 0.0f, 0.0f, std::cos(tilt / 2)};
-            if (st.sphere) {
-                // over the bubble's far side (its middle is 0.35 radii above Link, pc_vr_diorama.cpp)
-                const float r = 0.5f * st.tableWidth;
-                hud.pose.position = {st.tableX, -st.tableHeight + 0.35f * r + 0.7f * r + 0.5f * h,
-                                     -(st.tableDistance + 0.6f * r)};
+            hud.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+            const XrRect2Di full{{2 * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            if (s_menuOpen.load()) {
+                // the options menu: the panel floating in front of the player, where it opened
+                const float w = 1.3f, h = w * float(s.screenH) / float(eyeW);
+                hud.subImage.imageRect = full;
+                hud.pose = s.menuPose;
+                hud.size = {w, h};
+                layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
+                const int pl = updatePointer(hud.pose, hud.size, pointerQuads);
+                for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
+            } else if (s_dialogue.load()) {
+                // a dialogue: the message box (the bottom of the 2D) on its own panel above the model
+                const int32_t x0 = int32_t(eyeW * 0.08f), y0 = int32_t(s.screenH * 0.60f);
+                const int32_t cw = int32_t(eyeW * 0.84f), ch = int32_t(s.screenH * 0.38f);
+                hud.subImage.imageRect = {{2 * eyeW + x0, y0}, {cw, ch}};
+                const float w = 1.1f, h = w * float(ch) / float(cw);
+                hud.pose.position = {st.tableX, midY + r + 0.08f + 0.5f * h, -st.tableDistance};
+                hud.size = {w, h};
+                layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
             } else {
-                hud.pose.position = {st.tableX, -st.tableHeight + 0.1f + 0.5f * h,
-                                     -(st.tableDistance + 0.5f * st.tableDepth)};
+                // the HUD: a large panel behind the model at its height, its corners around it
+                const float w = st.hudWidth, h = w * float(s.screenH) / float(eyeW);
+                hud.subImage.imageRect = full;
+                hud.pose.position = {st.tableX, midY, -(st.tableDistance + 1.1f * r)};
+                hud.size = {w, h};
+                layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
             }
-            hud.size = {w, h};
-            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
         }
     } else if (screen) {
         const Settings& st = s.settings;
@@ -1261,6 +1562,11 @@ void runFrame() {
             quad.pose.position = {0.0f, st.height, -st.distance};
             quad.size = {st.width, st.width * float(s.screenH) / float(eyeW)};
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
+        }
+        // the options menu on the screen: the laser pointer at it
+        if (menuOpen) {
+            const int pl = updatePointer(quads[0].pose, quads[0].size, pointerQuads);
+            for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
         }
     }
     XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
@@ -1326,9 +1632,18 @@ extern "C" void wq_xr_set(const char* key, const char* value) {
     xrlog("settings: %s = %s (options menu)", key, value);
 }
 
-extern "C" void wq_xr_set_camera_heading(float heading) {
+extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue) {
     s_camHeading.store(heading);
     s_camHeadingValid.store(true);
+    s_rotateStick.store(rotate);
+    s_dialogue.store(dialogue);
+}
+
+extern "C" void wq_xr_menu_state(bool open, float width, float height, bool hovered) {
+    s_menuOpen.store(open);
+    s_menuW.store(width);
+    s_menuH.store(height);
+    s_menuHovered.store(hovered);
 }
 
 extern "C" bool wq_xr_head(WqXrHead* out) {

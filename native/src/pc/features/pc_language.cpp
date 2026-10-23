@@ -51,8 +51,15 @@ const PcSettingDesc kSetting = {
     "COS_GAME_LANGUAGE", "Idioma del juego",
     "Idioma de los textos del juego. Automático: el de la partida guardada, si no el del sistema. "
     "Requiere reiniciar.",
+#if defined(__ANDROID__)
+    // WakerQuest: in the "Juego / mejoras" page, Spanish unless chosen otherwise (the Quest's system
+    // language is often English)
+    PC_SETTING_TAB_QOL, PC_SETTING_RESTART, kChoices, (int)(sizeof(kChoices) / sizeof(kChoices[0])),
+    "es", nullptr, nullptr, 99,
+#else
     PC_SETTING_TAB_GRAPHICS, PC_SETTING_RESTART, kChoices, (int)(sizeof(kChoices) / sizeof(kChoices[0])),
     "auto", nullptr, nullptr, 99, // the last row of the tab: the menu scripts count rows from the top
+#endif
     "Game language",
     "Language of the game's text. Automatic: the saved game's, else the system's. Needs a restart."};
 

@@ -31,6 +31,7 @@
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
+#include "d/d_meter.h"
 
 #include <algorithm>
 
@@ -323,7 +324,9 @@ bool pc_vr_view_begin(view_class* view) {
     updateRig(player->current.pos, view->mViewMtx, table.followYaw);
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
     // for the left stick relative to the player's view (wq_xr.cpp)
-    wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw);
+    const bool freeControl = !pc::menuOpen() && dMenu_flag() == 0 && !dComIfGp_event_runCheck();
+    wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw, freeControl,
+                             dComIfGp_getMesgStatus() != 0);
 
     // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
     s.sphere = table.sphere;
@@ -404,6 +407,9 @@ void pc_vr_sky_end(void) {
 }
 
 void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
+void pc_vr_menu_state(bool open, float width, float height, bool hovered) {
+    wq_xr_menu_state(open, width, height, hovered);
+}
 
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius) {
     if (!cullSetup()) return -1;
@@ -457,6 +463,7 @@ void pc_vr_view_end(void) {}
 void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
+void pc_vr_menu_state(bool, float, float, bool) {}
 int pc_vr_clip_sphere(const f32[3][4], const Vec*, f32) { return -1; }
 int pc_vr_clip_box(const f32[3][4], const Vec*, const Vec*) { return -1; }
 int pc_vr_clip_model(J3DModel*) { return -1; }
