@@ -37,6 +37,7 @@ typedef struct WqXrTable {
     float x;         // metres to the right of straight ahead (moved with the right grip)
     float yaw;       // radians the world is turned by the right grip
     bool autoScreen; // the game's first-person views (telescope, aiming...) on the giant screen
+    bool cineScreen; // and its cutscenes
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).
@@ -50,6 +51,9 @@ void wq_xr_set(const char* key, const char* value);
 // rotate: the player controls Link freely (no options menu, pause menu or event): only then is the
 // stick turned. dialogue: a message box is open (shown on its own panel above the model).
 void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue);
+// The game, every frame (pc_vr_diorama.cpp): an event (a cutscene) runs; the giant screen's 3D is
+// stronger meanwhile (cine_3d).
+void wq_xr_set_cinematic(bool cinematic);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);

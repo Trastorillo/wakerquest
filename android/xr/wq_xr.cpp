@@ -79,7 +79,8 @@ struct Settings {
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
     bool stereo = true;
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
-    float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen
+    float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
+    bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
     float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
@@ -96,6 +97,7 @@ struct Settings {
     bool tableFollowYaw = true;                  // the world turns with the game camera
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
+    bool cineScreen = true;                      // and cutscenes
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
@@ -146,8 +148,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "passthrough")) s.passthrough = on;
     else if (!strcmp(key, "refresh")) s.refresh = int(f);
     else if (!strcmp(key, "stereo")) s.stereo = on;
-    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.1f);
-    else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 16000.0f);
+    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.03f);  // comfortable
+    else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
+    else if (!strcmp(key, "cine_3d")) s.cine3d = on;
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "mode")) s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
     else if (!strcmp(key, "shape")) s.sphere = strcmp(v, "caja") != 0 && strcmp(v, "box") != 0 && strcmp(v, "table") != 0;
@@ -165,6 +168,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "hud_width")) s.hudWidth = clampf(f, 0.2f, 3.0f);
     else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
+    else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
     else if (!strcmp(key, "hud_pose")) {
         float x = 0, y = 0, z = 0, yaw = 0;
@@ -197,6 +201,10 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
+    if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
+    if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
+    if (!strcmp(key, "stereo_focus")) return num(s.stereoFocus);
+    if (!strcmp(key, "cine_3d")) return flag(s.cine3d);
     if (!strcmp(key, "passthrough")) return flag(s.passthrough);
     if (!strcmp(key, "stereo")) return flag(s.stereo);
     if (!strcmp(key, "distance")) return num(s.distance);
@@ -377,6 +385,9 @@ bool hasExtension(const std::vector<XrExtensionProperties>& exts, const char* na
 }
 
 std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it now
+std::atomic_bool s_cinematic{false};       // wq_xr_set_cinematic: the game runs an event (a cutscene)
+float s_stereoApplied[3] = {-1.0f, 0.0f, 0.0f};  // the screen's 3D as last given to Aurora: on, strength, focus
+float s_cineRamp = 0.0f;                   // 0..1, the cutscenes' 3D faded in and out
 bool s_refreshDirty = false;               // the refresh rate changed while running
 
 void readSettings(bool force) {
@@ -426,7 +437,7 @@ void readSettings(bool force) {
     }
     if (refreshChanged && !force) s_refreshDirty = true;  // the menu's Frecuencia, applied now
     // the screen's 3D; the diorama sets its own eye shift every frame (pc_vr_diorama.cpp)
-    if (!next.diorama) aurora_xr_set_stereo(next.stereo, next.stereoStrength, next.stereoFocus);
+    s_stereoApplied[0] = -1.0f;  // the screen's 3D applied again (updateScreenStereo)
     xrlog("settings: mode %s; table %.0fx%.0f cm, %.0f m of the game across, %.2f m away, %.2f m below the eyes, "
           "fade %.2f m, %s the camera",
           next.diorama ? "maqueta" : "pantalla", next.tableWidth * 100.0f, next.tableDepth * 100.0f, next.tableSpan,
@@ -1776,6 +1787,30 @@ XrQuaternionf facingPlayer(XrVector3f at) {
     return {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
 }
 
+// The giant screen's 3D (the diorama sets its own eye shift every frame, pc_vr_diorama.cpp): the
+// settings', with more depth (x1.6) and more coming out of the screen (the plane twice as far) during
+// cutscenes (cine_3d), faded in and out over half a second.
+void updateScreenStereo() {
+    const Settings& st = s.settings;
+    if (st.diorama && s.dioramaFrame) {
+        s_stereoApplied[0] = -1.0f;  // the diorama's eye shift; the screen's applied again after it
+        return;
+    }
+    const float dt = s.settings.refresh > 0 ? 1.0f / float(s.settings.refresh) : 1.0f / 90.0f;
+    const float want = st.cine3d && s_cinematic.load() ? 1.0f : 0.0f;
+    s_cineRamp += clampf(want - s_cineRamp, -dt / 0.5f, dt / 0.5f);
+    const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.03f);
+    const float focus = clampf(st.stereoFocus * (1.0f + 1.0f * s_cineRamp), 1.0f, 2500.0f);
+    const float on = st.stereo ? 1.0f : 0.0f;
+    if (on == s_stereoApplied[0] && std::fabs(strength - s_stereoApplied[1]) < 1e-5f &&
+        std::fabs(focus - s_stereoApplied[2]) < 0.5f)
+        return;
+    s_stereoApplied[0] = on;
+    s_stereoApplied[1] = strength;
+    s_stereoApplied[2] = focus;
+    aurora_xr_set_stereo(st.stereo, strength, focus);
+}
+
 void runFrame() {
     XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};
     s.frame = {XR_TYPE_FRAME_STATE};
@@ -1788,6 +1823,7 @@ void runFrame() {
         setRefreshRate();
     }
     updatePerformance();
+    updateScreenStereo();
     locateHead();
     updatePad();
     updateTriggers();
@@ -2025,6 +2061,8 @@ extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialog
     s_dialogue.store(dialogue);
 }
 
+extern "C" void wq_xr_set_cinematic(bool cinematic) { s_cinematic.store(cinematic); }
+
 extern "C" void wq_xr_menu_state(bool open, float width, float height, bool hovered) {
     s_menuOpen.store(open);
     s_menuW.store(width);
@@ -2056,6 +2094,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->x = st.tableX;
     out->yaw = st.tableYaw * 0.0174532925f;
     out->autoScreen = st.autoScreen;
+    out->cineScreen = st.cineScreen;
 }
 
 extern "C" bool wq_xr_start(void) {

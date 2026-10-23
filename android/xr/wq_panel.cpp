@@ -84,10 +84,18 @@ const Item kGeneral[] = {
     {kXr, "refresh", "Frecuencia", "90 Hz: el juego va fluido y sobra GPU", kStepper, OPTS(kRefresh)},
     {kXr, "gpu_boost", "Más potencia de GPU", "Sube el reloj de la GPU; gasta más batería", kSwitch},
     {kXr, "passthrough", "Tu habitación", "Alrededor de la pantalla gigante", kSwitch},
-    {kXr, "stereo", "3D en la pantalla", "Una imagen para cada ojo", kSwitch},
     {kXr, "distance", "Distancia de la pantalla", "La pantalla gigante", kStepper, nullptr, 0, 2.0f, 15.0f, 0.5f,
      "%.1f m"},
     {kXr, "width", "Tamaño de la pantalla", "Su ancho", kStepper, nullptr, 0, 2.0f, 12.0f, 0.5f, "%.1f m"},
+};
+const Item kStereo[] = {
+    {kXr, "stereo", "3D en la pantalla", "Una imagen para cada ojo", kSwitch},
+    {kXr, "stereo_strength", "Profundidad 3D", "Más = el fondo más lejos", kStepper, nullptr, 0, 0.004f, 0.03f,
+     0.002f, "%.3f"},
+    {kXr, "stereo_focus", "Salir de la pantalla", "Más = lo cercano sale hacia ti", kStepper, nullptr, 0, 200.0f,
+     2500.0f, 100.0f, "%.0f"},
+    {kXr, "cine_3d", "3D intenso en cinemáticas", "Más profundidad y más salida en las escenas", kSwitch},
+    {kXr, "cine_screen", "Cinemáticas en pantalla gigante", "En la maqueta; vuelve a la burbuja al acabar", kSwitch},
 };
 const Item kDiorama[] = {
     {kXr, "shape", "Forma", "Una burbuja, o una mesa", kStepper, OPTS(kShape)},
@@ -126,7 +134,7 @@ struct Tab {
     int count;
 };
 #define TAB(name, items) {name, items, (int)(sizeof(items) / sizeof(items[0]))}
-const Tab kTabs[] = {TAB("General", kGeneral), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
+const Tab kTabs[] = {TAB("General", kGeneral), TAB("3D", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
                      TAB("Juego", kGameItems)};
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));

@@ -313,21 +313,25 @@ bool pc_vr_view_begin(view_class* view) {
     // the game's own first-person views, which the model cannot show: the giant screen meanwhile
     // (auto_screen): the telescope (the item, or the scope of an event), looking around, the picto box,
     // aiming the bow, the hookshot, the boomerang and the grappling hook
-    const bool ownView = table.autoScreen &&
-                         (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e |
-                                                             daPyStts0_BOW_AIM_e | daPyStts0_HOOKSHOT_AIM_e |
-                                                             daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
-                          dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 ||
-                          dComIfGp_getScopeType() != 0);
+    // ... and the cutscenes (a demo playing, cine_screen), with the screen's 3D stronger (wq_xr.cpp)
+    const bool cutscene = dComIfGp_demo_mode() != 0;
+    wq_xr_set_cinematic(cutscene);
+    const bool firstPerson =
+        table.autoScreen &&
+        (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
+                                            daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
+         dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
+    const bool ownView = firstPerson || (table.cineScreen && cutscene);
     const bool want = table.diorama && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
         if (s.wasOn) {
             pc::writef(STDERR_FILENO, "[vr] diorama off (%s)\n",
                        !table.diorama ? "mode" : view == nullptr ? "no camera" : player == nullptr ? "no Link"
-                       : ownView ? "telescope or first person: the screen" : "no head pose");
+                       : firstPerson ? "telescope or first person: the screen"
+                       : ownView ? "a cutscene: the screen" : "no head pose");
             aurora_xr_set_frame_info(0, false);
             if (ownView) {
-                aurora_xr_set_eye_shift(false, 0.0f, 0.0f);  // a flat picture on the screen meanwhile
+                aurora_xr_set_eye_shift(false, 0.0f, 0.0f);  // the screen's own 3D meanwhile (wq_xr.cpp)
             }
             s.wasOn = false;
             s.rigValid = false;
