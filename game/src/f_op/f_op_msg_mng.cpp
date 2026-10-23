@@ -1,5 +1,8 @@
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "f_op/f_op_msg_mng.h"
+#if TARGET_PC
+const char* pc_msg_override(u32 msgNo, const char* text); // native/src/pc/game_hooks/pc_msg_dedication.cpp
+#endif
 #include "JSystem/JKernel/JKRArchive.h"
 #include "JSystem/JUtility/JUTDataHeader.h"
 #include "d/d_meter.h"
@@ -1539,6 +1542,10 @@ const char* fopMsgM_msgGet_c::getMessage(mesg_header* i_head) {
         }
     }
 
+#if TARGET_PC
+    // WakerQuest's dedication (native/src/pc/game_hooks/pc_msg_dedication.cpp): one more page of our own
+    ret = pc_msg_override(mMsgNo, ret);
+#endif
     return ret;
 }
 
