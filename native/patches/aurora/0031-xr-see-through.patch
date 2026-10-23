@@ -1,0 +1,270 @@
+XR diorama and window: see Link through what stands in front of him, and the window's clip plane
+
+GX_AURORA_SET_SEE_THROUGH (AuroraSetSeeThrough): a point in the head's space (Link, from the game) and
+a cone from the eyes' midpoint toward it. The draws the view delta applies to (the world's) carry it in
+their uniform, and their fragments within the cone and nearer than the point by more than a margin are
+discarded, dithered over a soft edge, so what stands between the eyes and Link (trees, grass, walls) is
+cut away and Link and what is behind him show. The same cut for both eyes (a volume in the head's
+space), so the hole is solid in 3D. The margin keeps Link's own draws (and the ground at his feet); the
+HUD and the 2D are not the world's draws.
+
+GX_AURORA_SET_CLIP_PLANE (AuroraSetClipPlane): a plane in the head's space; the world's fragments on
+its positive side are discarded. The window (mode = ventana) puts it at the front of what may come out
+of it, so what the game camera sees nearer is not drawn and what is behind it shows (instead of the
+eyes' mask fading it into a see-through hole).
+
+Both off at the end of each frame. The world's shaders take the view-space position as one more
+varying, and every GX shader carries the discards (a uniform branch); the uniforms are 48 bytes longer
+(MaxUniformSize with them).
+
+diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -116,6 +116,25 @@
+  */
+ #define GX_AURORA_SET_VIEW_DELTA 0x0051
+ 
++/**
++ * See-through (native/patches/aurora/0031): followed by a u8. 0 turns it off. 1 is followed by 8 f32:
++ * a point in the view delta's target space (the head's, metres: x right, y up, -z ahead), the cut's
++ * soft depth (metres), the tangent of its angular radius, the margin before the point (metres), the
++ * soft fraction of its radius, and a spare. While on, the fragments of a draw the view delta applies
++ * to that lie within the cone from the space's origin toward the point, nearer than the point by more
++ * than the margin, are discarded (dithered over the soft edge): what stands between the eyes and the
++ * point is cut away and the point shows. Off at the end of each frame.
++ */
++#define GX_AURORA_SET_SEE_THROUGH 0x0052
++
++/**
++ * A clip plane (native/patches/aurora/0031): followed by a u8. 0 turns it off. 1 is followed by 4 f32,
++ * a plane in the view delta's target space (n.x, n.y, n.z, d). While on, the fragments of a draw the
++ * view delta applies to where n . p + d > 0 are discarded: the window's plane, so what the game camera
++ * sees in front of it is not drawn and what is behind it shows. Off at the end of each frame.
++ */
++#define GX_AURORA_SET_CLIP_PLANE 0x0053
++
+ #define GX2_SET_POLYGON_OFFSET 0x1000
+ 
+ 
+@@ -202,6 +221,17 @@
+ void AuroraSetViewDelta(const f32* delta, const f32* projFrom, const f32* projTo);
+ 
+ /**
++ * GX_AURORA_SET_SEE_THROUGH, recorded in the command stream: params (8 f32, see above), or NULL to
++ * turn it off.
++ */
++void AuroraSetSeeThrough(const f32* params);
++
++/**
++ * GX_AURORA_SET_CLIP_PLANE, recorded in the command stream: the plane (4 f32), or NULL to turn it off.
++ */
++void AuroraSetClipPlane(const f32* plane);
++
++/**
+  * Create an offscreen framebuffer and switch rendering to it.
+  * All subsequent GX rendering will target this framebuffer until GXRestoreFrameBuffer() is called.
+  * Use GXCopyTex to resolve the offscreen content into a texture.
+diff --git a/lib/dolphin/gx/GXAurora.cpp b/lib/dolphin/gx/GXAurora.cpp
+--- a/lib/dolphin/gx/GXAurora.cpp
++++ b/lib/dolphin/gx/GXAurora.cpp
+@@ -112,6 +112,30 @@
+   }
+ }
+ 
++void AuroraSetSeeThrough(const f32* params) {
++  GX_WRITE_AURORA(GX_AURORA_SET_SEE_THROUGH);
++  if (params == nullptr) {
++    GX_WRITE_U8(0);
++    return;
++  }
++  GX_WRITE_U8(1);
++  for (int i = 0; i < 8; ++i) {
++    GX_WRITE_F32(params[i]);
++  }
++}
++
++void AuroraSetClipPlane(const f32* plane) {
++  GX_WRITE_AURORA(GX_AURORA_SET_CLIP_PLANE);
++  if (plane == nullptr) {
++    GX_WRITE_U8(0);
++    return;
++  }
++  GX_WRITE_U8(1);
++  for (int i = 0; i < 4; ++i) {
++    GX_WRITE_F32(plane[i]);
++  }
++}
++
+ void GXCreateFrameBuffer(u32 width, u32 height) {
+   GX_WRITE_AURORA(GX_AURORA_BEGIN_OFFSCREEN);
+   GX_WRITE_U32(width);
+diff --git a/lib/gx/gx.hpp b/lib/gx/gx.hpp
+--- a/lib/gx/gx.hpp
++++ b/lib/gx/gx.hpp
+@@ -66,7 +66,7 @@
+ constexpr u32 MaxVtxFmt = GX_MAX_VTXFMT;
+ constexpr u32 MaxPnMtx = (GX_PNMTX9 / 3) + 1;
+ constexpr u32 MaxIndexAttr = 12; // VA_POS -> VA_TEX7
+-constexpr u32 MaxUniformSize = 3840;
++constexpr u32 MaxUniformSize = 3840 + 48; // patch 0031: the see-through and the clip plane
+ constexpr u32 XfRegCount = 0x58; // 0x1000-0x1057
+ 
+ enum DirtyFlag : u8 {
+@@ -314,6 +314,14 @@
+   std::array<float, 6> projTo{};   // the projection drawn instead
+ };
+ 
++// GX_AURORA_SET_SEE_THROUGH (native/patches/aurora/0031): see GXAurora.h.
++struct SeeThrough {
++  bool active = false;
++  std::array<float, 8> params{};
++  bool clipActive = false; // the clip plane
++  std::array<float, 4> clip{};
++};
++
+ struct GXState {
+   struct CopyTextureRef {
+     gfx::TextureHandle handle;
+@@ -339,6 +347,7 @@
+ 
+   // Decoded state
+   ViewDelta viewDelta; // native/patches/aurora/0019
++  SeeThrough seeThrough; // native/patches/aurora/0031
+   std::array<PnMtx, MaxPnMtx> pnMtx;
+   u32 currentPnMtx;
+   Mat4x4<float> proj;
+diff --git a/lib/gx/command_processor.cpp b/lib/gx/command_processor.cpp
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -1156,6 +1156,32 @@
+       g_gxState.dirty |= DirtyUniform;
+     }
+     vd.active = active;
++  } else if (subCmd == GX_AURORA_SET_SEE_THROUGH) {
++    // native/patches/aurora/0031: in the uniform of the draws the view delta applies to.
++    auto& st = g_gxState.seeThrough;
++    const bool active = reader.read<u8>() != 0;
++    if (active) {
++      for (auto& v : st.params) {
++        v = reader.read<f32>();
++      }
++    }
++    if (active || st.active) {
++      g_gxState.dirty |= DirtyUniform;
++    }
++    st.active = active;
++  } else if (subCmd == GX_AURORA_SET_CLIP_PLANE) {
++    // native/patches/aurora/0031: as the see-through
++    auto& st = g_gxState.seeThrough;
++    const bool active = reader.read<u8>() != 0;
++    if (active) {
++      for (auto& v : st.clip) {
++        v = reader.read<f32>();
++      }
++    }
++    if (active || st.clipActive) {
++      g_gxState.dirty |= DirtyUniform;
++    }
++    st.clipActive = active;
+   } else if (subCmd == GX_AURORA_BEGIN_OFFSCREEN) {
+     const u32 width = reader.read<u32>();
+     const u32 height = reader.read<u32>();
+@@ -1237,6 +1263,8 @@
+     it = it->second.frame + 1 < sPipelineMemoFrame ? sBindMemo.erase(it) : std::next(it);
+   }
+   g_gxState.viewDelta.active = false; // native/patches/aurora/0019: never past a frame
++  g_gxState.seeThrough.active = false; // native/patches/aurora/0031: nor the see-through
++  g_gxState.seeThrough.clipActive = false; // and the clip plane
+   sDrawCache.bindGeneration = 0;
+   sDrawCache.uniformRange = {};
+   sDrawCache.fogRange = {};
+diff --git a/lib/gx/shader_info.cpp b/lib/gx/shader_info.cpp
+--- a/lib/gx/shader_info.cpp
++++ b/lib/gx/shader_info.cpp
+@@ -220,7 +220,7 @@
+ 
+   ShaderInfo info{
+       // render/logical viewport size, proj
+-      .uniformSize = 8 + 8 + 64,
++      .uniformSize = 8 + 8 + 48 + 64, // patch 0031: the see-through's two vec4f, the clip plane
+   };
+ 
+   if (config.lineMode != 0) {
+@@ -424,6 +424,24 @@
+   buf.append<f32>(g_gxState.renderViewport.height);
+   buf.append<f32>(g_gxState.logicalViewport.width);
+   buf.append<f32>(g_gxState.logicalViewport.height);
++  // patch 0031: the see-through, for the draws the view delta applies to (zero: off)
++  {
++    std::array<f32, 8> st{};
++    if (viewDelta && g_gxState.seeThrough.active) {
++      st = g_gxState.seeThrough.params;
++      st[7] = 1.f;
++    }
++    for (const f32 v : st) {
++      buf.append<f32>(v);
++    }
++    std::array<f32, 4> clip{0.f, 0.f, 0.f, -1.f}; // never
++    if (viewDelta && g_gxState.seeThrough.clipActive) {
++      clip = g_gxState.seeThrough.clip;
++    }
++    for (const f32 v : clip) {
++      buf.append<f32>(v);
++    }
++  }
+   if (info.lineMode != 0) {
+     if (info.lineMode == 3) { // GX_POINTS
+       buf.append<f32>(static_cast<f32>(g_gxState.pointSize) / 6.f);
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -1047,6 +1047,9 @@
+         "\n    let mv_pos = vec4f({}, 1.0) * ubuf.postex_mtx[in_pnmtxidx];"
+         "\n    out.pos = vec4f(mv_pos, 1.0) * ubuf.proj;",
+         vtx_attr(config, GX_VA_POS));
++    // See-through (patch 0031, GXAurora.h): the position in view space for the fragment's cut
++    vtxOutAttrs += fmt::format("\n    @location({}) xr_pos: vec3f,", vtxOutIdx++);
++    vtxXfrAttrsPre += "\n    out.xr_pos = mv_pos;";
+   } else if (config.lineMode == 3) {
+     // GX_POINTS: expand single vertex to axis-aligned screen-space square
+     vtxXfrAttrsPre +=
+@@ -1716,6 +1719,27 @@
+     fragmentReturn = "\n    return FragmentOutput(vec4f(prev.rgb, 1.0), prev);";
+   }
+ 
++  // See-through (patch 0031, GXAurora.h): first of all, the fragments between the eyes and the point
++  // within its cone are cut (a dither over the soft edge); ubuf.xr_cut1.w is 0 when off. Then those on
++  // the clip plane's positive side (off: 0, 0, 0, -1). Triangles only.
++  if (config.lineMode == 0) {
++    fragmentFnPre.insert(
++        0,
++        "\n    if (ubuf.xr_cut1.w > 0.0) {"
++        "\n        let cut_l = ubuf.xr_cut0.xyz;"
++        "\n        let cut_len = max(length(cut_l), 1e-4);"
++        "\n        let cut_dir = cut_l / cut_len;"
++        "\n        let cut_along = dot(in.xr_pos, cut_dir);"
++        "\n        let cut_r = ubuf.xr_cut1.x * max(cut_along, 0.0);"
++        "\n        let cut_perp = length(in.xr_pos - cut_dir * cut_along);"
++        "\n        let cut_side = clamp((cut_r - cut_perp) / max(cut_r * ubuf.xr_cut1.z, 1e-5), 0.0, 1.0);"
++        "\n        let cut_depth = clamp((cut_len - ubuf.xr_cut1.y - cut_along) / max(ubuf.xr_cut0.w, 1e-5), 0.0, 1.0);"
++        "\n        let cut_noise = fract(52.9829189 * fract(dot(in.pos.xy, vec2f(0.06711056, 0.00583715))));"
++        "\n        if (cut_along > 0.0 && cut_side * cut_depth > cut_noise) { discard; }"
++        "\n    }"
++        "\n    if (dot(ubuf.xr_clip.xyz, in.xr_pos) + ubuf.xr_clip.w > 0.0) { discard; }");
++  }
++
+   // Draw census fragment counters (gfx/census.hpp): invocations, then the fragments that survived
+   // the alpha compare, per draw slot (imm._pad).
+   std::string censusBinding;
+@@ -2067,7 +2091,10 @@
+ 
+ struct Uniform {{
+     render_viewport_size: vec2f,
+-    logical_viewport_size: vec2f,{0}
++    logical_viewport_size: vec2f,
++    xr_cut0: vec4f,
++    xr_cut1: vec4f,
++    xr_clip: vec4f,{0}
+ }};
+ @group(0) @binding(0)
+ var<storage, read> vbuf: array<u32>;
