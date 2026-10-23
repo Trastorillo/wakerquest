@@ -1,0 +1,644 @@
+XR presentation: stereoscopic 3D, the frame encoded again for the right eye (Android)
+
+While the XR layer has turned it on (aurora_xr_set_stereo, include/aurora/xr.h) the XR buffers are
+two eyes wide. Each frame's left eye is encoded as it is recorded; at the end of the frame
+(gfx::end_frame, on the render worker, before the packet is released) the EFB is copied aside and
+every op of the frame packet is encoded again for the right eye (gfx/stereo.cpp, encoding.cpp
+stereo::encode_right_eye). EFB copies and whatever samples the screen are thus redone with each eye's
+picture, with no second set of textures. The replay skips what is for the CPU (encoder tasks with an
+after-submit step, the depth snapshot) and GPU timing; staging copies and uploads were already
+encoded.
+
+The shift: perspective draws in a pass on the EFB whose viewport covers (nearly) all of it carry the
+eye's shift and focus in DrawImmediateData::_pad (two snorm16), and the GX vertex shader moves them
+in clip space: clip.x += eye * strength * (clip.w - focus), only when the projection is a perspective
+one. Orthographic (2D, HUD) and partial-viewport draws (shadows, reflections) are drawn as recorded.
+The census, which uses _pad itself, turns the shift off. The pipeline cache holds configurations, not
+shaders, so it needs no new version.
+
+The present puts the left eye's copy in the buffer's left half and the EFB in the right half, and
+tells the XR layer (AuroraXrFrame.sideBySide, .stereo). A frame with ImGui drawn over it (the options
+menu) is not replayed: it is shown flat, in the left half; imgui::freeze returns an empty DrawData
+when nothing is drawn so the present can tell.
+
+diff --git a/cmake/aurora_gx.cmake b/cmake/aurora_gx.cmake
+index 574fcdc..7cde98f 100644
+--- a/cmake/aurora_gx.cmake
++++ b/cmake/aurora_gx.cmake
+@@ -8,6 +8,7 @@ add_library(aurora_gx STATIC
+         lib/gfx/recording.cpp
+         lib/gfx/render_worker.cpp
+         lib/gfx/resource_cache.cpp
++        lib/gfx/stereo.cpp
+         lib/gfx/dds_io.cpp
+         lib/gfx/tex_copy_conv.cpp
+         lib/gfx/tex_palette_conv.cpp
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+index 6ae99a0..0bef47f 100644
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -26,8 +26,20 @@ typedef struct AuroraXrFrame {
+   uint32_t width;
+   uint32_t height;
+   uint32_t serial; /* counts the frames published */
++  /* Stereoscopic 3D (patch 0024): while it is on, the buffer is two eyes wide (width is the
++   * buffer's, each eye width / 2). `stereo` says whether this frame holds both eyes (left half,
++   * right half); when it does not (a menu is open), only the left half holds the frame, for both. */
++  bool sideBySide;
++  bool stereo;
+ } AuroraXrFrame;
+ 
++/* Stereoscopic 3D (patch 0024), from any thread; takes effect from the next frame. The scene's
++ * perspective draws over the whole EFB are drawn once per eye, each shifted in clip space by
++ * clip.x += eye * strength * (clip.w - focus): strength is the shift of what is far away, in NDC
++ * (half the picture's width is 1), and focus the depth (game units, the clip w) that stays on the
++ * screen's plane. Orthographic (2D, HUD) draws are not shifted. Off by default. */
++void aurora_xr_set_stereo(bool enable, float strength, float focus);
++
+ /* Starts or stops presenting into the buffers (any thread). Takes effect from the next frame. */
+ void aurora_xr_present_enable(bool enable);
+ /* Whether the device can present into the buffers (known once Aurora has initialized). */
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index a637cdb..1affdf2 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -6,6 +6,7 @@
+ #include "gfx/frame.hpp"
+ #include "gfx/recording.hpp"
+ #include "gfx/render_worker.hpp"
++#include "gfx/stereo.hpp"
+ #include "gx/command_processor.hpp"
+ #include "gx/fifo.hpp"
+ #include "gx/fifo_profile.hpp"
+@@ -343,6 +344,11 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   const auto xrViewport = xr ? webgpu::calculate_present_viewport(xrWidth, xrHeight, presentSource.size.width,
+                                                                   presentSource.size.height)
+                              : viewport;
++  // Stereoscopic 3D (patch 0024): while it is on the XR buffers are two eyes wide. A frame is shown in
++  // stereo when nothing is drawn over it (ImGui, the options menu, would be in one eye only); the
++  // render worker then encodes it again for the right eye (gfx/stereo.hpp).
++  const bool sideBySide = xr && webgpu::xr_present::stereo_wanted();
++  gfx::stereo::request(sideBySide && !imguiDrawData);
+ 
+   wgpu::BindGroup rmlBindGroup;
+   bool rmlOverlay = false;
+@@ -355,18 +361,21 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+ #endif
+ 
+   gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, surfaceViewport = viewport, xr, xrWidth,
+-                  xrHeight, xrViewport, imguiDrawData = std::move(imguiDrawData)](
++                  xrHeight, xrViewport, sideBySide, imguiDrawData = std::move(imguiDrawData)](
+                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+     // XR presentation (patch 0023): one of the XR layer's buffers; the surface when that fails.
++    const uint32_t xrBufferWidth = sideBySide ? xrWidth * 2 : xrWidth;
+     if (xr) {
+-      currentView = webgpu::xr_present::begin(xrWidth, xrHeight);
++      currentView = webgpu::xr_present::begin(xrBufferWidth, xrHeight);
+     }
+     const bool xrFrame = static_cast<bool>(currentView);
++    // Patch 0024: both eyes side by side (the left from its copy, the right from the EFB)
++    const bool xrStereo = xrFrame && sideBySide && gfx::stereo::presented() && gfx::stereo::left_eye().view;
+     const auto& viewport = xrFrame ? xrViewport : surfaceViewport;
+-    const uint32_t targetWidth = xrFrame ? xrWidth : webgpu::g_graphicsConfig.surfaceConfiguration.width;
++    const uint32_t targetWidth = xrFrame ? xrBufferWidth : webgpu::g_graphicsConfig.surfaceConfiguration.width;
+     const uint32_t targetHeight = xrFrame ? xrHeight : webgpu::g_graphicsConfig.surfaceConfiguration.height;
+     if (!xrFrame) {
+       window::SurfaceLock surfaceLock;
+@@ -387,6 +396,8 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+       wgpu::BindGroup presentBindGroup;
+       if (rmlBindGroup && !rmlOverlay) {
+         presentBindGroup = rmlBindGroup;
++      } else if (xrStereo) {
++        presentBindGroup = webgpu::create_copy_bind_group(gfx::stereo::left_eye());
+       } else {
+         const auto& resampledSource = webgpu::resample_present_source(encoder, viewport);
+         presentBindGroup = webgpu::create_copy_bind_group(resampledSource);
+@@ -412,6 +423,14 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+         set_present_viewport(pass, viewport, targetWidth, targetHeight);
+ 
+         pass.Draw(3);
++        if (xrStereo) {
++          // the right eye: the EFB as the replay left it, in the buffer's right half
++          auto rightViewport = viewport;
++          rightViewport.left += static_cast<float>(xrWidth);
++          pass.SetBindGroup(0, webgpu::create_copy_bind_group(webgpu::present_source()), 0, nullptr);
++          set_present_viewport(pass, rightViewport, targetWidth, targetHeight);
++          pass.Draw(3);
++        }
+         if (rmlBindGroup && rmlOverlay) {
+           pass.SetPipeline(webgpu::g_CopyPremultipliedAlphaPipeline);
+           pass.SetBindGroup(0, rmlBindGroup, 0, nullptr);
+@@ -434,7 +453,9 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+             .timestampWrites = webgpu::gpu_prof::pass_writes("ImGui"),
+         };
+         const auto pass = encoder.BeginRenderPass(&renderPassDescriptor);
+-        pass.SetViewport(0.f, 0.f, static_cast<float>(targetWidth), static_cast<float>(targetHeight), 0.f, 1.f);
++        // side by side (patch 0024), a frame with ImGui is mono: the left half, which both eyes show
++        const uint32_t imguiWidth = xrFrame && sideBySide ? xrWidth : targetWidth;
++        pass.SetViewport(0.f, 0.f, static_cast<float>(imguiWidth), static_cast<float>(targetHeight), 0.f, 1.f);
+         imgui::render(pass, imguiDrawData);
+         pass.End();
+       }
+@@ -451,7 +472,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+     webgpu::gpu_prof::after_submit();
+     if (xrFrame) {
+       // XR presentation (patch 0023): the XR layer shows it; nothing to present here.
+-      webgpu::xr_present::end();
++      webgpu::xr_present::end(sideBySide, xrStereo);
+       gfx::after_present();
+     } else if (canPresent && g_surface) {
+       ZoneScopedN("Present");
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+index e0081a3..f522df1 100644
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -5,6 +5,7 @@
+ #include "clear.hpp"
+ #include "depth_peek.hpp"
+ #include "pipeline_cache.hpp"
++#include "stereo.hpp"
+ #include "tex_copy_conv.hpp"
+ #include "tex_palette_conv.hpp"
+ #include "../gx/gx.hpp"
+@@ -120,6 +121,8 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+   // Bind bind group for the whole pass
+   pass.SetBindGroup(0, resources().staticBindGroup);
+   pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
++  // Stereoscopic 3D (patch 0024): which of this pass's draws carry the eye's shift.
++  stereo::begin_pass(passInfo);
+ 
+   for (auto& cmd : passInfo.commands) {
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+@@ -146,6 +149,7 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+       apply_viewport(pass, vp);
+       currentViewport = vp;
+       hasViewport = true;
++      stereo::set_viewport(vp.width, vp.height);
+     } break;
+     case CommandType::SetScissor: {
+       const auto& sc = cmd.data.setScissor;
+@@ -188,6 +192,7 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+     pass.PopDebugGroup();
+   }
+ #endif
++  stereo::end_pass();
+ }
+ 
+ // Draw census (census.hpp): one CSV row per pass with its targets, load ops, draws and EFB copy.
+@@ -275,7 +280,8 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+       .colorAttachments = attachments.data(),
+       .depthStencilAttachment = depthStencilAttachmentPtr,
+       .occlusionQuerySet = frame.census ? frame.census->querySet : nullptr,
+-      .timestampWrites = webgpu::gpu_prof::pass_writes(label),
++      // the right eye's replay (patch 0024) is not timed: its passes were, as the left eye's
++      .timestampWrites = stereo::replaying() ? nullptr : webgpu::gpu_prof::pass_writes(label),
+   };
+   if (frame.census)
+     UNLIKELY { census_pass_row(frame, passInfo, label); }
+@@ -284,7 +290,8 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+   render_pass(pass, frame, passInfo);
+   pass.End();
+ 
+-  if (passInfo.captureDepthSnapshot) {
++  // The depth snapshot is for the CPU (depth_peek): the left eye's is the frame's.
++  if (passInfo.captureDepthSnapshot && !stereo::replaying()) {
+     // native/patches/aurora/0009: with an EFB content scale the depth is in the top-left part.
+     auto snapshotSize = passInfo.colorAttachments[SceneColorAttachmentIndex].size;
+     if (passInfo.depthSnapshotScale < 1.f) {
+@@ -472,6 +479,51 @@ void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op)
+ }
+ } // namespace detail
+ 
++namespace stereo {
++// Patch 0024: the frame's ops again for the right eye. The staging copies and texture uploads were
++// encoded with the left eye; readbacks (encoder tasks with an after-submit step, the depth snapshot)
++// and the census happen once, for the left eye.
++void encode_right_eye(wgpu::CommandEncoder& cmd, FramePacket& frame) {
++  ZoneScoped;
++  const webgpu::gpu_prof::Zone zone{cmd, "Right eye"};
++  copy_left_eye(cmd);
++  set_eye(1);
++  for (const auto& op : frame.ops) {
++    switch (op.type) {
++    case FrameOpType::RenderPass:
++      if (op.renderPass != nullptr) {
++        render(cmd, frame, *op.renderPass, op.index);
++      }
++      break;
++    case FrameOpType::TextureCopy:
++      if (op.textureCopy != nullptr) {
++        cmd.CopyTextureToTexture(&op.textureCopy->src, &op.textureCopy->dst, &op.textureCopy->size);
++      }
++      break;
++    case FrameOpType::EncoderTask:
++      if (op.encoderTask != nullptr) {
++        const auto taskType = find_runtime_encoder_task_type(op.encoderTask->type);
++        if (taskType && taskType->afterSubmit == nullptr) {
++          auto& res = resources();
++          const EncoderTaskContext context{
++              .device = g_device,
++              .queue = g_queue,
++              .vertexBuffer = res.vertexBuffer,
++              .indexBuffer = res.indexBuffer,
++              .uniformBuffer = res.uniformBuffer,
++              .storageBuffer = res.storageBuffer,
++          };
++          taskType->callback(context, cmd, op.encoderTask->payload.data(), op.encoderTask->payloadSize,
++                             taskType->userdata);
++        }
++      }
++      break;
++    }
++  }
++  set_eye(-1);
++}
++} // namespace stereo
++
+ void bind_pipeline(const wgpu::RenderPipeline& pipeline, const wgpu::RenderPassEncoder& pass) {
+   if (pipeline.Get() == g_currentPipeline) {
+     return;
+diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
+index 18b1edb..aff3810 100644
+--- a/lib/gfx/frame.cpp
++++ b/lib/gfx/frame.cpp
+@@ -5,6 +5,7 @@
+ #include "recording.hpp"
+ #include "render_worker.hpp"
+ #include "resource_cache.hpp"
++#include "stereo.hpp"
+ #include "tex_copy_conv.hpp"
+ #include "tex_palette_conv.hpp"
+ #include "texture_replacement.hpp"
+@@ -679,6 +680,7 @@ bool begin_frame() {
+     constexpr wgpu::CommandEncoderDescriptor EncoderDescriptor{.label = "Redraw encoder"};
+     g_framePackets[frameSlot].encoder = g_device.CreateCommandEncoder(&EncoderDescriptor);
+     webgpu::gpu_prof::frame_begin(g_framePackets[frameSlot].encoder);
++    stereo::begin_frame(); // patch 0024: whether this frame's left eye is shifted
+   });
+   g_cpuFrameStart = PresentClock::now();
+   return true;
+@@ -700,7 +702,10 @@ void end_frame(EndFrameCallback callback) {
+   ++g_frameIndex;
+ 
+   const size_t stagingSlot = frame.stagingBuffer;
+-  render_worker::enqueue_end_frame(frameId, [frameSlot, stagingSlot, callback = std::move(callback)]() mutable {
++  // Patch 0024: whether the present wants this frame in stereo (nothing over it must be alike in both eyes).
++  const bool stereoRequested = stereo::take_request();
++  render_worker::enqueue_end_frame(frameId, [frameSlot, stagingSlot, stereoRequested,
++                                             callback = std::move(callback)]() mutable {
+     auto& packet = g_framePackets[frameSlot];
+     g_stagingBuffers[stagingSlot].Unmap();
+     g_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
+@@ -713,6 +718,12 @@ void end_frame(EndFrameCallback callback) {
+         census::encode_resolve(encoder, census);
+         afterSubmitCallbacks.emplace_back([census] { census::after_submit(census); });
+       }
++    // Patch 0024: the right eye, from the packet's ops, before the present (the callback) reads both.
++    const bool stereoFrame = stereoRequested && stereo::frame_active();
++    if (stereoFrame) {
++      stereo::encode_right_eye(encoder, packet);
++    }
++    stereo::set_presented(stereoFrame);
+     packet = {};
+     g_resources.stats.drawCallCount = stats.drawCallCount;
+     g_resources.stats.mergedDrawCallCount = stats.mergedDrawCallCount;
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+new file mode 100644
+index 0000000..96a94bb
+--- /dev/null
++++ b/lib/gfx/stereo.cpp
+@@ -0,0 +1,100 @@
++#include "stereo.hpp"
++
++#include "frame_packet.hpp"
++#include "recording.hpp"
++#include "../webgpu/gpu.hpp"
++#include "../webgpu/xr_present.hpp"
++
++#include <algorithm>
++#include <atomic>
++#include <cmath>
++
++namespace aurora::gfx::stereo {
++namespace {
++// Render worker state
++int g_eye = 0;               // 0 mono, -1 left, +1 right
++bool g_frameActive = false;  // this frame's left eye was shifted
++bool g_replaying = false;
++bool g_presented = false;
++float g_strength = 0.f, g_focus = 0.f;  // latched per frame
++bool g_efbPass = false;
++float g_passWidth = 0.f, g_passHeight = 0.f;
++uint32_t g_word = 0;
++webgpu::TextureWithSampler g_left;
++
++std::atomic_bool g_request{false};
++
++int16_t snorm16(float v) { return static_cast<int16_t>(std::lround(std::clamp(v, -1.f, 1.f) * 32767.f)); }
++
++// unpack2x16snorm in the shader: x from the low 16 bits; focus in units of 16384 game units
++uint32_t make_word(int eye) {
++  const float k = static_cast<float>(eye) * g_strength;
++  const uint32_t x = static_cast<uint16_t>(snorm16(k));
++  const uint32_t y = static_cast<uint16_t>(snorm16(g_focus / 16384.f));
++  const uint32_t word = x | (y << 16);
++  return word != 0 ? word : 1u;  // a non-zero word for "shift by nothing"
++}
++} // namespace
++
++void begin_frame() noexcept {
++  g_frameActive = webgpu::xr_present::stereo_wanted();
++  g_strength = webgpu::xr_present::stereo_strength();
++  g_focus = webgpu::xr_present::stereo_focus();
++  g_eye = g_frameActive ? -1 : 0;
++  g_replaying = false;
++}
++
++bool frame_active() noexcept { return g_frameActive; }
++bool replaying() noexcept { return g_replaying; }
++
++void begin_pass(const detail::RenderPass& pass) noexcept {
++  const auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
++  g_efbPass = g_eye != 0 && color.view && color.view.Get() == webgpu::g_frameBuffer.view.Get();
++  // the logical EFB maps to the top-left part of the target under an EFB content scale (patch 0009)
++  const float scale = std::min(1.f, std::max(0.01f, content_scale()));
++  g_passWidth = static_cast<float>(color.size.width) * scale;
++  g_passHeight = static_cast<float>(color.size.height) * scale;
++  g_word = 0;
++}
++
++void set_viewport(float width, float height) noexcept {
++  // the scene: a viewport over (nearly) the whole EFB; partial ones (shadow maps, reflections and
++  // other pictures drawn into a corner and copied out) stay as recorded
++  const bool scene = g_efbPass && width >= 0.9f * g_passWidth && height >= 0.9f * g_passHeight;
++  g_word = scene ? make_word(g_eye) : 0;
++}
++
++void end_pass() noexcept {
++  g_efbPass = false;
++  g_word = 0;
++}
++
++uint32_t draw_word() noexcept { return g_word; }
++
++void request(bool stereo) noexcept { g_request.store(stereo, std::memory_order_relaxed); }
++bool take_request() noexcept { return g_request.load(std::memory_order_relaxed); }
++
++void set_eye(int eye) noexcept {
++  g_eye = eye;
++  g_replaying = eye > 0;
++}
++
++void copy_left_eye(wgpu::CommandEncoder& cmd) {
++  const auto& source = webgpu::present_source();
++  if (!g_left.texture || g_left.size.width != source.size.width || g_left.size.height != source.size.height ||
++      g_left.format != source.format) {
++    g_left = webgpu::create_render_texture(source.size.width, source.size.height, false);
++  }
++  const wgpu::TexelCopyTextureInfo src{.texture = source.texture};
++  const wgpu::TexelCopyTextureInfo dst{.texture = g_left.texture};
++  const wgpu::Extent3D size{source.size.width, source.size.height, 1};
++  cmd.CopyTextureToTexture(&src, &dst, &size);
++}
++
++void set_presented(bool stereo) noexcept { g_presented = stereo; }
++bool presented() noexcept { return g_presented; }
++const webgpu::TextureWithSampler& left_eye() noexcept { return g_left; }
++
++void shutdown() noexcept { g_left = {}; }
++
++} // namespace aurora::gfx::stereo
+diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
+new file mode 100644
+index 0000000..1483a5e
+--- /dev/null
++++ b/lib/gfx/stereo.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++
++// Stereoscopic 3D for the XR presentation (centollOS patch 0024, include/aurora/xr.h).
++//
++// A stereo frame is encoded twice. The left eye is the frame as it is recorded (each pass encoded as
++// it is sealed); at the end of the frame the EFB (the present source) is copied aside and every op
++// of the frame packet is encoded again for the right eye. EFB copies and whatever samples the screen
++// are thus redone with the right eye's picture. In both, the scene's perspective draws over the
++// whole EFB carry the eye's shift in their immediates (DrawImmediateData::_pad, read by the GX
++// vertex shader); everything else is drawn as recorded. All of this runs on the render worker.
++
++#include <cstdint>
++
++namespace wgpu {
++class CommandEncoder;
++}
++
++namespace aurora::webgpu {
++struct TextureWithSampler;
++}
++
++namespace aurora::gfx::detail {
++struct FramePacket;
++struct RenderPass;
++} // namespace aurora::gfx::detail
++
++namespace aurora::gfx::stereo {
++
++// Render worker, at the start of a frame's encoding: whether its left eye is shifted.
++void begin_frame() noexcept;
++// This frame's draws are encoded per eye (its left eye is shifted).
++bool frame_active() noexcept;
++// The right eye's replay is being encoded (passes skip their readbacks and GPU timing).
++bool replaying() noexcept;
++
++// render_pass: a pass begins, and its viewport is set; the draws that follow carry draw_word().
++void begin_pass(const detail::RenderPass& pass) noexcept;
++void set_viewport(float width, float height) noexcept;
++void end_pass() noexcept;
++// The value for DrawImmediateData::_pad: the eye's shift and the focus (two snorm16), 0 for none.
++uint32_t draw_word() noexcept;
++
++// Game thread (or the GX FIFO worker), before gfx::end_frame: whether this frame may be shown in
++// stereo (nothing is drawn over it that has to be in both eyes alike, such as ImGui).
++void request(bool stereo) noexcept;
++bool take_request() noexcept;
++
++// Render worker, in the end of a frame (encoding.cpp): copies the left eye's picture aside and
++// encodes the frame again for the right eye. Afterwards presented() is true until the next frame.
++void encode_right_eye(wgpu::CommandEncoder& cmd, detail::FramePacket& frame);
++void set_presented(bool stereo) noexcept;
++bool presented() noexcept;
++// The left eye's picture of the last stereo frame (the present source's size and format).
++const webgpu::TextureWithSampler& left_eye() noexcept;
++
++// The eye being encoded, for the replay (encoding.cpp).
++void set_eye(int eye) noexcept;
++void copy_left_eye(wgpu::CommandEncoder& cmd);
++void shutdown() noexcept;
++
++} // namespace aurora::gfx::stereo
+diff --git a/lib/gx/pipeline.cpp b/lib/gx/pipeline.cpp
+index aaf7c60..9853d58 100644
+--- a/lib/gx/pipeline.cpp
++++ b/lib/gx/pipeline.cpp
+@@ -1,6 +1,8 @@
+ #include "pipeline.hpp"
+ 
++#include "../gfx/census.hpp"
+ #include "../gfx/encoding.hpp"
++#include "../gfx/stereo.hpp"
+ #include "../gfx/resources.hpp"
+ #include "../gfx/pipeline_cache.hpp"
+ #include "../gfx/resource_cache.hpp"
+@@ -63,7 +65,15 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+     return;
+   }
+   const auto& resources = gfx::detail::resources();
+-  pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
++  // Stereoscopic 3D (patch 0024): the eye's shift and focus in the free immediate word, which the
++  // census uses instead when it counts fragments.
++  if (const uint32_t stereoWord = gfx::stereo::draw_word(); stereoWord != 0 && !gfx::census::counters_enabled()) {
++    auto immediates = data.immediateData;
++    immediates._pad = stereoWord;
++    pass.SetImmediates(0, &immediates, sizeof(immediates));
++  } else {
++    pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
++  }
+   const std::array offsets{data.uniformRange.offset};
+   pass.SetBindGroup(1, resources.uniformBindGroup, offsets.size(), offsets.data());
+   if (data.bindGroups.textureBindGroup) {
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+index 645fe65..e6a950d 100644
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -1075,6 +1075,17 @@ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlph
+         "\n    let clip_base = select(clip_a, clip_b, use_b);"
+         "\n    out.pos = vec4f(clip_base.xy + offset_ndc * clip_base.w, clip_base.zw);";
+   }
++  // Stereoscopic 3D (patch 0024, gfx/stereo.hpp): the eye's shift (x) and focus (y, in units of
++  // 16384) in imm._pad, 0 for a draw drawn as recorded. Only perspective projections (w = -z, the
++  // projection's last column not (0, 0, 0, 1)) move: what is at the focus depth stays, what is far
++  // moves by the shift. The census uses imm._pad for its own counting.
++  if (!gfx::census::counters_enabled()) {
++    vtxXfrAttrsPre +=
++        "\n    if (imm._pad != 0u && ubuf.proj[3].z != 0.0) {"
++        "\n        let eye = unpack2x16snorm(imm._pad);"
++        "\n        out.pos.x += eye.x * (out.pos.w - eye.y * 16384.0);"
++        "\n    }";
++  }
+   vtxXfrAttrsPre += fmt::format(
+       "\n    let nrm_tmp = vec4f({}, 0.0) * ubuf.nrm_mtx[in_pnmtxidx];"
+       "\n    let mv_nrm = select(nrm_tmp, normalize(nrm_tmp), dot(nrm_tmp, nrm_tmp) > 1e-10);",
+diff --git a/lib/imgui.cpp b/lib/imgui.cpp
+index 07a0ec1..cfe4faa 100644
+--- a/lib/imgui.cpp
++++ b/lib/imgui.cpp
+@@ -208,6 +208,10 @@ DrawData freeze() noexcept {
+   ImGui::Render();
+ 
+   auto* data = ImGui::GetDrawData();
++  // Nothing drawn: an empty DrawData (patch 0024; the XR present shows such a frame in stereo).
++  if (data == nullptr || data->TotalVtxCount == 0) {
++    return {};
++  }
+   data->FramebufferScale = ImGui::GetIO().DisplayFramebufferScale;
+   auto frozen = std::make_shared<DrawData::Impl>();
+   frozen->drawData = *data;
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+index 170b316..dda881a 100644
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -18,6 +18,10 @@ bool g_supported = false;
+ 
+ namespace {
+ std::atomic_bool g_enabled{false};
++// Stereoscopic 3D (patch 0024)
++std::atomic_bool g_stereo{false};
++std::atomic<float> g_stereoStrength{0.012f};
++std::atomic<float> g_stereoFocus{600.f};
+ 
+ #ifdef __ANDROID__
+ Module Log("aurora::xr");
+@@ -41,6 +45,7 @@ int g_writing = -1;   // render worker: begun, not yet ended
+ int g_latest = -1;    // published, not yet taken
+ int g_latestFd = -1;  // its sync file
+ int g_reading = -1;   // taken, not yet done
++bool g_latestSideBySide = false, g_latestStereo = false;  // patch 0024
+ uint32_t g_serial = 0;
+ bool g_failed = false;  // creating the buffers failed: the surface for good
+ 
+@@ -159,7 +164,7 @@ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept {
+ #endif
+ }
+ 
+-void end() noexcept {
++void end(bool sideBySide, bool stereo) noexcept {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+   if (g_writing < 0) {
+@@ -187,11 +192,20 @@ void end() noexcept {
+   }
+   g_latest = g_writing;
+   g_latestFd = fd;
++  g_latestSideBySide = sideBySide;
++  g_latestStereo = stereo;
+   g_writing = -1;
+   ++g_serial;
++#else
++  (void)sideBySide;
++  (void)stereo;
+ #endif
+ }
+ 
++bool stereo_wanted() noexcept { return g_stereo.load(std::memory_order_relaxed) && active(); }
++float stereo_strength() noexcept { return g_stereoStrength.load(std::memory_order_relaxed); }
++float stereo_focus() noexcept { return g_stereoFocus.load(std::memory_order_relaxed); }
++
+ void shutdown() noexcept {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+@@ -209,6 +223,12 @@ void aurora_xr_present_enable(bool enable) { g_enabled.store(enable); }
+ 
+ bool aurora_xr_present_supported(void) { return g_supported; }
+ 
++void aurora_xr_set_stereo(bool enable, float strength, float focus) {
++  g_stereoStrength.store(strength);
++  g_stereoFocus.store(focus);
++  g_stereo.store(enable);
++}
++
+ bool aurora_xr_present_take(AuroraXrFrame* out) {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+@@ -220,6 +240,8 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+   out->width = g_width;
+   out->height = g_height;
+   out->serial = g_serial;
++  out->sideBySide = g_latestSideBySide;
++  out->stereo = g_latestStereo;
+   g_reading = g_latest;
+   g_latest = g_latestFd = -1;
+   return true;
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+index 241eaf2..fd76b5b 100644
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -18,9 +18,15 @@ bool active() noexcept;
+ // On the render worker: a target of the given size to draw the frame into, or a null view (the
+ // frame then goes to the surface as usual). Each begin() is followed by end() after the submit.
+ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept;
+-// On the render worker, after the queue submit: publishes the frame to the XR layer.
+-void end() noexcept;
++// On the render worker, after the queue submit: publishes the frame to the XR layer. sideBySide:
++// the buffer is two eyes wide (patch 0024); stereo: both halves hold this frame's eyes.
++void end(bool sideBySide = false, bool stereo = false) noexcept;
+ // Drops the buffers (device shutdown).
+ void shutdown() noexcept;
+ 
++// Stereoscopic 3D settings (patch 0024, aurora_xr_set_stereo): wanted only while active().
++bool stereo_wanted() noexcept;
++float stereo_strength() noexcept;
++float stereo_focus() noexcept;
++
+ } // namespace aurora::webgpu::xr_present

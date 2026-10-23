@@ -69,6 +69,10 @@ struct Settings {
     float height = 0.0f;     // m above eye height
     bool passthrough = true; // the room around the screen instead of black
     int refresh = 120;       // Hz, the headset's nearest at or below; 120 shows 30 and 60 fps evenly
+    // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
+    bool stereo = true;
+    float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
+    float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen
 };
 
 const char kDefaultSettings[] =
@@ -79,7 +83,12 @@ const char kDefaultSettings[] =
     "width = 4.5\n"
     "height = 0.0\n"
     "passthrough = 1\n"
-    "refresh = 120\n";
+    "refresh = 120\n"
+    "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
+    "# stereo_focus = the distance in the game that stays on the screen (100-3000).\n"
+    "stereo = 1\n"
+    "stereo_strength = 0.012\n"
+    "stereo_focus = 600\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
@@ -89,6 +98,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "height")) s.height = clampf(f, -10.0f, 10.0f);
     else if (!strcmp(key, "passthrough")) s.passthrough = on;
     else if (!strcmp(key, "refresh")) s.refresh = int(f);
+    else if (!strcmp(key, "stereo")) s.stereo = on;
+    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.1f);
+    else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 16000.0f);
 }
 
 // ---- State ---------------------------------------------------------------------------------------
@@ -132,6 +144,7 @@ struct Xr {
     std::vector<GLuint> fbos;
     uint32_t screenW = 0, screenH = 0;
     bool srgb = false, haveScreen = false;
+    bool sideBySide = false, stereoFrame = false;  // the swapchain's picture: two eyes wide, both eyes in it
     GLuint copyProg = 0;
     GLint copyULinear = -1;
     std::vector<Cached> cache;
@@ -220,8 +233,11 @@ void readSettings(bool force) {
     }
     fclose(f);
     s.settings = next;
-    xrlog("settings: screen %.1f m wide, %.1f m away, %.1f m up; passthrough %s; refresh %d Hz", next.width,
-          next.distance, next.height, next.passthrough ? "on" : "off", next.refresh);
+    aurora_xr_set_stereo(next.stereo, next.stereoStrength, next.stereoFocus);
+    xrlog("settings: screen %.1f m wide, %.1f m away, %.1f m up; passthrough %s; refresh %d Hz; 3D %s "
+          "(strength %.3f, focus %.0f)",
+          next.width, next.distance, next.height, next.passthrough ? "on" : "off", next.refresh,
+          next.stereo ? "on" : "off", next.stereoStrength, next.stereoFocus);
 }
 
 // ---- Instance (on the game's thread, before Aurora) ----------------------------------------------
@@ -848,6 +864,10 @@ bool copyNewestFrame() {
         aurora_xr_present_done();
     }
     if (copied) {
+        if (f.stereo != s.stereoFrame || f.sideBySide != s.sideBySide)
+            xrlog("picture: %s", f.stereo ? "3D (one eye per half)" : f.sideBySide ? "flat (left half, a menu is open)" : "flat");
+        s.sideBySide = f.sideBySide;
+        s.stereoFrame = f.stereo;
         s.haveScreen = true;
         if (++s.frames == 1 || s.frames % 1800 == 0)
             xrlog("frame %u from Aurora (serial %u, %ux%u)", s.frames, f.serial, f.width, f.height);
@@ -866,24 +886,34 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[2];
+    const XrCompositionLayerBaseHeader* layers[3];
     uint32_t layerCount = 0;
     XrCompositionLayerPassthroughFB room{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
     if (s.frame.shouldRender && updatePassthrough()) {  // the room first, the screen over it
         room.layerHandle = s.passthroughLayer;
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&room;
     }
-    XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    // The screen: one quad for both eyes, or in 3D one per eye over its half of the picture, at the
+    // same place, so each eye sees its own picture of the scene.
+    XrCompositionLayerQuad quads[2];
     if (screen) {
         const Settings& st = s.settings;
-        quad.space = s.space;
-        quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-        quad.subImage.swapchain = s.swapchain;
-        quad.subImage.imageRect = {{0, 0}, {int32_t(s.screenW), int32_t(s.screenH)}};
-        quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
-        quad.pose.position = {0.0f, st.height, -st.distance};
-        quad.size = {st.width, st.width * float(s.screenH) / float(s.screenW)};
-        layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
+        const int32_t eyeW = int32_t(s.sideBySide ? s.screenW / 2 : s.screenW);
+        const int eyes = s.stereoFrame ? 2 : 1;
+        for (int eye = 0; eye < eyes; eye++) {
+            XrCompositionLayerQuad& quad = quads[eye];
+            quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+            quad.space = s.space;
+            quad.eyeVisibility = eyes == 1 ? XR_EYE_VISIBILITY_BOTH
+                                 : eye == 0 ? XR_EYE_VISIBILITY_LEFT
+                                            : XR_EYE_VISIBILITY_RIGHT;
+            quad.subImage.swapchain = s.swapchain;
+            quad.subImage.imageRect = {{eye * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+            quad.pose.position = {0.0f, st.height, -st.distance};
+            quad.size = {st.width, st.width * float(s.screenH) / float(eyeW)};
+            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
+        }
     }
     XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
     ei.displayTime = s.frame.predictedDisplayTime;
