@@ -13,6 +13,9 @@ typedef struct _GXTlutObj GXTlutObj;
 #endif
 typedef struct Vec Vec;
 struct ResTIMG;
+#if TARGET_PC
+#include "pc/pc_vr.h"
+#endif
 
 struct mDoLib_clipper {
     static void changeFar(f32 far) {
@@ -21,14 +24,30 @@ struct mDoLib_clipper {
     }
 
     static BOOL clip(const Mtx m, Vec* max, Vec* min) {
+#if TARGET_PC
+        // the diorama in the Meta Quest (pc_vr.h): what is on the table, not in the camera's view
+        if (int r = pc_vr_clip_box(m, max, min); r >= 0) {
+            return r;
+        }
+#endif
         return mClipper.clip(m, max, min);
     }
 
     static BOOL clip(const Mtx m, Vec center, f32 radius) {
+#if TARGET_PC
+        if (int r = pc_vr_clip_sphere(m, &center, radius); r >= 0) {
+            return r;
+        }
+#endif
         return mClipper.clip(m, center, radius);
     }
-    
+
     static BOOL clip(J3DModel* model) {
+#if TARGET_PC
+        if (int r = pc_vr_clip_model(model); r >= 0) {
+            return r;
+        }
+#endif
         return mClipper.clipByBox(model);
     }
 

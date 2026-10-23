@@ -28,6 +28,11 @@
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_view.h"
+#include "JSystem/J3DGraphAnimator/J3DModel.h"
+#include "JSystem/J3DGraphAnimator/J3DModelData.h"
+#include "JSystem/J3DGraphBase/J3DSys.h"
+
+#include <algorithm>
 
 #include <aurora/xr.h>
 #include <dolphin/gx/GXAurora.h>
@@ -101,6 +106,18 @@ struct State {
     Mtx delta, skyDelta;
     f32 projFrom[6], projTo[6];
     uint64_t lastLogNs = 0;
+    // the table, for the mask and the culling: table coordinates (x, z within +-1 over the top, y 0
+    // on it, -1 at the cut below) from the world, and the scale
+    bool tableValid = false;
+    M4 tableFromWorld;
+    float k = 0.0f;  // metres per game unit
+    float halfX = 0.5f, halfZ = 0.35f, below = 0.175f;
+    // culling: table from the current camera's view (redone when the view changes)
+    Mtx cullView;
+    M4 tableFromView;
+    bool cullViewValid = false;
+    unsigned long cullTests = 0, cullHidden = 0;
+    uint64_t cullLogNs = 0;
 };
 State s;
 
@@ -206,6 +223,71 @@ void toMtx(const M4& a, Mtx out) {
         for (int j = 0; j < 4; j++) out[i][j] = a.m[i][j];
 }
 
+// Table from stage: its middle at the anchor (table_distance ahead, table_height below the eyes).
+M4 tableFromStage(const WqXrTable& t) {
+    M4 m = identity();
+    m.m[0][0] = 1.0f / s.halfX;
+    m.m[1][1] = 1.0f / s.below;
+    m.m[1][3] = t.height / s.below;
+    m.m[2][2] = 1.0f / s.halfZ;
+    m.m[2][3] = t.distance / s.halfZ;
+    return m;
+}
+
+// Stage from head: the head's pose (the inverse of headFromStage)
+M4 stageFromHead(const WqXrHead& h) {
+    const float x = h.rot[0], y = h.rot[1], z = h.rot[2], w = h.rot[3];
+    M4 m = identity();
+    const float R[3][3] = {{1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)},
+                           {2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)},
+                           {2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)}};
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) m.m[i][j] = R[i][j];
+        m.m[i][3] = h.pos[i];
+    }
+    return m;
+}
+
+void xform(const M4& a, const float p[3], float out[3]) {
+    for (int r = 0; r < 3; r++) out[r] = a.m[r][0] * p[0] + a.m[r][1] * p[1] + a.m[r][2] * p[2] + a.m[r][3];
+}
+
+// The culling's table from the current camera view (dComIfGd_getView, set by camera_draw before the
+// actors draw), false when the diorama is off.
+bool cullSetup() {
+    if (!s.tableValid) return false;
+    view_class* view = dComIfGd_getView();
+    if (view == nullptr) return false;
+    if (!s.cullViewValid || memcmp(s.cullView, view->mViewMtx, sizeof(Mtx)) != 0) {
+        memcpy(s.cullView, view->mViewMtx, sizeof(Mtx));
+        s.tableFromView = mul(s.tableFromWorld, rigidInverse(view->mViewMtx));
+        s.cullViewValid = true;
+    }
+    return true;
+}
+
+// A sphere (view space, game units) against the table's box: 1 culled, 0 drawn. The margin keeps
+// what the rig is about to bring onto the table; nothing above the table is cut.
+int cullSphereView(const float p[3], float radius) {
+    float t[3];
+    xform(s.tableFromView, p, t);
+    const float r = radius * s.k;
+    const float margin = 0.15f;
+    s.cullTests++;
+    const bool out = std::fabs(t[0]) - r / s.halfX > 1.0f + margin || std::fabs(t[2]) - r / s.halfZ > 1.0f + margin ||
+                     t[1] + r / s.below < -1.0f - margin;
+    if (out) s.cullHidden++;
+    const uint64_t now = nowNs();
+    if (now - s.cullLogNs > 1000000000ull) {
+        if (s.cullLogNs != 0)
+            pc::writef(STDERR_FILENO, "[vr] culling by the table: %lu tests, %lu culled in the last second\n",
+                       s.cullTests, s.cullHidden);
+        s.cullTests = s.cullHidden = 0;
+        s.cullLogNs = now;
+    }
+    return out ? 1 : 0;
+}
+
 } // namespace
 
 bool pc_vr_view_begin(view_class* view) {
@@ -223,12 +305,24 @@ bool pc_vr_view_begin(view_class* view) {
             s.wasOn = false;
             s.rigValid = false;
         }
+        s.tableValid = false;
         return false;
     }
     updateRig(player->current.pos, view->mViewMtx, table.followYaw);
 
+    // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
+    s.halfX = 0.5f * table.width;
+    s.halfZ = 0.5f * table.depth;
+    s.below = 0.25f * std::min(table.width, table.depth);
+    s.k = table.width / (table.span * kUnitsPerMetre);
+    const M4 stage = stageFromWorld(table);
+    const M4 tableStage = tableFromStage(table);
+    s.tableFromWorld = mul(tableStage, stage);
+    s.tableValid = true;
+    s.cullViewValid = false;
+
     // C = V_head * Stage * World * V_game^-1: the game camera's view space to the head's (metres)
-    const M4 c = mul(mul(headFromStage(head), stageFromWorld(table)), rigidInverse(view->mViewMtx));
+    const M4 c = mul(mul(headFromStage(head), stage), rigidInverse(view->mViewMtx));
     toMtx(c, s.delta);
     // the frustum both eyes are drawn with
     Mtx44 p;
@@ -237,7 +331,17 @@ bool pc_vr_view_begin(view_class* view) {
     projParams(p, s.projTo);
     // each eye: the head moved by half the distance between the eyes along its x (the right eye +x):
     // clip.x shifts by -P00 * ipd / 2 for the right eye, the opposite for the left
-    aurora_xr_set_eye_shift(true, 0.0f, -p[0][0] * head.ipd * 0.5f);
+    const float eyeShift = -p[0][0] * head.ipd * 0.5f;
+    aurora_xr_set_eye_shift(true, 0.0f, eyeShift);
+    // the eyes' mask (Aurora patch 0026): table from head, the edges' fade in table units
+    {
+        const M4 tableHead = mul(tableStage, stageFromHead(head));
+        float tfh[12];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 4; j++) tfh[i * 4 + j] = tableHead.m[i][j];
+        const float fade[3] = {table.fade / s.halfX, table.fade / s.halfZ, table.fade / s.below};
+        aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
+    }
     aurora_xr_set_frame_info(head.tag, true);
     AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
     // the sky's things built around the camera's eye: squeezed to nothing (C = 0)
@@ -281,11 +385,59 @@ void pc_vr_sky_end(void) {
     s.skyOn = false;
 }
 
+int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius) {
+    if (!cullSetup()) return -1;
+    Vec p;
+    MTXMultVec(m, center, &p);
+    const float v[3] = {p.x, p.y, p.z};
+    return cullSphereView(v, radius);
+}
+
+int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min) {
+    if (!cullSetup()) return -1;
+    // the box's middle and half diagonal, scaled as the matrix scales (its largest column)
+    Vec c = {0.5f * (max->x + min->x), 0.5f * (max->y + min->y), 0.5f * (max->z + min->z)};
+    const float dx = max->x - min->x, dy = max->y - min->y, dz = max->z - min->z;
+    float scale = 0.0f;
+    for (int col = 0; col < 3; col++)
+        scale = std::max(scale, std::sqrt(m[0][col] * m[0][col] + m[1][col] * m[1][col] + m[2][col] * m[2][col]));
+    Vec p;
+    MTXMultVec(m, &c, &p);
+    const float v[3] = {p.x, p.y, p.z};
+    return cullSphereView(v, 0.5f * std::sqrt(dx * dx + dy * dy + dz * dz) * scale);
+}
+
+int pc_vr_clip_model(J3DModel* model) {
+    if (!cullSetup()) return -1;
+    // as J3DUClipper::clipByBox, each joint's box against the table instead of the camera's view
+    int hidden = 0;
+    J3DModelData* data = model->getModelData();
+    for (u16 i = 0; i < data->getJointNum(); i++) {
+        J3DJoint* joint = data->getJointNodePointer(i);
+        if (joint->getKind() != 0) continue;
+        Mtx mtx;
+        MTXConcat(j3dSys.getViewMtx(), model->getAnmMtx(i), mtx);
+        const bool out = pc_vr_clip_box(mtx, joint->getMax(), joint->getMin()) == 1;
+        for (J3DMaterial* mat = joint->getMesh(); mat != nullptr; mat = mat->getNext()) {
+            if (out) {
+                mat->getShape()->hide();
+                hidden++;
+            } else {
+                mat->getShape()->show();
+            }
+        }
+    }
+    return hidden;
+}
+
 #else
 
 bool pc_vr_view_begin(view_class*) { return false; }
 void pc_vr_view_end(void) {}
 void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
+int pc_vr_clip_sphere(const f32[3][4], const Vec*, f32) { return -1; }
+int pc_vr_clip_box(const f32[3][4], const Vec*, const Vec*) { return -1; }
+int pc_vr_clip_model(J3DModel*) { return -1; }
 
 #endif

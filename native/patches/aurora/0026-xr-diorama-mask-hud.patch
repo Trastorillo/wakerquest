@@ -1,0 +1,715 @@
+XR presentation: the diorama's eyes masked by the table, its HUD on a panel of its own
+
+For WakerQuest's diorama (patch 0025):
+- Draws are marked at record time when the view delta (patch 0019) applies to them (DrawData.worldView,
+  the world). In a diorama frame the eyes draw the world alone; after the right eye a third replay
+  draws everything else (the HUD, the 2D, the menus) over a transparent EFB (stereo::encode_hud: its
+  clears transparent, no texture copies, resolves, snapshots or encoder tasks), for a panel.
+- Each eye is masked right after it is drawn, while its depth is in the EFB (stereo::encode_mask): a
+  pass puts each pixel's point in the table's space (aurora_xr_set_diorama_mask: table from head,
+  the frustum, the eye's shift, the fade) and writes alpha 0 outside the table's box (x and z within
+  +-1, above the cut at -1), fading at its edges.
+- The XR buffer is three eyes wide: the masked left and right eyes and the HUD (AuroraXrFrame.hud),
+  copied with their alpha (straight). ImGui goes into a texture of the window's size and over the
+  HUD's third. A diorama frame is always in stereo.
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+index 6f8837b..e4f3024 100644
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -36,8 +36,20 @@ typedef struct AuroraXrFrame {
+    * for a projection layer. */
+   bool diorama;
+   uint32_t tag;
++  /* Patch 0026: the diorama's buffer is three eyes wide: left, right, and the HUD (everything that
++   * is not the world: the 2D, the menus, ImGui) over a transparent background, for a panel. The eyes
++   * carry the table's mask in their alpha (straight, not premultiplied). */
++  bool hud;
+ } AuroraXrFrame;
+ 
++/* Patch 0026, from the game thread with the frame info: the diorama's table for the eyes' mask.
++ * tableFromHead (row-major 3x4) maps the head's space (metres, the eyes' midpoint) to the table's:
++ * x and z within +-1 over its top, y 0 on it and -1 at the cut below; proj is the frustum both eyes
++ * are drawn with (GXSetProjection's perspective parameters); eyeShift the right eye's clip shift b;
++ * fade the edges' fade in table units (x, z, y). */
++void aurora_xr_set_diorama_mask(const float tableFromHead[12], const float proj[6], float eyeShift,
++                                const float fade[3]);
++
+ /* Patch 0025, from the game thread while it records a frame: the head pose it is drawn for (a tag
+  * the XR layer gave out) and whether it is the diorama. Taken by the frame's present. */
+ void aurora_xr_set_frame_info(uint32_t tag, bool diorama);
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index ffd454f..6da4b1a 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -358,7 +358,8 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   // stereo when nothing is drawn over it (ImGui, the options menu, would be in one eye only); the
+   // render worker then encodes it again for the right eye (gfx/stereo.hpp).
+   const bool sideBySide = xr && webgpu::xr_present::stereo_wanted();
+-  gfx::stereo::request(sideBySide && !imguiDrawData);
++  // The diorama (patch 0026) is always in stereo: ImGui goes to the HUD's panel.
++  gfx::stereo::request(sideBySide && (!imguiDrawData || xrDiorama));
+ 
+   wgpu::BindGroup rmlBindGroup;
+   bool rmlOverlay = false;
+@@ -377,13 +378,19 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+     // XR presentation (patch 0023): one of the XR layer's buffers; the surface when that fails.
+-    const uint32_t xrBufferWidth = sideBySide ? xrWidth * 2 : xrWidth;
++    // patch 0026: the diorama's buffers are three wide (left, right, the HUD's panel)
++    const uint32_t xrBufferWidth = sideBySide ? xrWidth * (xrDiorama ? 3 : 2) : xrWidth;
+     if (xr) {
+       currentView = webgpu::xr_present::begin(xrBufferWidth, xrHeight);
+     }
+     const bool xrFrame = static_cast<bool>(currentView);
+     // Patch 0024: both eyes side by side (the left from its copy, the right from the EFB)
+-    const bool xrStereo = xrFrame && sideBySide && gfx::stereo::presented() && gfx::stereo::left_eye().view;
++    const bool xrStereo = xrFrame && sideBySide && gfx::stereo::presented() && !gfx::stereo::frame_diorama() &&
++                          gfx::stereo::left_eye().view;
++    // Patch 0026: the diorama: the masked eyes and the HUD (the EFB after its replay)
++    const bool xrDioramaFull = xrFrame && sideBySide && xrDiorama && gfx::stereo::presented() &&
++                               gfx::stereo::frame_diorama() && gfx::stereo::masked_eye(0).view &&
++                               gfx::stereo::masked_eye(1).view;
+     const auto& viewport = xrFrame ? xrViewport : surfaceViewport;
+     const uint32_t targetWidth = xrFrame ? xrBufferWidth : webgpu::g_graphicsConfig.surfaceConfiguration.width;
+     const uint32_t targetHeight = xrFrame ? xrHeight : webgpu::g_graphicsConfig.surfaceConfiguration.height;
+@@ -402,7 +409,56 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+     }
+ 
+     const bool canPresent = xrFrame || (currentTexture && currentView);
+-    if (canPresent) {
++    if (canPresent && xrDioramaFull) {
++      // ImGui (the options menu) into a texture of the window's size: its scissors are the window's
++      static webgpu::TextureWithSampler s_imguiTarget;
++      bool imguiDrawn = false;
++      const uint32_t winW = webgpu::g_graphicsConfig.surfaceConfiguration.width;
++      const uint32_t winH = webgpu::g_graphicsConfig.surfaceConfiguration.height;
++      if (imguiDrawData && winW > 0 && winH > 0) {
++        if (!s_imguiTarget.texture || s_imguiTarget.size.width != winW || s_imguiTarget.size.height != winH) {
++          s_imguiTarget = webgpu::create_render_texture(winW, winH, false);
++        }
++        const wgpu::RenderPassColorAttachment attachment{
++            .view = s_imguiTarget.view,
++            .loadOp = wgpu::LoadOp::Clear,
++            .storeOp = wgpu::StoreOp::Store,
++            .clearValue = {0.0, 0.0, 0.0, 0.0},
++        };
++        const wgpu::RenderPassDescriptor desc{.label = "ImGui (XR HUD)", .colorAttachmentCount = 1,
++                                              .colorAttachments = &attachment};
++        const auto pass = encoder.BeginRenderPass(&desc);
++        pass.SetViewport(0.f, 0.f, static_cast<float>(winW), static_cast<float>(winH), 0.f, 1.f);
++        imgui::render(pass, imguiDrawData);
++        pass.End();
++        imguiDrawn = true;
++      }
++      // left | right | HUD, alpha kept (the eyes' mask; the HUD's transparent background)
++      const wgpu::RenderPassColorAttachment attachment{
++          .view = currentView,
++          .loadOp = wgpu::LoadOp::Clear,
++          .storeOp = wgpu::StoreOp::Store,
++          .clearValue = {0.0, 0.0, 0.0, 0.0},
++      };
++      const wgpu::RenderPassDescriptor desc{.label = "XR diorama blit", .colorAttachmentCount = 1,
++                                            .colorAttachments = &attachment};
++      const auto pass = encoder.BeginRenderPass(&desc);
++      pass.SetPipeline(webgpu::g_CopyPremultipliedAlphaPipeline);
++      const auto region = [&](const webgpu::TextureWithSampler& source, int index) {
++        auto vp = viewport;
++        vp.left += static_cast<float>(xrWidth) * static_cast<float>(index);
++        pass.SetBindGroup(0, webgpu::create_copy_bind_group(source), 0, nullptr);
++        set_present_viewport(pass, vp, targetWidth, targetHeight);
++        pass.Draw(3);
++      };
++      region(gfx::stereo::masked_eye(0), 0);
++      region(gfx::stereo::masked_eye(1), 1);
++      region(webgpu::present_source(), 2);
++      if (imguiDrawn) {
++        region(s_imguiTarget, 2);
++      }
++      pass.End();
++    } else if (canPresent) {
+       wgpu::BindGroup presentBindGroup;
+       if (rmlBindGroup && !rmlOverlay) {
+         presentBindGroup = rmlBindGroup;
+@@ -482,7 +538,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+     webgpu::gpu_prof::after_submit();
+     if (xrFrame) {
+       // XR presentation (patch 0023): the XR layer shows it; nothing to present here.
+-      webgpu::xr_present::end(sideBySide, xrStereo, xrDiorama, xrTag);
++      webgpu::xr_present::end(sideBySide, xrStereo || xrDioramaFull, xrDiorama, xrTag);
+       gfx::after_present();
+     } else if (canPresent && g_surface) {
+       ZoneScopedN("Present");
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+index f522df1..c114e2a 100644
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -237,9 +237,14 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+     return;
+   }
+ 
++  // The diorama's HUD replay (patch 0026) draws over a transparent EFB: its clears are transparent.
++  const bool hud = stereo::hud_replay();
+   std::array<wgpu::RenderPassColorAttachment, MaxColorAttachments> attachments{};
+   for (uint32_t i = 0; i < passInfo.colorAttachmentCount; ++i) {
+-    const auto& source = passInfo.colorAttachments[i];
++    auto source = passInfo.colorAttachments[i];
++    if (hud) {
++      source.clearValue = Vec4<float>{0.f, 0.f, 0.f, 0.f};
++    }
+     attachments[i] = {
+         .view = source.view,
+         .resolveTarget = source.resolveView,
+@@ -303,6 +308,11 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+     depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, snapshotSize, passInfo.msaaSamples);
+   }
+ 
++  // The HUD replay writes no texture: they hold the eyes' pictures (and may be used by later frames).
++  if (hud) {
++    return;
++  }
++
+   if (passInfo.resolveTarget) {
+     const auto& dstSize = passInfo.resolveTarget->size;
+     const bool needsConversion = tex_copy_conv::needs_conversion(passInfo.resolveFormat);
+@@ -486,7 +496,12 @@ namespace stereo {
+ void encode_right_eye(wgpu::CommandEncoder& cmd, FramePacket& frame) {
+   ZoneScoped;
+   const webgpu::gpu_prof::Zone zone{cmd, "Right eye"};
+-  copy_left_eye(cmd);
++  // the diorama (patch 0026): the left eye masked while its depth is in the EFB; else its copy
++  if (frame_diorama()) {
++    encode_mask(cmd, 0);
++  } else {
++    copy_left_eye(cmd);
++  }
+   set_eye(1);
+   for (const auto& op : frame.ops) {
+     switch (op.type) {
+@@ -521,6 +536,24 @@ void encode_right_eye(wgpu::CommandEncoder& cmd, FramePacket& frame) {
+     }
+   }
+   set_eye(-1);
++  if (frame_diorama()) {
++    encode_mask(cmd, 1);
++  }
++}
++
++// Patch 0026: the diorama's HUD, everything that is not the world, over a transparent EFB. No
++// texture copies nor encoder tasks: the passes alone, which write no texture (render()).
++void encode_hud(wgpu::CommandEncoder& cmd, FramePacket& frame) {
++  ZoneScoped;
++  const webgpu::gpu_prof::Zone zone{cmd, "HUD"};
++  clear_efb(cmd);
++  set_hud_replay(true);
++  for (const auto& op : frame.ops) {
++    if (op.type == FrameOpType::RenderPass && op.renderPass != nullptr) {
++      render(cmd, frame, *op.renderPass, op.index);
++    }
++  }
++  set_hud_replay(false);
+ }
+ } // namespace stereo
+ 
+diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
+index aff3810..9d17c64 100644
+--- a/lib/gfx/frame.cpp
++++ b/lib/gfx/frame.cpp
+@@ -722,6 +722,9 @@ void end_frame(EndFrameCallback callback) {
+     const bool stereoFrame = stereoRequested && stereo::frame_active();
+     if (stereoFrame) {
+       stereo::encode_right_eye(encoder, packet);
++      if (stereo::frame_diorama()) {
++        stereo::encode_hud(encoder, packet); // patch 0026: the HUD's panel
++      }
+     }
+     stereo::set_presented(stereoFrame);
+     packet = {};
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+index 4464f7d..06875fc 100644
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -2,10 +2,12 @@
+ 
+ #include "frame_packet.hpp"
+ #include "recording.hpp"
++#include "../gx/gx.hpp"
+ #include "../webgpu/gpu.hpp"
+ #include "../webgpu/xr_present.hpp"
+ 
+ #include <algorithm>
++#include <array>
+ #include <atomic>
+ #include <cmath>
+ 
+@@ -21,6 +23,13 @@ bool g_efbPass = false;
+ float g_passWidth = 0.f, g_passHeight = 0.f;
+ uint32_t g_word = 0;
+ webgpu::TextureWithSampler g_left;
++// the diorama (patch 0026)
++bool g_frameDiorama = false;
++bool g_hudReplay = false;
++webgpu::TextureWithSampler g_masked[2];
++wgpu::RenderPipeline g_maskPipeline;
++wgpu::BindGroupLayout g_maskLayout;
++wgpu::Buffer g_maskUniform[2];
+ 
+ std::atomic_bool g_request{false};
+ 
+@@ -44,10 +53,26 @@ void begin_frame() noexcept {
+   g_b = webgpu::xr_present::stereo_b();
+   g_eye = g_frameActive ? -1 : 0;
+   g_replaying = false;
++  g_frameDiorama = g_frameActive && webgpu::xr_present::diorama_wanted();
++  g_hudReplay = false;
++}
++
++bool frame_diorama() noexcept { return g_frameDiorama; }
++bool hud_replay() noexcept { return g_hudReplay; }
++void set_hud_replay(bool on) noexcept {
++  g_hudReplay = on;
++  g_eye = on ? 0 : g_eye;
++}
++
++bool skip_draw(bool worldView) noexcept {
++  if (!g_frameDiorama) {
++    return false;
++  }
++  return g_hudReplay ? worldView : !worldView;
+ }
+ 
+ bool frame_active() noexcept { return g_frameActive; }
+-bool replaying() noexcept { return g_replaying; }
++bool replaying() noexcept { return g_replaying || g_hudReplay; }
+ 
+ void begin_pass(const detail::RenderPass& pass) noexcept {
+   const auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
+@@ -97,6 +122,247 @@ void set_presented(bool stereo) noexcept { g_presented = stereo; }
+ bool presented() noexcept { return g_presented; }
+ const webgpu::TextureWithSampler& left_eye() noexcept { return g_left; }
+ 
+-void shutdown() noexcept { g_left = {}; }
++namespace {
++// 4x4, row-major, column vectors
++struct M4 {
++  float m[4][4];
++};
++
++M4 mul(const M4& a, const M4& b) {
++  M4 r{};
++  for (int i = 0; i < 4; i++)
++    for (int j = 0; j < 4; j++)
++      for (int k = 0; k < 4; k++)
++        r.m[i][j] += a.m[i][k] * b.m[k][j];
++  return r;
++}
++
++// the inverse by cofactors (row-major in, row-major out); identity when singular
++M4 inverse(const M4& a) {
++  float in[16], o[16];
++  for (int i = 0; i < 16; i++) in[i] = a.m[i % 4][i / 4];  // column-major
++  const float* m = in;
++  o[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
++  o[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
++  o[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
++  o[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
++  o[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
++  o[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
++  o[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
++  o[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
++  o[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
++  o[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
++  o[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
++  o[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
++  o[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
++  o[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
++  o[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
++  o[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
++  const float det = m[0] * o[0] + m[1] * o[4] + m[2] * o[8] + m[3] * o[12];
++  M4 r{};
++  if (std::fabs(det) < 1e-30f) {
++    r.m[0][0] = r.m[1][1] = r.m[2][2] = r.m[3][3] = 1.f;
++    return r;
++  }
++  for (int i = 0; i < 16; i++) r.m[i % 4][i / 4] = o[i] / det;
++  return r;
++}
++
++struct MaskUniform {
++  float tableFromClip[16];  // column-major for WGSL
++  float fade[4];
++};
++
++constexpr const char* kMaskShader = R"(
++struct U {
++    table_from_clip: mat4x4f,
++    fade: vec4f,
++};
++@group(0) @binding(0) var<uniform> u: U;
++@group(0) @binding(1) var color_tex: texture_2d<f32>;
++@group(0) @binding(2) var depth_tex: texture_depth_2d;
++
++struct VertexOutput {
++    @builtin(position) pos: vec4f,
++    @location(0) uv: vec2f,
++};
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> VertexOutput {
++    var p = array<vec2f, 3>(vec2f(-1.0, 1.0), vec2f(-1.0, -3.0), vec2f(3.0, 1.0));
++    var t = array<vec2f, 3>(vec2f(0.0, 0.0), vec2f(0.0, 2.0), vec2f(2.0, 0.0));
++    var out: VertexOutput;
++    out.pos = vec4f(p[i], 0.0, 1.0);
++    out.uv = t[i];
++    return out;
++}
++
++// The eye's picture with the table's mask in its alpha: each pixel's point (from the depth) in the
++// table's space, opaque within the box (x and z within +-1, y above the cut at -1), fading at its edges.
++@fragment
++fn fs_main(in: VertexOutput) -> @location(0) vec4f {
++    let px = vec2i(in.pos.xy);
++    let c = textureLoad(color_tex, px, 0);
++    let d = textureLoad(depth_tex, px, 0);
++    let ndc = vec4f(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0, d, 1.0);
++    let h = u.table_from_clip * ndc;
++    let t = h.xyz / h.w;
++    let ax = (1.0 - abs(t.x)) / u.fade.x;
++    let az = (1.0 - abs(t.z)) / u.fade.y;
++    let ay = (t.y + 1.0) / u.fade.z;
++    let a = clamp(min(min(ax, az), ay), 0.0, 1.0);
++    return vec4f(c.rgb, select(a, 0.0, h.w <= 0.0));
++}
++)";
++
++void create_mask_pipeline() {
++  wgpu::ShaderSourceWGSL source{};
++  source.code = kMaskShader;
++  const wgpu::ShaderModuleDescriptor moduleDesc{.nextInChain = &source, .label = "XR diorama mask"};
++  const auto module = webgpu::g_device.CreateShaderModule(&moduleDesc);
++  const std::array entries{
++      wgpu::BindGroupLayoutEntry{
++          .binding = 0,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = sizeof(MaskUniform)},
++      },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 1,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                      .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 2,
++          .visibility = wgpu::ShaderStage::Fragment,
++          .texture = {.sampleType = wgpu::TextureSampleType::Depth, .viewDimension = wgpu::TextureViewDimension::e2D},
++      },
++  };
++  const wgpu::BindGroupLayoutDescriptor layoutDesc{.entryCount = entries.size(), .entries = entries.data()};
++  g_maskLayout = webgpu::g_device.CreateBindGroupLayout(&layoutDesc);
++  const wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{.bindGroupLayoutCount = 1, .bindGroupLayouts = &g_maskLayout};
++  const auto pipelineLayout = webgpu::g_device.CreatePipelineLayout(&pipelineLayoutDesc);
++  const wgpu::ColorTargetState target{.format = wgpu::TextureFormat::RGBA8Unorm, .writeMask = wgpu::ColorWriteMask::All};
++  const wgpu::FragmentState fragment{.module = module, .entryPoint = "fs_main", .targetCount = 1, .targets = &target};
++  const wgpu::RenderPipelineDescriptor desc{
++      .label = "XR diorama mask",
++      .layout = pipelineLayout,
++      .vertex = {.module = module, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = 1, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  g_maskPipeline = webgpu::g_device.CreateRenderPipeline(&desc);
++  for (auto& buffer : g_maskUniform) {
++    const wgpu::BufferDescriptor bufferDesc{
++        .label = "XR diorama mask uniform",
++        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
++        .size = sizeof(MaskUniform),
++    };
++    buffer = webgpu::g_device.CreateBuffer(&bufferDesc);
++  }
++}
++
++// Table from the eye's clip space: tableFromHead * (the eye's clip from head)^-1, the clip matrix as
++// Aurora's GX uniforms build it (fill_uniform: the projection's depth row reversed) plus the eye's shift.
++M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
++  const float* p = mk.proj;
++  const float shift = (eye == 0 ? -1.f : 1.f) * mk.eyeShift;
++  M4 clip{};
++  clip.m[0][0] = p[0];
++  clip.m[0][2] = p[1];
++  clip.m[0][3] = shift;
++  clip.m[1][1] = p[2];
++  clip.m[1][2] = p[3];
++  clip.m[2][2] = p[4];
++  clip.m[2][3] = p[5];
++  clip.m[3][2] = -1.f;
++  if constexpr (gx::UseReversedZ) {
++    for (int j = 0; j < 4; j++) clip.m[2][j] = -clip.m[2][j];
++  } else {
++    for (int j = 0; j < 4; j++) clip.m[2][j] += clip.m[3][j];
++  }
++  M4 table{};
++  for (int i = 0; i < 3; i++)
++    for (int j = 0; j < 4; j++) table.m[i][j] = mk.tableFromHead[i * 4 + j];
++  table.m[3][3] = 1.f;
++  return mul(table, inverse(clip));
++}
++} // namespace
++
++void clear_efb(wgpu::CommandEncoder& cmd) {
++  const wgpu::RenderPassColorAttachment color{
++      .view = webgpu::g_frameBuffer.view,
++      .loadOp = wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  };
++  const wgpu::RenderPassDepthStencilAttachment depth{
++      .view = webgpu::g_depthBuffer.view,
++      .depthLoadOp = wgpu::LoadOp::Clear,
++      .depthStoreOp = wgpu::StoreOp::Store,
++      .depthClearValue = gx::UseReversedZ ? 0.f : 1.f,
++  };
++  const wgpu::RenderPassDescriptor desc{
++      .label = "XR HUD clear",
++      .colorAttachmentCount = 1,
++      .colorAttachments = &color,
++      .depthStencilAttachment = &depth,
++  };
++  auto pass = cmd.BeginRenderPass(&desc);
++  pass.End();
++}
++
++void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
++  webgpu::xr_present::DioramaMask mk;
++  if (!webgpu::xr_present::diorama_mask(mk)) {
++    return;
++  }
++  if (!g_maskPipeline) {
++    create_mask_pipeline();
++  }
++  const auto& source = webgpu::present_source();
++  auto& target = g_masked[eye];
++  if (!target.texture || target.size.width != source.size.width || target.size.height != source.size.height) {
++    target = webgpu::create_render_texture(source.size.width, source.size.height, false);
++  }
++  const M4 m = table_from_clip(mk, eye);
++  MaskUniform u{};
++  for (int i = 0; i < 4; i++)
++    for (int j = 0; j < 4; j++) u.tableFromClip[j * 4 + i] = m.m[i][j];
++  u.fade[0] = std::max(mk.fade[0], 1e-3f);
++  u.fade[1] = std::max(mk.fade[1], 1e-3f);
++  u.fade[2] = std::max(mk.fade[2], 1e-3f);
++  webgpu::g_queue.WriteBuffer(g_maskUniform[eye], 0, &u, sizeof(u));
++  const std::array bindEntries{
++      wgpu::BindGroupEntry{.binding = 0, .buffer = g_maskUniform[eye], .size = sizeof(MaskUniform)},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = source.view},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = webgpu::g_depthBuffer.view},
++  };
++  const wgpu::BindGroupDescriptor bindDesc{.layout = g_maskLayout, .entryCount = bindEntries.size(), .entries = bindEntries.data()};
++  const auto bindGroup = webgpu::g_device.CreateBindGroup(&bindDesc);
++  const wgpu::RenderPassColorAttachment color{
++      .view = target.view,
++      .loadOp = wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  };
++  const wgpu::RenderPassDescriptor desc{.label = "XR diorama mask", .colorAttachmentCount = 1, .colorAttachments = &color};
++  auto pass = cmd.BeginRenderPass(&desc);
++  pass.SetPipeline(g_maskPipeline);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
++
++const webgpu::TextureWithSampler& masked_eye(int eye) noexcept { return g_masked[eye]; }
++
++void shutdown() noexcept {
++  g_left = {};
++  g_masked[0] = g_masked[1] = {};
++  g_maskPipeline = {};
++  g_maskLayout = {};
++  g_maskUniform[0] = g_maskUniform[1] = {};
++}
+ 
+ } // namespace aurora::gfx::stereo
+diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
+index 1483a5e..c2f8bfb 100644
+--- a/lib/gfx/stereo.hpp
++++ b/lib/gfx/stereo.hpp
+@@ -58,4 +58,20 @@ void set_eye(int eye) noexcept;
+ void copy_left_eye(wgpu::CommandEncoder& cmd);
+ void shutdown() noexcept;
+ 
++// The diorama (patch 0026). Its eyes draw the world alone (the draws the view delta applies to);
++// after the right eye a third replay draws everything else (the HUD, the 2D, the menus) over a
++// transparent EFB, for a panel of its own. Each eye's picture is masked right after it is drawn,
++// while its depth is in the EFB: alpha 0 outside the table's box, fading at its edges.
++bool frame_diorama() noexcept;
++bool hud_replay() noexcept;
++bool skip_draw(bool worldView) noexcept;
++void set_hud_replay(bool on) noexcept;
++// The EFB's colour (transparent) and depth cleared, before the HUD replay.
++void clear_efb(wgpu::CommandEncoder& cmd);
++// Eye 0 (left) or 1 (right): the EFB's picture with the table's mask in its alpha.
++void encode_mask(wgpu::CommandEncoder& cmd, int eye);
++const webgpu::TextureWithSampler& masked_eye(int eye) noexcept;
++// encoding.cpp: the HUD replay
++void encode_hud(wgpu::CommandEncoder& cmd, detail::FramePacket& frame);
++
+ } // namespace aurora::gfx::stereo
+diff --git a/lib/gx/command_processor.cpp b/lib/gx/command_processor.cpp
+index b7c1bcb..b20f2d5 100644
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -731,6 +731,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+       .indexCount = numIndices,
+       .instanceCount = instanceCount,
+       .dstAlpha = state.dstAlpha,
++      .worldView = view_delta_applies_to_draw(), // patch 0026
+   });
+   if (gfx::census::recording() != nullptr)
+     UNLIKELY { census_record(prim, vtxCount, cache.config, cache.shaderInfo); }
+diff --git a/lib/gx/pipeline.cpp b/lib/gx/pipeline.cpp
+index 9853d58..bcd46c6 100644
+--- a/lib/gx/pipeline.cpp
++++ b/lib/gx/pipeline.cpp
+@@ -60,6 +60,10 @@ gfx::CompiledPipeline create_pipeline(const PipelineConfig& config, const gfx::R
+ }
+ 
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
++  // The diorama (patch 0026): the eyes draw the world alone, the HUD replay everything else.
++  if (gfx::stereo::skip_draw(data.worldView)) {
++    return;
++  }
+   gfx::CompiledPipeline pipeline;
+   if (!gfx::get_pipeline(data.pipeline, pipeline)) {
+     return;
+diff --git a/lib/gx/pipeline.hpp b/lib/gx/pipeline.hpp
+index 54456ed..3ca83fb 100644
+--- a/lib/gx/pipeline.hpp
++++ b/lib/gx/pipeline.hpp
+@@ -15,6 +15,8 @@ struct DrawData {
+   uint32_t indexCount;
+   uint32_t instanceCount;
+   uint32_t dstAlpha;
++  // patch 0026: the view delta (patch 0019) applied to this draw (the diorama's world)
++  bool worldView = false;
+ };
+ 
+ constexpr uint32_t GXPipelineConfigVersion = 13;
+diff --git a/lib/gx/shader_info.cpp b/lib/gx/shader_info.cpp
+index 53015b4..0dbe831 100644
+--- a/lib/gx/shader_info.cpp
++++ b/lib/gx/shader_info.cpp
+@@ -389,6 +389,8 @@ static bool view_delta_applies() noexcept {
+          p.m1[2] == vd.projFrom[3] && p.m2[2] == vd.projFrom[4] && p.m2[3] == vd.projFrom[5];
+ }
+ 
++bool view_delta_applies_to_draw() noexcept { return view_delta_applies(); }
++
+ // d = C * m for row-major 3x4 affine matrices; withTranslation false: C's rotation only (normals).
+ static Mat3x4<float> view_delta_mul(const Mat3x4<float>& c, const Mat3x4<float>& m, bool withTranslation) noexcept {
+   const Vec4<float>* cr[3] = {&c.m0, &c.m1, &c.m2};
+diff --git a/lib/gx/shader_info.hpp b/lib/gx/shader_info.hpp
+index 24d431b..5461e7f 100644
+--- a/lib/gx/shader_info.hpp
++++ b/lib/gx/shader_info.hpp
+@@ -6,4 +6,6 @@ namespace aurora::gx {
+ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept;
+ gfx::Range build_uniform(const ShaderInfo& info) noexcept;
+ u8 color_channel(GXChannelID id) noexcept;
++// patch 0026: the current draw gets the view delta (patch 0019): the diorama's world
++bool view_delta_applies_to_draw() noexcept;
+ }; // namespace aurora::gx
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+index ba790d3..1b534e4 100644
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -24,6 +24,9 @@ std::atomic<float> g_stereoA{0.012f};        // patch 0025: clip.x += eye * (a *
+ std::atomic<float> g_stereoB{-0.012f * 600.f};
+ std::atomic<uint32_t> g_frameTag{0};         // patch 0025: aurora_xr_set_frame_info
+ std::atomic_bool g_frameDiorama{false};
++std::mutex g_maskMutex;                      // patch 0026: aurora_xr_set_diorama_mask
++DioramaMask g_mask{};
++bool g_maskValid = false;
+ 
+ #ifdef __ANDROID__
+ Module Log("aurora::xr");
+@@ -50,6 +53,7 @@ int g_reading = -1;   // taken, not yet done
+ bool g_latestSideBySide = false, g_latestStereo = false;  // patch 0024
+ bool g_latestDiorama = false;                              // patch 0025
+ uint32_t g_latestTag = 0;
++bool g_latestHud = false;                                  // patch 0026
+ uint32_t g_serial = 0;
+ bool g_failed = false;  // creating the buffers failed: the surface for good
+ 
+@@ -213,6 +217,7 @@ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag) noexcept {
+   g_latestStereo = stereo;
+   g_latestDiorama = diorama;
+   g_latestTag = tag;
++  g_latestHud = diorama && sideBySide;  // patch 0026: the diorama's buffers are left | right | HUD
+   g_writing = -1;
+   ++g_serial;
+ #else
+@@ -228,6 +233,14 @@ void take_frame_info(uint32_t& tag, bool& diorama) noexcept {
+   diorama = g_frameDiorama.load(std::memory_order_relaxed);
+ }
+ 
++bool diorama_wanted() noexcept { return g_frameDiorama.load(std::memory_order_relaxed) && active(); }
++
++bool diorama_mask(DioramaMask& out) noexcept {
++  std::lock_guard lock{g_maskMutex};
++  out = g_mask;
++  return g_maskValid;
++}
++
+ bool stereo_wanted() noexcept { return g_stereo.load(std::memory_order_relaxed) && active(); }
+ float stereo_a() noexcept { return g_stereoA.load(std::memory_order_relaxed); }
+ float stereo_b() noexcept { return g_stereoB.load(std::memory_order_relaxed); }
+@@ -259,6 +272,16 @@ void aurora_xr_set_eye_shift(bool enable, float a, float b) {
+   g_stereo.store(enable);
+ }
+ 
++void aurora_xr_set_diorama_mask(const float tableFromHead[12], const float proj[6], float eyeShift,
++                                const float fade[3]) {
++  std::lock_guard lock{g_maskMutex};
++  std::copy(tableFromHead, tableFromHead + 12, g_mask.tableFromHead);
++  std::copy(proj, proj + 6, g_mask.proj);
++  g_mask.eyeShift = eyeShift;
++  std::copy(fade, fade + 3, g_mask.fade);
++  g_maskValid = true;
++}
++
+ void aurora_xr_set_frame_info(uint32_t tag, bool diorama) {
+   g_frameTag.store(tag);
+   g_frameDiorama.store(diorama);
+@@ -279,6 +302,7 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+   out->stereo = g_latestStereo;
+   out->diorama = g_latestDiorama;
+   out->tag = g_latestTag;
++  out->hud = g_latestHud;
+   g_reading = g_latest;
+   g_latest = g_latestFd = -1;
+   return true;
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+index 170028e..f1f2fa1 100644
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -33,4 +33,15 @@ bool stereo_wanted() noexcept;
+ float stereo_a() noexcept;
+ float stereo_b() noexcept;
+ 
++// Patch 0026: the diorama's last frame info (sticky: the next frame is drawn the same way) and its
++// mask (aurora_xr_set_diorama_mask).
++bool diorama_wanted() noexcept;
++struct DioramaMask {
++  float tableFromHead[12]; // row-major 3x4
++  float proj[6];           // GXSetProjection's perspective parameters
++  float eyeShift;          // b (the right eye's; the left's is -b)
++  float fade[3];           // x, z, y in table units
++};
++bool diorama_mask(DioramaMask& out) noexcept;
++
+ } // namespace aurora::webgpu::xr_present

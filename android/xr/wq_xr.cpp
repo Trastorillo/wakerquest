@@ -77,6 +77,7 @@ struct Settings {
     bool stereo = true;
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
     float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen
+    float hudWidth = 0.9f;          // the diorama's HUD panel, metres across
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
     int resolution = 1080;
@@ -139,6 +140,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "table_height")) s.tableHeight = clampf(f, -1.0f, 2.0f);
     else if (!strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
     else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
+    else if (!strcmp(key, "hud_width")) s.hudWidth = clampf(f, 0.2f, 3.0f);
 }
 
 // ---- State ---------------------------------------------------------------------------------------
@@ -216,6 +218,8 @@ struct Xr {
     // the diorama: the swapchain's picture was drawn for head pose `frameTag`
     bool dioramaFrame = false;
     uint32_t frameTag = 0;
+    bool hudFrame = false;  // the buffer's third part is the HUD's panel (Aurora patch 0026)
+    GLint copyUAlpha = -1;
 };
 Xr s;
 
@@ -442,13 +446,15 @@ void main() {
 precision highp float;
 uniform sampler2D u_tex;
 uniform int u_linear;
+uniform int u_alpha;  // the diorama: keep the alpha (straight in the buffer), premultiplied for OpenXR
 in vec2 v_uv;
 out vec4 o_color;
 void main() {
-    vec3 c = texture(u_tex, v_uv).rgb;
+    vec4 t = texture(u_tex, v_uv);
+    vec3 c = t.rgb;
     if (u_linear != 0)
         c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
-    o_color = vec4(c, 1.0);
+    o_color = u_alpha != 0 ? vec4(c * t.a, t.a) : vec4(c, 1.0);
 }
 )";
     GLuint v = compile(GL_VERTEX_SHADER, vs), f = compile(GL_FRAGMENT_SHADER, fs);
@@ -467,6 +473,7 @@ void main() {
     glUseProgram(s.copyProg);
     glUniform1i(glGetUniformLocation(s.copyProg, "u_tex"), 0);
     s.copyULinear = glGetUniformLocation(s.copyProg, "u_linear");
+    s.copyUAlpha = glGetUniformLocation(s.copyProg, "u_alpha");
     return true;
 }
 
@@ -978,6 +985,7 @@ bool copyNewestFrame() {
             glDisable(GL_SCISSOR_TEST);
             glUseProgram(s.copyProg);
             glUniform1i(s.copyULinear, s.srgb ? 1 : 0);
+            glUniform1i(s.copyUAlpha, f.hud ? 1 : 0);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, tex);
             glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -1001,6 +1009,7 @@ bool copyNewestFrame() {
         s.stereoFrame = f.stereo;
         s.dioramaFrame = f.diorama;
         s.frameTag = f.tag;
+        s.hudFrame = f.hud;
         s.haveScreen = true;
         if (++s.frames == 1 || s.frames % 600 == 0)
             xrlog("frame %u from Aurora (serial %u, %ux%u): %u skipped, %u without a fence", s.frames, f.serial,
@@ -1021,7 +1030,7 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[3];
+    const XrCompositionLayerBaseHeader* layers[4];
     uint32_t layerCount = 0;
     XrCompositionLayerPassthroughFB room{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
     if (s.frame.shouldRender && updatePassthrough()) {  // the room first, the screen over it
@@ -1037,8 +1046,10 @@ void runFrame() {
     XrCompositionLayerProjectionView projViews[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
                                                      {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     HeadSnap drawnFor;
+    XrCompositionLayerQuad hud{XR_TYPE_COMPOSITION_LAYER_QUAD};
     if (screen && s.dioramaFrame && s.sideBySide && headForTag(s.frameTag, drawnFor)) {
-        const int32_t eyeW = int32_t(s.screenW / 2);
+        // left | right | HUD (Aurora patch 0026), or left | right
+        const int32_t eyeW = int32_t(s.screenW / (s.hudFrame ? 3 : 2));
         const XrFovf fov{std::atan(drawnFor.head.tanLeft), std::atan(drawnFor.head.tanRight),
                          std::atan(drawnFor.head.tanUp), std::atan(drawnFor.head.tanDown)};
         for (int eye = 0; eye < 2; eye++) {
@@ -1052,7 +1063,25 @@ void runFrame() {
         proj.space = s.space;
         proj.viewCount = 2;
         proj.views = projViews;
+        // the eyes carry the table's mask in their alpha: the room shows around the model
+        if (s.hudFrame) proj.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&proj;
+        if (s.hudFrame) {
+            // the HUD's panel: over the table's far edge, a little above it, facing the player
+            const Settings& st = s.settings;
+            const float w = st.hudWidth;
+            const float h = w * float(s.screenH) / float(eyeW);
+            hud.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            hud.space = s.space;
+            hud.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+            hud.subImage.swapchain = s.swapchain;
+            hud.subImage.imageRect = {{2 * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            const float tilt = -0.2f;  // leaning back a little, towards the eyes above it
+            hud.pose.orientation = {std::sin(tilt / 2), 0.0f, 0.0f, std::cos(tilt / 2)};
+            hud.pose.position = {0.0f, -st.tableHeight + 0.1f + 0.5f * h, -(st.tableDistance + 0.5f * st.tableDepth)};
+            hud.size = {w, h};
+            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
+        }
     } else if (screen) {
         const Settings& st = s.settings;
         const int32_t eyeW = int32_t(s.sideBySide ? s.screenW / 2 : s.screenW);

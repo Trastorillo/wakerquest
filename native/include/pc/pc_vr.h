@@ -17,6 +17,14 @@ void pc_vr_view_end(void);
 /* The sun, the stars and the sky's clouds (pc_fps60_sky_begin/_end): not in the model. */
 void pc_vr_sky_begin(void);
 void pc_vr_sky_end(void);
+
+/* The game's culling (mDoLib_clipper, m_Do_lib.h) while the diorama is on: what lies on the table is
+   drawn, wherever the game camera looks. 1 culled, 0 drawn; -1: the diorama is off, the camera's test
+   applies. m is the game camera's view times the model's matrix, as the clipper takes it. */
+class J3DModel;
+int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);
+int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min);
+int pc_vr_clip_model(J3DModel* model); /* the hidden joints' shapes, as clipByBox */
 #endif
 
 #endif /* PC_VR_H */
