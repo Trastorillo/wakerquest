@@ -13,7 +13,7 @@
 //     back (aurora_xr_present_done).
 //   - The screen is a quad layer in the LOCAL space, at the picture's aspect (16:9 in widescreen, Aurora
 //     patch 0032), by default 4.5 m wide and 5 m away, over the room (XR_FB_passthrough) when the
-//     headset has it, in a wooden frame (screen_frame). The left grip moves and turns it, both grips
+//     headset has it, in a wooden frame (screen_frame, the window's too). The left grip moves and turns it, both grips
 //     scale it, as the window's (mode = ventana); the right grip alone stays the game's Z.
 //   - The controllers drive an SDL virtual gamepad, which Aurora sees as any other controller: left
 //     stick = control stick, right stick = C-stick, A/B/X/Y as labelled, triggers = L and R (analog),
@@ -2526,6 +2526,15 @@ void runFrame() {
         proj.views = projViews;
         // the eyes carry the table's mask in their alpha: the room shows around the model
         if (s.hudFrame) proj.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        // the window's wooden frame (screen_frame, as the giant screen's): four opaque quads at the
+        // window's plane around its rectangle, under the eyes' pictures, so what comes out of the window
+        // (the pop-out) and what flies in the room are drawn over it; outside the window the pictures'
+        // alpha is 0 (Aurora patch 0030), so the frame shows there
+        if (s.hudFrame && s.settings.screenFrame && (drawnFor.windowFrame || s.settings.window)) {
+            const Settings& st = s.settings;
+            const int fl = frameLayers(windowPose(st), {st.windowWidth, st.windowWidth * 9.0f / 16.0f}, frameQuads);
+            for (int i = 0; i < fl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&frameQuads[i];
+        }
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&proj;
         if (s.hudFrame) {
             const Settings& st = s.settings;
