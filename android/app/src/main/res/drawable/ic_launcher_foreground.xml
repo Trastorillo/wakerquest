@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WakerQuest's icon (our own art): a red-sailed boat on cel-shaded waves, a wind swirl, in a bubble. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- the bubble -->
+    <path
+        android:fillColor="#14FFFFFF"
+        android:strokeColor="#A6FFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M54,24a30,30 0,1 1,0 60a30,30 0,1 1,0 -60z" />
+    <path
+        android:fillColor="#33FFFFFF"
+        android:pathData="M38,36Q42,30 49,28Q43,33 40,40Z" />
+    <!-- the sea: two cel-shaded bands -->
+    <path
+        android:fillColor="#FF1E62C8"
+        android:pathData="M24,66Q31,61 38,66T52,66T66,66T84,66L84,74Q70,84 54,84Q38,84 26,76Z" />
+    <path
+        android:fillColor="#FF2A8BE0"
+        android:pathData="M26,72Q33,68 40,72T54,72T68,72T82,72L80,76Q68,84 54,84Q40,84 30,78Z" />
+    <!-- the boat -->
+    <path
+        android:fillColor="#FF7A4A22"
+        android:pathData="M39,63L71,63L65,71L45,71Z" />
+    <path
+        android:fillColor="#FF5A3414"
+        android:pathData="M42,66L68,66L67,68L43,68Z" />
+    <path
+        android:strokeColor="#FF5A3414"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M54,34L54,63" />
+    <path
+        android:fillColor="#FFD8352B"
+        android:pathData="M55,35Q71,44 67,59L55,59Z" />
+    <path
+        android:fillColor="#FFF2E2C4"
+        android:pathData="M60,45a3,3 0,1 1,0 6a3,3 0,1 1,0 -6z" />
+    <!-- the foam -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M25,66Q31,61.5 38,66T52,66M60,66Q66,61.5 72,66T83,66" />
+    <!-- the wind's swirl -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M27,48Q31,48 34,46Q36,40 42,40Q47,40 47,44.5Q47,48 43.5,48Q41,48 41,45.5" />
+</vector>

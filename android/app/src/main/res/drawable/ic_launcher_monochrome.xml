@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WakerQuest's icon, one colour: the boat, its sail, the waves and the wind's swirl. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M39,63L71,63L65,71L45,71Z M53,34L55,34L55,63L53,63Z M55,35Q71,44 67,59L55,59Z" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M25,75Q31,70.5 38,75T52,75T66,75T83,75 M27,48Q31,48 34,46Q36,40 42,40Q47,40 47,44.5Q47,48 43.5,48Q41,48 41,45.5" />
+</vector>
