@@ -53,6 +53,15 @@ void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue);
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);
 
+// The headset's settings panel (wq_panel.cpp) and the game's settings (pc_settings), on the game thread
+// every frame (pc_vr_panel_frame): the game keys the panel shows (NULL-terminated), the value of each,
+// the changes made on the panel to apply, and its state: 1 open (the game waits), 2 the game's full
+// options menu was asked for (once).
+const char* const* wq_xr_panel_game_keys(void);
+void wq_xr_panel_game_value(const char* key, const char* value);
+bool wq_xr_panel_take_change(char* key, int keySize, char* value, int valueSize);
+int wq_xr_panel_flags(void);
+
 #ifdef __cplusplus
 }
 #endif

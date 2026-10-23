@@ -19,6 +19,7 @@
 // Settings: <files>/user/xr.ini (distance, width, height, passthrough, refresh), read again when it
 // changes (checked every second). Every step goes to switchwaker.log as "[xr] ...".
 #include "wq_xr.h"
+#include "wq_panel.h"
 
 #include <aurora/xr.h>
 
@@ -73,7 +74,8 @@ struct Settings {
     float width = 4.5f;      // m; the height follows the picture (4:3)
     float height = 0.0f;     // m above eye height
     bool passthrough = true; // the room around the screen instead of black
-    int refresh = 120;       // Hz, the headset's nearest at or below; 120 shows 30 and 60 fps evenly
+    int refresh = 90;        // Hz, the headset's nearest at or below; 90 shows the game's 30 fps evenly
+    bool gpuBoost = true;    // XR_EXT_performance_settings: the GPU at its sustained high level
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
     bool stereo = true;
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
@@ -81,20 +83,26 @@ struct Settings {
     float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
-    int resolution = 1188;  // 1.10 of 1080 lines (the menu's scale)
+    int resolution = 1512;  // 1.40 of 1080 lines (the menu's scale): the game holds 30 fps with it
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
     bool diorama = false;
     bool sphere = true;
     float tableWidth = 1.0f, tableDepth = 0.7f;  // m: the bubble's diameter, or the table's width and depth
-    float tableSpan = 30.0f;                     // m of the game's world across it
+    float tableSpan = 30.0f;                     // m of the game's world across it (more: more to draw)
     float tableDistance = 1.0f;                  // m, its middle in front of the eyes
     float tableHeight = 0.3f;                    // m, Link (the table's top) below the eyes
-    float tableFade = 0.2f;                      // m, the edges' fade
+    float tableFade = 0.1f;                      // m, the edges' fade
     bool tableFollowYaw = true;                  // the world turns with the game camera
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
+    float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
+    // the HUD's panel, fixed in the room (m in the LOCAL space, and its yaw in degrees): moved only by
+    // a grip on it, not with the model
+    float hudPose[4] = {-0.03f, -0.22f, -1.39f, 0.0f};
+    // m, the dialogues' panel moved by hand (a grip on it) from its place above the model; it moves with it
+    float dialogueOffset[3] = {0, 0, 0};
 };
 
 const char kDefaultSettings[] =
@@ -105,14 +113,14 @@ const char kDefaultSettings[] =
     "width = 4.5\n"
     "height = 0.0\n"
     "passthrough = 1\n"
-    "refresh = 120\n"
+    "refresh = 90\n"
     "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
     "# stereo_focus = the distance in the game that stays on the screen (100-3000).\n"
     "stereo = 1\n"
     "stereo_strength = 0.012\n"
     "stereo_focus = 600\n"
     "# the game's internal height in pixels (720, 900, 1080, 1200, 1440); read when the game starts.\n"
-    "resolution = 1200\n"
+    "resolution = 1512\n"
     "# mode = pantalla (a giant screen) or maqueta (the world as a model in the room).\n"
     "mode = pantalla\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
@@ -124,7 +132,7 @@ const char kDefaultSettings[] =
     "bubble_span = 30\n"
     "bubble_distance = 1.0\n"
     "bubble_height = 0.3\n"
-    "bubble_fade = 0.2\n"
+    "bubble_fade = 0.1\n"
     "table_depth = 70\n"
     "table_follow_yaw = 1\n";
 
@@ -154,6 +162,52 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "table_depth")) s.tableDepth = clampf(f, 20.0f, 400.0f) / 100.0f;
     else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
     else if (!strcmp(key, "hud_width")) s.hudWidth = clampf(f, 0.2f, 3.0f);
+    else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
+    else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
+    else if (!strcmp(key, "hud_pose")) {
+        float x = 0, y = 0, z = 0, yaw = 0;
+        if (sscanf(v, "%f,%f,%f,%f", &x, &y, &z, &yaw) == 4) {
+            s.hudPose[0] = clampf(x, -10.0f, 10.0f);
+            s.hudPose[1] = clampf(y, -10.0f, 10.0f);
+            s.hudPose[2] = clampf(z, -10.0f, 10.0f);
+            s.hudPose[3] = yaw;
+        }
+    } else if (!strcmp(key, "dialogue_offset")) {
+        float x = 0, y = 0, z = 0;
+        if (sscanf(v, "%f,%f,%f", &x, &y, &z) == 3) {
+            s.dialogueOffset[0] = clampf(x, -5.0f, 5.0f);
+            s.dialogueOffset[1] = clampf(y, -5.0f, 5.0f);
+            s.dialogueOffset[2] = clampf(z, -5.0f, 5.0f);
+        }
+    }
+}
+
+// The value in effect of an xr.ini key (the settings panel's), as the file would hold it.
+std::string settingValue(const Settings& s, const char* key) {
+    char b[48];
+    auto num = [&](float v) {
+        snprintf(b, sizeof b, "%g", v);
+        return std::string(b);
+    };
+    auto flag = [](bool v) { return std::string(v ? "1" : "0"); };
+    if (!strcmp(key, "mode")) return s.diorama ? "maqueta" : "pantalla";
+    if (!strcmp(key, "shape")) return s.sphere ? "esfera" : "caja";
+    if (!strcmp(key, "refresh")) return num(float(s.refresh));
+    if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
+    if (!strcmp(key, "passthrough")) return flag(s.passthrough);
+    if (!strcmp(key, "stereo")) return flag(s.stereo);
+    if (!strcmp(key, "distance")) return num(s.distance);
+    if (!strcmp(key, "width")) return num(s.width);
+    if (!strcmp(key, "bubble_size")) return num(s.tableWidth);
+    if (!strcmp(key, "bubble_span")) return num(s.tableSpan);
+    if (!strcmp(key, "bubble_distance")) return num(s.tableDistance);
+    if (!strcmp(key, "bubble_height")) return num(s.tableHeight);
+    if (!strcmp(key, "bubble_fade")) return num(s.tableFade);
+    if (!strcmp(key, "hud_width")) return num(s.hudWidth);
+    if (!strcmp(key, "dialogue_back")) return num(s.dialogueBack);
+    if (!strcmp(key, "table_follow_yaw")) return flag(s.tableFollowYaw);
+    if (!strcmp(key, "view_relative")) return flag(s.viewRelative);
+    return std::string();
 }
 
 // ---- State ---------------------------------------------------------------------------------------
@@ -232,11 +286,31 @@ struct Xr {
     bool hoverWas = false;
     float mouseX = -1.0f, mouseY = -1.0f;
     XrSwapchain cursorSwapchain = XR_NULL_HANDLE, raySwapchain = XR_NULL_HANDLE;
+    // the grips: the model moved by one hand, moved, turned and scaled by both, or a panel (the HUD's,
+    // the dialogues') moved by the hand whose ray or grip is on it
+    XrAction gripL = XR_NULL_HANDLE, handPoseL = XR_NULL_HANDLE;
+    XrSpace handSpaceL = XR_NULL_HANDLE;
+    bool gripDown[2] = {false, false};
+    int grabbed[2] = {0, 0};  // the panel a hand holds: 1 the HUD, 2 the dialogues
+    XrVector3f grabHand[2]{};
+    float grabOffset[2][3]{};
+    int dragHands = 0;        // the hands on the model when its drag (re)started: 1 left, 2 right, 3 both
     bool dragging = false;
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
+    float dragSpan = 0.0f, dragSize = 0.0f, tickSize = 0.0f;  // both hands: their distance, the size then
+    uint64_t sizeShownUntil = 0;                             // the size's label (ms, SDL_GetTicks)
     bool clickWas = false;
+    // the panels where they are shown this frame (for the grips and the rays)
+    bool hudShown = false, dialogueShown = false;
+    XrPosef hudPanel{}, dialoguePanel{};
+    XrExtent2Df hudSize{}, dialogueSize{};
+    // the settings panel
+    bool panelReady = false;
+    bool comboWas = false, comboHeld = false;  // both triggers + the right grip
+    bool hasPerf = false;
+    int perfApplied = -1;
     XrPath hands[2] = {XR_NULL_PATH, XR_NULL_PATH};
     SDL_JoystickID padId = 0;
     SDL_Joystick* pad = nullptr;
@@ -399,6 +473,8 @@ bool initInstance() {
     if (s.hasRefreshRate) enable.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     s.hasPassthrough = hasExtension(exts, XR_FB_PASSTHROUGH_EXTENSION_NAME);
     if (s.hasPassthrough) enable.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    s.hasPerf = hasExtension(exts, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
+    if (s.hasPerf) enable.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
 
     XrInstanceCreateInfoAndroidKHR android{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     android.applicationVM = s.vm;
@@ -674,6 +750,8 @@ bool initActions() {
     s.handPose = makeAction("hand_pose", XR_ACTION_TYPE_POSE_INPUT, false);
     s.aimPose = makeAction("aim_pose", XR_ACTION_TYPE_POSE_INPUT, true);
     s.stickClick = makeAction("stick_click", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+    s.gripL = makeAction("grip_l", XR_ACTION_TYPE_FLOAT_INPUT, false);
+    s.handPoseL = makeAction("hand_pose_l", XR_ACTION_TYPE_POSE_INPUT, false);
 
     const struct {
         XrAction act;
@@ -695,6 +773,8 @@ bool initActions() {
         {s.aimPose, "/user/hand/left/input/aim/pose"},
         {s.aimPose, "/user/hand/right/input/aim/pose"},
         {s.stickClick, "/user/hand/right/input/thumbstick/click"},
+        {s.gripL, "/user/hand/left/input/squeeze/value"},
+        {s.handPoseL, "/user/hand/left/input/grip/pose"},
     };
     std::vector<XrActionSuggestedBinding> suggested;
     for (const auto& bnd : binds) suggested.push_back({bnd.act, toPath(bnd.path)});
@@ -712,6 +792,8 @@ bool initActions() {
     asi.action = s.handPose;
     asi.poseInActionSpace.orientation.w = 1.0f;
     ok(xrCreateActionSpace(s.session, &asi, &s.handSpace), "xrCreateActionSpace");
+    asi.action = s.handPoseL;
+    ok(xrCreateActionSpace(s.session, &asi, &s.handSpaceL), "xrCreateActionSpace (left grip)");
     for (int h = 0; h < 2; h++) {
         XrActionSpaceCreateInfo aim{XR_TYPE_ACTION_SPACE_CREATE_INFO};
         aim.action = s.aimPose;
@@ -741,6 +823,20 @@ void setRefreshRate() {
     }
     if (best <= 0.0f) best = lowest;
     if (ok(request(s.session, best), "xrRequestDisplayRefreshRateFB")) xrlog("refresh rate %.0f Hz", best);
+}
+
+// The GPU's clock (gpu_boost): the runtime keeps it at its sustained high level, or chooses (the
+// game is GPU-bound in the diorama: both eyes and the HUD each frame). Applied when it changes.
+void updatePerformance() {
+    const int want = s.settings.gpuBoost ? 1 : 0;
+    if (!s.hasPerf || want == s.perfApplied) return;
+    s.perfApplied = want;
+    PFN_xrPerfSettingsSetPerformanceLevelEXT setLevel = nullptr;
+    xrGetInstanceProcAddr(s.instance, "xrPerfSettingsSetPerformanceLevelEXT", (PFN_xrVoidFunction*)&setLevel);
+    if (!setLevel) return;
+    const XrPerfSettingsLevelEXT level = want ? XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT : XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT;
+    if (ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, level), "xrPerfSettingsSetPerformanceLevelEXT"))
+        xrlog("GPU level: %s", want ? "sustained high" : "sustained low");
 }
 
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
@@ -905,63 +1001,9 @@ void publishSettings() {
     s_sharedSettings = s.settings;
 }
 
-// The diorama's grip (the right grip held): the model follows the hand, moved and turned about the
-// vertical; saved to xr.ini on release; the right stick's click while holding puts it back.
-void updateDrag(bool grip, bool click) {
-    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
-    if (!s.handSpace || XR_FAILED(xrLocateSpace(s.handSpace, s.space, s.frame.predictedDisplayTime, &loc)) ||
-        !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) ||
-        !(loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
-        return;
-    }
-    const XrQuaternionf& q = loc.pose.orientation;
-    // the hand's forward (-z) on the ground: its heading
-    const float fx = -2.0f * (q.x * q.z + q.w * q.y), fz = -(1.0f - 2.0f * (q.x * q.x + q.y * q.y));
-    const float handYaw = std::atan2(fx, -fz);
-    Settings& st = s.settings;
-    if (grip && !s.dragging) {
-        s.dragging = true;
-        s.dragHand = loc.pose.position;
-        s.dragHandYaw = handYaw;
-        s.dragX = st.tableX;
-        s.dragHeight = st.tableHeight;
-        s.dragDistance = st.tableDistance;
-        s.dragYaw = st.tableYaw;
-        xrlog("grip: moving the model");
-    }
-    if (grip) {
-        if (click && !s.clickWas) {
-            st.tableX = 0.0f;
-            st.tableHeight = 0.3f;
-            st.tableDistance = 1.0f;
-            st.tableYaw = 0.0f;
-            s.dragging = false;  // starts again from here
-            xrlog("grip: the model back in its place");
-        } else {
-            const XrVector3f& p = loc.pose.position;
-            st.tableX = s.dragX + (p.x - s.dragHand.x);
-            st.tableHeight = s.dragHeight - (p.y - s.dragHand.y);
-            st.tableDistance = std::max(0.2f, s.dragDistance - (p.z - s.dragHand.z));
-            float dy = handYaw - s.dragHandYaw;
-            while (dy > 3.14159265f) dy -= 6.28318531f;
-            while (dy < -3.14159265f) dy += 6.28318531f;
-            st.tableYaw = s.dragYaw - dy * 57.2957795f;
-        }
-        publishSettings();
-    } else if (s.dragging) {
-        s.dragging = false;
-        char v[32];
-        snprintf(v, sizeof v, "%.3f", st.tableX);
-        wq_xr_set("bubble_x", v);
-        snprintf(v, sizeof v, "%.3f", st.tableHeight);
-        wq_xr_set("bubble_height", v);
-        snprintf(v, sizeof v, "%.3f", st.tableDistance);
-        wq_xr_set("bubble_distance", v);
-        snprintf(v, sizeof v, "%.1f", st.tableYaw);
-        wq_xr_set("bubble_yaw", v);
-    }
-    s.clickWas = click;
-}
+void updateGrips(float gripL, float gripR, bool click);
+void togglePanel();
+void pointerHaptic(int hand, float amplitude);
 
 void updatePad() {
     attachPad();
@@ -987,14 +1029,36 @@ void updatePad() {
             start = getBool(s.start);
             s.trig[0] = l;
             s.trig[1] = r;
-            if (s_menuOpen.load()) {
+            const float gripL = getFloat(s.gripL);
+            const bool menu = s_menuOpen.load();
+            // both triggers and the right grip: the settings panel, opened or closed (the game's own
+            // options menu, open, keeps the combination: it closes it)
+            const bool combo = !menu && l > 0.5f && r > 0.5f && z > 0.6f;
+            if (combo && !s.comboWas) togglePanel();
+            s.comboWas = combo;
+            static bool panelWas = false;
+            const bool panel = wqp::isOpen();
+            // from the combination, or the panel closing, until every trigger and grip is let go: not
+            // the game's
+            if (combo || (panelWas && !panel)) s.comboHeld = true;
+            if (s.comboHeld && l < 0.2f && r < 0.2f && z < 0.2f) s.comboHeld = false;
+            panelWas = panel;
+            if (panel) {
+                bool tick = false;
+                wqp::nav(m.x, m.y, c.x, a, b, &tick);
+                if (tick) pointerHaptic(s.activeHand, 0.15f);
+            }
+            if (panel || s.comboHeld) {
+                m = c = {0.0f, 0.0f};
+                l = r = z = 0.0f;
+                a = b = x = y = start = false;
+            } else if (menu) {
                 // the options menu: the triggers are the laser pointer's clicks, not L and R
                 l = r = 0.0f;
                 z = 0.0f;
-            } else if (s.settings.diorama && !(l > 0.5f && r > 0.5f)) {
-                // the diorama: the right grip moves the model (not the game's Z), except with both
-                // triggers held (both triggers + grip open the options menu)
-                updateDrag(z > 0.6f, getBool(s.stickClick));
+            } else if (s.settings.diorama) {
+                // the diorama: the grips move the model or a panel (not the game's Z)
+                updateGrips(gripL, z, getBool(s.stickClick));
                 z = 0.0f;
             }
         }
@@ -1207,48 +1271,107 @@ void pushMouse(Uint32 type, float x, float y, bool down) {
     SDL_PushEvent(&e);
 }
 
-// The pointer this frame: the active hand's ray against the panel (pose, size in metres), the mouse
-// events for ImGui, haptic ticks, and the ray's and the cursor's layers. Returns the layers written.
-int updatePointer(const XrPosef& panel, XrExtent2Df size, XrCompositionLayerQuad* out) {
+void ensurePointerTextures() {
     if (!s.cursorSwapchain) s.cursorSwapchain = makePointerTexture(64, 64, 0);
     if (!s.raySwapchain) s.raySwapchain = makePointerTexture(256, 16, 1);
+}
+
+// The triggers this frame: which hand points (the last to pull its trigger).
+void updateTriggers() {
     for (int h = 0; h < 2; h++) {
         const bool down = s.trig[h] > (s.trigDown[h] ? 0.4f : 0.6f);
-        if (down && !s.trigDown[h] && h != s.activeHand) s.activeHand = h;  // the hand that pulls its trigger
+        if (down && !s.trigDown[h] && h != s.activeHand) s.activeHand = h;
         s.trigDown[h] = down;
     }
-    const int h = s.activeHand;
+}
+
+// Hand h's aim ray in the LOCAL space.
+bool aimRay(int h, XrVector3f* o, XrVector3f* d) {
     XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
     if (!s.aimSpace[h] || XR_FAILED(xrLocateSpace(s.aimSpace[h], s.space, s.frame.predictedDisplayTime, &loc)) ||
-        !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
-        return 0;
-    const XrVector3f o = loc.pose.position;
-    const XrVector3f d = vnorm(qrot(loc.pose.orientation, {0, 0, -1}));
-    const XrVector3f n = qrot(panel.orientation, {0, 0, 1});
-    float len = 2.0f;
-    bool onPanel = false;
-    XrVector3f hit{};
+        !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) ||
+        !(loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT))
+        return false;
+    *o = loc.pose.position;
+    *d = vnorm(qrot(loc.pose.orientation, {0, 0, -1}));
+    return true;
+}
+
+// Where a ray meets a quad (either side): its distance, and the point in the quad (u, v from the top
+// left, 0..1). False when it misses.
+bool rayQuad(XrVector3f o, XrVector3f d, const XrPosef& pose, XrExtent2Df size, float* t, float* u = nullptr,
+             float* v = nullptr) {
+    const XrVector3f n = qrot(pose.orientation, {0, 0, 1});
     const float dn = vdot(d, n);
-    if (std::fabs(dn) > 1e-4f) {
-        const float t = vdot(vsub(panel.position, o), n) / dn;
-        if (t > 0.0f) {
-            hit = vadd(o, vscale(d, t));
-            const XrQuaternionf inv{-panel.orientation.x, -panel.orientation.y, -panel.orientation.z, panel.orientation.w};
-            const XrVector3f local = qrot(inv, vsub(hit, panel.position));
-            const float u = local.x / size.width + 0.5f, v = 0.5f - local.y / size.height;
-            if (u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f) {
-                onPanel = true;
-                len = t;
-                const float mx = u * s_menuW.load(), my = v * s_menuH.load();
-                if (std::fabs(mx - s.mouseX) > 0.5f || std::fabs(my - s.mouseY) > 0.5f) {
-                    pushMouse(SDL_EVENT_MOUSE_MOTION, mx, my, false);
-                    s.mouseX = mx;
-                    s.mouseY = my;
-                }
-            }
+    if (std::fabs(dn) < 1e-4f) return false;
+    const float tt = vdot(vsub(pose.position, o), n) / dn;
+    if (tt <= 0.0f) return false;
+    const XrQuaternionf inv{-pose.orientation.x, -pose.orientation.y, -pose.orientation.z, pose.orientation.w};
+    const XrVector3f local = qrot(inv, vsub(vadd(o, vscale(d, tt)), pose.position));
+    const float uu = local.x / size.width + 0.5f, vv = 0.5f - local.y / size.height;
+    if (uu < 0.0f || uu > 1.0f || vv < 0.0f || vv > 1.0f) return false;
+    *t = tt;
+    if (u) *u = uu;
+    if (v) *v = vv;
+    return true;
+}
+
+XrVector3f latestHeadPos() {
+    std::lock_guard lock{s_shared};
+    const WqXrHead& h = s_heads[(s_nextTag - 1) % kHeadHistory].head;
+    return {h.pos[0], h.pos[1], h.pos[2]};
+}
+
+// A ray from o along d, `len` long and `width` wide: a thin strip turned to face the eyes.
+void rayLayer(XrVector3f o, XrVector3f d, float len, float width, XrCompositionLayerQuad* out) {
+    const XrVector3f mid = vadd(o, vscale(d, 0.5f * len));
+    XrVector3f z = vsub(latestHeadPos(), mid);
+    z = vnorm(vsub(z, vscale(d, vdot(z, d))));
+    const XrVector3f y = vcross(z, d);
+    *out = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    out->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    out->space = s.space;
+    out->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    out->subImage.swapchain = s.raySwapchain;
+    out->subImage.imageRect = {{0, 0}, {256, 16}};
+    out->pose.orientation = qfromAxes(d, y, z);
+    out->pose.position = mid;
+    out->size = {len, width};
+}
+
+// The cursor where the ray meets a panel (larger over something to press).
+void cursorLayer(XrVector3f at, const XrQuaternionf& orientation, bool big, XrCompositionLayerQuad* out) {
+    const XrVector3f n = qrot(orientation, {0, 0, 1});
+    *out = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    out->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    out->space = s.space;
+    out->eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    out->subImage.swapchain = s.cursorSwapchain;
+    out->subImage.imageRect = {{0, 0}, {64, 64}};
+    out->pose.orientation = orientation;
+    out->pose.position = vadd(at, vscale(n, 0.003f));
+    const float c = big ? 0.022f : 0.014f;
+    out->size = {c, c};
+}
+
+// The game's options menu (ImGui) on a panel: the active hand's ray against it, the mouse events for
+// ImGui, haptic ticks, and the ray's and the cursor's layers. Returns the layers written.
+int updatePointer(const XrPosef& panel, XrExtent2Df size, XrCompositionLayerQuad* out) {
+    ensurePointerTextures();
+    const int h = s.activeHand;
+    XrVector3f o, d;
+    if (!aimRay(h, &o, &d)) return 0;
+    float len = 2.0f, u = 0.0f, v = 0.0f;
+    const bool onPanel = rayQuad(o, d, panel, size, &len, &u, &v);
+    if (!onPanel) len = 2.0f;
+    if (onPanel) {
+        const float mx = u * s_menuW.load(), my = v * s_menuH.load();
+        if (std::fabs(mx - s.mouseX) > 0.5f || std::fabs(my - s.mouseY) > 0.5f) {
+            pushMouse(SDL_EVENT_MOUSE_MOTION, mx, my, false);
+            s.mouseX = mx;
+            s.mouseY = my;
         }
     }
-    // the click: the active hand's trigger
     const bool click = s.trigDown[h];
     if (click != s.clickDown && (onPanel || s.clickDown)) {
         pushMouse(click ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP, s.mouseX, s.mouseY, click);
@@ -1258,46 +1381,254 @@ int updatePointer(const XrPosef& panel, XrExtent2Df size, XrCompositionLayerQuad
     const bool hovered = onPanel && s_menuHovered.load();
     if (hovered && !s.hoverWas) pointerHaptic(h, 0.15f);
     s.hoverWas = hovered;
-
     int layers = 0;
-    // the ray: a thin strip from the controller along its aim, turned to face the eyes
-    if (s.raySwapchain) {
-        WqXrHead head{};
-        {
-            std::lock_guard lock{s_shared};
-            head = s_heads[(s_nextTag - 1) % kHeadHistory].head;
-        }
-        const XrVector3f mid = vadd(o, vscale(d, 0.5f * len));
-        const XrVector3f toEye = vsub({head.pos[0], head.pos[1], head.pos[2]}, mid);
-        XrVector3f z = vsub(toEye, vscale(d, vdot(toEye, d)));
-        z = vnorm(z);
-        const XrVector3f y = vcross(z, d);
-        XrCompositionLayerQuad& ray = out[layers++];
-        ray = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-        ray.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-        ray.space = s.space;
-        ray.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-        ray.subImage.swapchain = s.raySwapchain;
-        ray.subImage.imageRect = {{0, 0}, {256, 16}};
-        ray.pose.orientation = qfromAxes(d, y, z);
-        ray.pose.position = mid;
-        ray.size = {len, 0.004f};
-    }
-    // the cursor where it meets the panel, larger over something to press
-    if (onPanel && s.cursorSwapchain) {
-        XrCompositionLayerQuad& cursor = out[layers++];
-        cursor = {XR_TYPE_COMPOSITION_LAYER_QUAD};
-        cursor.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-        cursor.space = s.space;
-        cursor.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-        cursor.subImage.swapchain = s.cursorSwapchain;
-        cursor.subImage.imageRect = {{0, 0}, {64, 64}};
-        cursor.pose.orientation = panel.orientation;
-        cursor.pose.position = vadd(hit, vscale(n, 0.003f));
-        const float c = hovered ? 0.022f : 0.014f;
-        cursor.size = {c, c};
+    if (s.raySwapchain) rayLayer(o, d, len, 0.004f, &out[layers++]);
+    if (onPanel && s.cursorSwapchain) cursorLayer(vadd(o, vscale(d, len)), panel.orientation, hovered, &out[layers++]);
+    return layers;
+}
+
+// The settings panel (wq_panel.cpp): the active hand's ray and trigger, its ticks; the ray's and the
+// cursor's layers. Returns the layers written.
+int updatePanelPointer(XrCompositionLayerQuad* out) {
+    ensurePointerTextures();
+    const int h = s.activeHand;
+    XrVector3f o, d;
+    if (!aimRay(h, &o, &d)) return 0;
+    bool tick = false, hovering = false;
+    const float t = wqp::pointer(o, d, s.trigDown[h], &tick, &hovering);
+    if (tick) pointerHaptic(h, s.trigDown[h] ? 0.5f : 0.15f);
+    int layers = 0;
+    XrCompositionLayerQuad panel;
+    const bool shown = wqp::layer(s.space, &panel);
+    if (s.raySwapchain) rayLayer(o, d, t > 0.0f ? t : 2.0f, 0.004f, &out[layers++]);
+    if (t > 0.0f && shown && s.cursorSwapchain) cursorLayer(vadd(o, vscale(d, t)), panel.pose.orientation, hovering, &out[layers++]);
+    return layers;
+}
+
+// The diorama with no menu open: a faint ray from a hand whose aim is on the HUD's or the dialogues'
+// panel (a grip there takes the panel). Returns the layers written.
+int updatePanelRays(XrCompositionLayerQuad* out) {
+    ensurePointerTextures();
+    int layers = 0;
+    for (int h = 0; h < 2; h++) {
+        XrVector3f o, d;
+        if (!s.raySwapchain || !aimRay(h, &o, &d)) continue;
+        float t = 0.0f, best = 0.0f;
+        if (s.hudShown && rayQuad(o, d, s.hudPanel, s.hudSize, &t)) best = t;
+        if (s.dialogueShown && rayQuad(o, d, s.dialoguePanel, s.dialogueSize, &t) && (best == 0.0f || t < best)) best = t;
+        if (best > 0.0f || s.grabbed[h]) rayLayer(o, d, best > 0.0f ? best : 0.3f, 0.0022f, &out[layers++]);
     }
     return layers;
+}
+
+// The panel a hand takes with its grip: the one its ray is on, or its hand is at. 0 none, 1 the HUD,
+// 2 the dialogues.
+int panelUnderHand(int h, XrVector3f hand) {
+    XrVector3f o, d;
+    float t = 0.0f, best = 0.0f;
+    int which = 0;
+    if (aimRay(h, &o, &d)) {
+        if (s.hudShown && rayQuad(o, d, s.hudPanel, s.hudSize, &t)) best = t, which = 1;
+        if (s.dialogueShown && rayQuad(o, d, s.dialoguePanel, s.dialogueSize, &t) && (best == 0.0f || t < best)) which = 2;
+        if (which) return which;
+    }
+    // the hand itself at a panel: within 8 cm of it, in front or behind
+    auto near = [&](const XrPosef& pose, XrExtent2Df size) {
+        const XrQuaternionf inv{-pose.orientation.x, -pose.orientation.y, -pose.orientation.z, pose.orientation.w};
+        const XrVector3f l = qrot(inv, vsub(hand, pose.position));
+        return std::fabs(l.z) < 0.08f && std::fabs(l.x) < 0.5f * size.width && std::fabs(l.y) < 0.5f * size.height;
+    };
+    if (s.dialogueShown && near(s.dialoguePanel, s.dialogueSize)) return 2;
+    if (s.hudShown && near(s.hudPanel, s.hudSize)) return 1;
+    return 0;
+}
+
+float headingOf(const XrQuaternionf& q) {
+    // the forward (-z) on the ground: its heading, positive to the right
+    const float fx = -2.0f * (q.x * q.z + q.w * q.y), fz = -(1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+    return std::atan2(fx, -fz);
+}
+
+float wrapPi(float a) {
+    while (a > 3.14159265f) a -= 6.28318531f;
+    while (a < -3.14159265f) a += 6.28318531f;
+    return a;
+}
+
+void saveModel() {
+    const Settings& st = s.settings;
+    char v[32];
+    snprintf(v, sizeof v, "%.3f", st.tableX);
+    wq_xr_set("bubble_x", v);
+    snprintf(v, sizeof v, "%.3f", st.tableHeight);
+    wq_xr_set("bubble_height", v);
+    snprintf(v, sizeof v, "%.3f", st.tableDistance);
+    wq_xr_set("bubble_distance", v);
+    snprintf(v, sizeof v, "%.1f", st.tableYaw);
+    wq_xr_set("bubble_yaw", v);
+    snprintf(v, sizeof v, "%.2f", st.tableWidth);
+    wq_xr_set("bubble_size", v);
+}
+
+// The diorama's grips. Pressed with the hand's ray (or the hand) on the HUD's or the dialogues' panel:
+// the panel follows the hand (the HUD turned to face the player), saved on release. Otherwise on the
+// model: one hand moves it and turns it about the vertical (the right stick's click while holding
+// puts it back); both hands move, turn and scale it (its size, the world inside the same), with a
+// tick every 10% and its size shown. Saved to xr.ini on release.
+void updateGrips(float gripL, float gripR, bool click) {
+    XrSpaceLocation loc[2] = {{XR_TYPE_SPACE_LOCATION}, {XR_TYPE_SPACE_LOCATION}};
+    const XrSpace spaces[2] = {s.handSpaceL, s.handSpace};
+    bool valid[2];
+    for (int h = 0; h < 2; h++) {
+        valid[h] = spaces[h] && XR_SUCCEEDED(xrLocateSpace(spaces[h], s.space, s.frame.predictedDisplayTime, &loc[h])) &&
+                   (loc[h].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) &&
+                   (loc[h].locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT);
+    }
+    Settings& st = s.settings;
+    const float g[2] = {gripL, gripR};
+    for (int h = 0; h < 2; h++) {
+        const bool down = valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
+        if (down && !s.gripDown[h]) {
+            const int panel = panelUnderHand(h, loc[h].pose.position);
+            if (panel) {
+                s.grabbed[h] = panel;
+                s.grabHand[h] = loc[h].pose.position;
+                const float* from = panel == 1 ? st.hudPose : st.dialogueOffset;
+                for (int i = 0; i < 3; i++) s.grabOffset[h][i] = from[i];
+                pointerHaptic(h, 0.3f);
+                xrlog("grip: moving the %s", panel == 1 ? "HUD" : "dialogues");
+            }
+        }
+        if (!down && s.grabbed[h]) {
+            char v[64];
+            if (s.grabbed[h] == 1) {
+                snprintf(v, sizeof v, "%.3f,%.3f,%.3f,%.1f", st.hudPose[0], st.hudPose[1], st.hudPose[2], st.hudPose[3]);
+                wq_xr_set("hud_pose", v);
+            } else {
+                snprintf(v, sizeof v, "%.3f,%.3f,%.3f", st.dialogueOffset[0], st.dialogueOffset[1], st.dialogueOffset[2]);
+                wq_xr_set("dialogue_offset", v);
+            }
+            s.grabbed[h] = 0;
+        }
+        s.gripDown[h] = down;
+        if (s.grabbed[h] && valid[h]) {
+            const XrVector3f dp = vsub(loc[h].pose.position, s.grabHand[h]);
+            float* to = s.grabbed[h] == 1 ? st.hudPose : st.dialogueOffset;
+            to[0] = s.grabOffset[h][0] + dp.x;
+            to[1] = s.grabOffset[h][1] + dp.y;
+            to[2] = s.grabOffset[h][2] + dp.z;
+            if (s.grabbed[h] == 1) {
+                const XrVector3f head = latestHeadPos();
+                st.hudPose[3] = std::atan2(head.x - to[0], head.z - to[2]) * 57.2957795f;
+            }
+            publishSettings();
+        }
+    }
+    // the model: the hands that hold no panel
+    const int hands = (s.gripDown[0] && !s.grabbed[0] ? 1 : 0) | (s.gripDown[1] && !s.grabbed[1] ? 2 : 0);
+    if (hands != s.dragHands) {
+        if (s.dragHands && !hands) saveModel();
+        if (hands) xrlog("grip: %s", hands == 3 ? "both hands on the model" : "moving the model");
+        s.dragHands = hands;
+        s.dragging = false;  // starts again from the hands as they are
+    }
+    if (!hands) {
+        s.clickWas = click;
+        return;
+    }
+    XrVector3f at;
+    float heading, span = 0.0f;
+    if (hands == 3) {
+        const XrVector3f a = loc[0].pose.position, b = loc[1].pose.position;
+        at = vscale(vadd(a, b), 0.5f);
+        const XrVector3f v = vsub(b, a);
+        heading = std::atan2(v.z, v.x);  // the hands' line turned right: the same sign as a hand's heading
+        span = std::sqrt(vdot(v, v));
+    } else {
+        const XrPosef& pose = loc[hands == 1 ? 0 : 1].pose;
+        at = pose.position;
+        heading = headingOf(pose.orientation);
+    }
+    if (!s.dragging) {
+        s.dragging = true;
+        s.dragHand = at;
+        s.dragHandYaw = heading;
+        s.dragX = st.tableX;
+        s.dragHeight = st.tableHeight;
+        s.dragDistance = st.tableDistance;
+        s.dragYaw = st.tableYaw;
+        s.dragSpan = span;
+        s.dragSize = s.tickSize = st.tableWidth;
+    }
+    if (hands == 2 && click && !s.clickWas) {
+        st.tableX = 0.0f;
+        st.tableHeight = 0.3f;
+        st.tableDistance = 1.0f;
+        st.tableYaw = 0.0f;
+        s.dragging = false;
+        xrlog("grip: the model back in its place");
+    } else {
+        st.tableX = s.dragX + (at.x - s.dragHand.x);
+        st.tableHeight = s.dragHeight - (at.y - s.dragHand.y);
+        st.tableDistance = std::max(0.2f, s.dragDistance - (at.z - s.dragHand.z));
+        st.tableYaw = s.dragYaw - wrapPi(heading - s.dragHandYaw) * 57.2957795f;
+        if (hands == 3 && s.dragSpan > 0.05f) {
+            st.tableWidth = clampf(s.dragSize * span / s.dragSpan, 0.4f, 3.0f);
+            if (std::fabs(st.tableWidth / s.tickSize - 1.0f) >= 0.1f) {
+                s.tickSize = st.tableWidth;
+                pointerHaptic(0, 0.25f);
+                pointerHaptic(1, 0.25f);
+            }
+            s.sizeShownUntil = SDL_GetTicks() + 1500;
+        }
+    }
+    publishSettings();
+    s.clickWas = click;
+}
+
+// The settings panel opens 0.9 m in front of the player, a little below the eyes, facing them.
+void togglePanel() {
+    if (!s.panelReady) return;
+    if (wqp::isOpen()) {
+        wqp::close();
+        return;
+    }
+    WqXrHead head{};
+    {
+        std::lock_guard lock{s_shared};
+        head = s_heads[(s_nextTag - 1) % kHeadHistory].head;
+    }
+    const XrQuaternionf q{head.rot[0], head.rot[1], head.rot[2], head.rot[3]};
+    XrVector3f f = qrot(q, {0, 0, -1});
+    f.y = 0.0f;
+    f = vnorm(f);
+    const float yaw = std::atan2(-f.x, -f.z);
+    XrPosef pose;
+    pose.orientation = {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
+    pose.position = {head.pos[0] + 0.9f * f.x, head.pos[1] - 0.12f, head.pos[2] + 0.9f * f.z};
+    wqp::open(pose);
+}
+
+// The panel's host (wq_panel.h): xr.ini's settings.
+std::string hostGet(const char* key) { return settingValue(s.settings, key); }
+void hostSet(const char* key, const char* value) {
+    applySetting(s.settings, key, value);  // shown at once; the file is read again next frame
+    publishSettings();
+    wq_xr_set(key, value);
+}
+void hostResetPosition() {
+    hostSet("bubble_x", "0");
+    hostSet("bubble_height", "0.3");
+    hostSet("bubble_distance", "1.0");
+    hostSet("bubble_yaw", "0");
+}
+void hostResetPanels() {
+    const Settings defaults;
+    char v[64];
+    snprintf(v, sizeof v, "%.3f,%.3f,%.3f,%.1f", defaults.hudPose[0], defaults.hudPose[1], defaults.hudPose[2],
+             defaults.hudPose[3]);
+    hostSet("hud_pose", v);
+    hostSet("dialogue_offset", "0,0,0");
 }
 
 // ---- Head poses (the diorama) ----------------------------------------------------------------------
@@ -1435,6 +1766,13 @@ bool copyNewestFrame() {
     return s.haveScreen;
 }
 
+// A quad's orientation at `at` turned about the vertical to face the player.
+XrQuaternionf facingPlayer(XrVector3f at) {
+    const XrVector3f head = latestHeadPos();
+    const float yaw = std::atan2(head.x - at.x, head.z - at.z);
+    return {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
+}
+
 void runFrame() {
     XrFrameWaitInfo wi{XR_TYPE_FRAME_WAIT_INFO};
     s.frame = {XR_TYPE_FRAME_STATE};
@@ -1446,14 +1784,17 @@ void runFrame() {
         s_refreshDirty = false;
         setRefreshRate();
     }
+    updatePerformance();
     locateHead();
     updatePad();
+    updateTriggers();
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[8];
+    const XrCompositionLayerBaseHeader* layers[12];
     uint32_t layerCount = 0;
-    XrCompositionLayerQuad pointerQuads[2];
+    XrCompositionLayerQuad pointerQuads[2], panelQuad, labelQuad;
+    s.hudShown = s.dialogueShown = false;
     // the options menu opens 1 m in front of the player, at eye height, facing them (the diorama)
     const bool menuOpen = s_menuOpen.load();
     if (menuOpen && !s.menuWasOpen) {
@@ -1518,6 +1859,7 @@ void runFrame() {
             hud.subImage.swapchain = s.swapchain;
             hud.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
             const XrRect2Di full{{2 * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            const bool panelOpen = wqp::isOpen();
             if (s_menuOpen.load()) {
                 // the options menu: the panel floating in front of the player, where it opened
                 const float w = 1.3f, h = w * float(s.screenH) / float(eyeW);
@@ -1528,21 +1870,36 @@ void runFrame() {
                 const int pl = updatePointer(hud.pose, hud.size, pointerQuads);
                 for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
             } else if (s_dialogue.load()) {
-                // a dialogue: the message box (the bottom of the 2D) on its own panel above the model
+                // a dialogue: the message box (the bottom of the 2D) on its own panel above the model,
+                // `dialogue_back` behind its middle (larger with the distance, the text the same size to
+                // the eye), where a grip moved it (dialogue_offset), facing the player
                 const int32_t x0 = int32_t(eyeW * 0.08f), y0 = int32_t(s.screenH * 0.60f);
                 const int32_t cw = int32_t(eyeW * 0.84f), ch = int32_t(s.screenH * 0.38f);
                 hud.subImage.imageRect = {{2 * eyeW + x0, y0}, {cw, ch}};
-                const float w = 1.1f, h = w * float(ch) / float(cw);
-                hud.pose.position = {st.tableX, midY + r + 0.08f + 0.5f * h, -st.tableDistance};
+                const float w = 1.1f * (st.tableDistance + st.dialogueBack) / std::max(0.3f, st.tableDistance);
+                const float h = w * float(ch) / float(cw);
+                // above the model, but never higher than the eyes (a large bubble's top can be far above)
+                const float aboveY = std::min(midY + r + 0.08f + 0.5f * h, latestHeadPos().y - 0.05f);
+                hud.pose.position = {st.tableX + st.dialogueOffset[0], aboveY + st.dialogueOffset[1],
+                                     -(st.tableDistance + st.dialogueBack) + st.dialogueOffset[2]};
+                hud.pose.orientation = facingPlayer(hud.pose.position);
                 hud.size = {w, h};
-                layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
+                if (!panelOpen) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
+                s.dialogueShown = !panelOpen;
+                s.dialoguePanel = hud.pose;
+                s.dialogueSize = hud.size;
             } else {
-                // the HUD: a large panel behind the model at its height, its corners around it
+                // the HUD: a large panel fixed in the room (hud_pose), where a grip on it put it
                 const float w = st.hudWidth, h = w * float(s.screenH) / float(eyeW);
                 hud.subImage.imageRect = full;
-                hud.pose.position = {st.tableX, midY, -(st.tableDistance + 1.1f * r)};
+                hud.pose.position = {st.hudPose[0], st.hudPose[1], st.hudPose[2]};
+                const float yaw = st.hudPose[3] * 0.0174532925f;
+                hud.pose.orientation = {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
                 hud.size = {w, h};
                 layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
+                s.hudShown = !panelOpen;
+                s.hudPanel = hud.pose;
+                s.hudSize = hud.size;
             }
         }
     } else if (screen) {
@@ -1564,10 +1921,34 @@ void runFrame() {
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
         }
         // the options menu on the screen: the laser pointer at it
-        if (menuOpen) {
+        if (menuOpen && !wqp::isOpen()) {
             const int pl = updatePointer(quads[0].pose, quads[0].size, pointerQuads);
             for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
         }
+    }
+    // the settings panel over everything, in either mode, with the laser pointer; or, in the diorama,
+    // a faint ray where a hand points at the HUD or the dialogues (a grip there takes them)
+    if (wqp::isOpen()) {
+        const int pl = updatePanelPointer(pointerQuads);
+        if (wqp::layer(s.space, &panelQuad)) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&panelQuad;
+        for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
+    } else if (!menuOpen && s.settings.diorama && (s.hudShown || s.dialogueShown)) {
+        const int pl = updatePanelRays(pointerQuads);
+        for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
+    }
+    // the model's size while both hands scale it, above it
+    if (s.settings.diorama && SDL_GetTicks() < s.sizeShownUntil) {
+        const Settings& st = s.settings;
+        const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;
+        const float midY = st.sphere ? -st.tableHeight + 0.35f * r : -st.tableHeight + 0.1f;
+        XrPosef at;
+        at.position = {st.tableX, midY + r + 0.05f, -st.tableDistance};
+        at.orientation = facingPlayer(at.position);
+        char text[32];
+        snprintf(text, sizeof text, "%.2f m", st.tableWidth);
+        for (char* c = text; *c; c++)
+            if (*c == '.') *c = ',';
+        if (wqp::label(text, at, s.space, &labelQuad)) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&labelQuad;
     }
     XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
     ei.displayTime = s.frame.predictedDisplayTime;
@@ -1585,6 +1966,8 @@ void threadMain() {
         aurora_xr_present_enable(false);
         return;
     }
+    wqp::init({hostGet, hostSet, hostResetPosition, hostResetPanels}, s.session, s.srgb);
+    s.panelReady = true;
     xrlog("headset layer ready; waiting for the session");
     while (!s.exiting) {
         pollEvents();

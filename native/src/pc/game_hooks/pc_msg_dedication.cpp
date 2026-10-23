@@ -7,8 +7,11 @@
 //   2007  an Outset islander praising the green clothes
 //   10873 "Veo que te interesa esta imagen..."
 //   3514  Tingle's goodbye in his tower ("¡Hasta la vista, duende!")
+//   2008, 2020, 2021, 2032, 2045  the grandmother again, at home (reachable from any save)
+// Each message asked for is logged once in a row ("[cos] msg 2003"), to find more of them.
 #include "d/dolzel.h" // IWYU pragma: keep
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -23,6 +26,11 @@ const Extra kExtras[] = {
     {2003, "Ah, y antes de que se me olvide...\n\xA1Saludos a Shaak4, nerestraw\ny compa\xF1\xED" "a!"},
     {2007, "\xBFNecesitas mucho espacio para\njugar en VR? Aqu\xED en la isla\ntenemos todo el mar."},
     {10873, "Dicen que en un canal llamado\nShaak4 VR ense\xF1" "an a vivir\nla magia desde dentro."},
+    {2008, "Por cierto, ha venido un tal\nShaak4 preguntando por ti.\nDice que te espera en YouTube."},
+    {2020, "\xA1" "Ah! Y saludos de mi parte a\nShaak4, nerestraw y compa\xF1\xED" "a.\nSon buena gente."},
+    {2021, "Abril dice que los v\xED" "deos de\nShaak4 VR son lo mejor\ndel mundo."},
+    {2032, "\xA1Saludos a Shaak4, nerestraw\ny compa\xF1\xED" "a!"},
+    {2045, "\xA1Saludos a Shaak4, nerestraw\ny compa\xF1\xED" "a, de parte\nde tu abuela!"},
     {3514, "\xA1La gente odia la VR!\n\xA1Industria retr\xF3grada!\nKurul\xFAn... \xA1PA!"},
 };
 
@@ -43,6 +51,11 @@ bool enabled() {
 // The message with our page after its last one; the original when it is not one of ours. The text's
 // control codes (0x1A, their length, their bytes) are copied as they are; a page holds four lines.
 const char* pc_msg_override(u32 msgNo, const char* text) {
+    static u32 sLogged = 0;
+    if (msgNo != sLogged) {
+        sLogged = msgNo;
+        fprintf(stderr, "[cos] msg %u%s\n", (unsigned)msgNo, text == nullptr ? " (none)" : "");
+    }
     if (text == nullptr || !enabled()) {
         return text;
     }

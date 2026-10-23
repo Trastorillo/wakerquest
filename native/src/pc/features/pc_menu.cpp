@@ -562,7 +562,7 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kVrHeight), "0.3", applyVr, (void*)"bubble_height", 6, "Height",
      "How far below your eyes Link is in the diorama."},
     {"COS_VR_FADE", "Fundido del borde", "Lo suave que se desvanece el borde de la maqueta.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrFade), "0.2", applyVr, (void*)"bubble_fade", 7, "Edge fade",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrFade), "0.1", applyVr, (void*)"bubble_fade", 7, "Edge fade",
      "How softly the diorama's edge fades out."},
     {"COS_VR_FOLLOW", "Seguir la cámara", "La maqueta gira con la cámara del juego (el stick sigue siendo intuitivo).",
      PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"table_follow_yaw", 8, "Follow the camera",
@@ -576,12 +576,12 @@ const PcSettingDesc kBuiltins[] = {
      "Depth of the 3D in screen mode."},
     {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas). Más alta = "
      "más nítida y más trabajo para la GPU. Se aplica al momento.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1188", applyVrResolution, nullptr, 10, "Resolution",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1512", applyVrResolution, nullptr, 10, "Resolution",
      "Scale of the game's picture in the headset (1.00 = 1080 lines). Higher = sharper and more GPU work. "
      "Applies at once."},
-    {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 120 Hz muestra los 30 y 60 fps del juego sin saltos.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "120", applyVr, (void*)"refresh", 10, "Refresh rate",
-     "The headset's refresh rate. 120 Hz shows the game's 30 and 60 fps evenly."},
+    {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 90 Hz muestra los 30 fps del juego sin saltos y deja GPU libre.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "90", applyVr, (void*)"refresh", 10, "Refresh rate",
+     "The headset's refresh rate. 90 Hz shows the game's 30 fps evenly and leaves GPU time free."},
     {"COS_VR_HUD", "Tamaño del HUD", "El ancho del panel con los corazones y los menús en el modo maqueta.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "1.3", applyVr, (void*)"hud_width", 11, "HUD size",
      "The width of the panel with the hearts and menus in diorama mode."},
@@ -2009,6 +2009,15 @@ void menuFrame() {
     const uint32_t keys = (sSmoke.on ? readScript() : 0) | readGamepads() | readKeyboard();
     captureFrame();
     handleInput(keys);
+    // WakerQuest: the headset's own settings panel (pc_vr.h) holds the game while it is open, and its
+    // "Más opciones" opens this menu
+    const int vrPanel = pc_vr_panel_frame();
+    if ((vrPanel & 2) != 0 && !m.open) {
+        setOpen(true);
+    }
+    if ((vrPanel & 1) != 0 && !m.open && inPlay()) {
+        dScnPly_ply_c::setPauseTimer(2);
+    }
     if (!m.open) {
         return;
     }

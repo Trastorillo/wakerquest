@@ -101,7 +101,8 @@ set_target_properties(cos_openxr_loader PROPERTIES
         IMPORTED_LOCATION "${_cos_openxr_dir}/jni/arm64-v8a/libopenxr_loader.so"
         IMPORTED_NO_SONAME OFF
         INTERFACE_INCLUDE_DIRECTORIES "${_cos_openxr_dir}/prefab/modules/headers/include")
-target_sources(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr/wq_xr.cpp")
+target_sources(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr/wq_xr.cpp" "${COS_ANDROID_DIR}/xr/wq_panel.cpp"
+        "${COS_ANDROID_DIR}/xr/ui_canvas.cpp")
 target_include_directories(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr")
 # the diorama's game side (native/src/pc/game_hooks/pc_vr_diorama.cpp) asks the headset layer
 target_include_directories(cos_pc PRIVATE "${COS_ANDROID_DIR}/xr")

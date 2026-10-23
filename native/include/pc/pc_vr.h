@@ -27,6 +27,10 @@ void pc_vr_sky_end(void);
 void pc_vr_setting(const char* key, const char* value);
 /* The options menu, every frame (pc_menu.cpp menuFrame): for the headset's laser pointer. */
 void pc_vr_menu_state(bool open, float width, float height, bool hovered);
+/* The headset's settings panel (android/xr/wq_panel.cpp), every frame (pc_menu.cpp menuFrame): its game
+   settings mirrored and its changes applied; returns 1 while it is open (the game waits), | 2 once
+   when it asks for the game's full options menu. 0 elsewhere. */
+int pc_vr_panel_frame(void);
 
 class J3DModel;
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);

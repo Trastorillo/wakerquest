@@ -23,6 +23,7 @@
 #if defined(__ANDROID__)
 
 #include "pc/pc_harness.h"
+#include "pc/pc_settings.h"
 #include "pc_internal.h"
 
 #include "d/d_com_inf_game.h"
@@ -325,8 +326,15 @@ bool pc_vr_view_begin(view_class* view) {
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
     // for the left stick relative to the player's view (wq_xr.cpp)
     const bool freeControl = !pc::menuOpen() && dMenu_flag() == 0 && !dComIfGp_event_runCheck();
-    wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw, freeControl,
-                             dComIfGp_getMesgStatus() != 0);
+    const u8 mesg = dComIfGp_getMesgStatus();
+    static u8 sMesgWas = 0;
+    if (mesg != sMesgWas) {
+        // when the dialogues' panel shows (with the "[cos] msg" lines, which message)
+        pc::writef(STDERR_FILENO, "[vr] message status %u -> %u%s\n", (unsigned)sMesgWas, (unsigned)mesg,
+                   dComIfGp_event_runCheck() ? " (event)" : "");
+        sMesgWas = mesg;
+    }
+    wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw, freeControl, mesg != 0);
 
     // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
     s.sphere = table.sphere;
@@ -411,6 +419,19 @@ void pc_vr_menu_state(bool open, float width, float height, bool hovered) {
     wq_xr_menu_state(open, width, height, hovered);
 }
 
+int pc_vr_panel_frame(void) {
+    // the panel's game settings: their values for it, and its changes applied (and saved)
+    for (const char* const* key = wq_xr_panel_game_keys(); *key != nullptr; key++) {
+        const char* v = pc_settings_get(*key);
+        wq_xr_panel_game_value(*key, v != nullptr ? v : "");
+    }
+    char key[64], value[64];
+    while (wq_xr_panel_take_change(key, sizeof key, value, sizeof value)) {
+        pc_settings_set(key, value);
+    }
+    return wq_xr_panel_flags();
+}
+
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius) {
     if (!cullSetup()) return -1;
     Vec p;
@@ -464,6 +485,7 @@ void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
 void pc_vr_menu_state(bool, float, float, bool) {}
+int pc_vr_panel_frame(void) { return 0; }
 int pc_vr_clip_sphere(const f32[3][4], const Vec*, f32) { return -1; }
 int pc_vr_clip_box(const f32[3][4], const Vec*, const Vec*) { return -1; }
 int pc_vr_clip_model(J3DModel*) { return -1; }
