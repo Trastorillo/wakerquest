@@ -178,7 +178,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "passthrough")) s.passthrough = on;
     else if (!strcmp(key, "refresh")) s.refresh = int(f);
     else if (!strcmp(key, "stereo")) s.stereo = on;
-    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.03f);  // comfortable
+    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.10f);
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
     else if (!strcmp(key, "cine_3d")) s.cine3d = on;
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
@@ -1934,7 +1934,7 @@ XrQuaternionf facingPlayer(XrVector3f at) {
 }
 
 // The giant screen's 3D (the diorama sets its own eye shift every frame, pc_vr_diorama.cpp): the
-// settings', with more depth (x1.6) and more coming out of the screen (the plane twice as far) during
+// settings', with more depth behind the screen (x1.6, the same plane) during
 // cutscenes (cine_3d), faded in and out over half a second.
 void updateScreenStereo() {
     const Settings& st = s.settings;
@@ -1945,8 +1945,8 @@ void updateScreenStereo() {
     const float dt = s.settings.refresh > 0 ? 1.0f / float(s.settings.refresh) : 1.0f / 90.0f;
     const float want = st.cine3d && s_cinematic.load() ? 1.0f : 0.0f;
     s_cineRamp += clampf(want - s_cineRamp, -dt / 0.5f, dt / 0.5f);
-    const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.03f);
-    const float focus = clampf(st.stereoFocus * (1.0f + 1.0f * s_cineRamp), 1.0f, 2500.0f);
+    const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.10f);
+    const float focus = clampf(st.stereoFocus, 1.0f, 2500.0f);  // the same plane: more depth behind it
     const float on = st.stereo ? 1.0f : 0.0f;
     if (on == s_stereoApplied[0] && std::fabs(strength - s_stereoApplied[1]) < 1e-5f &&
         std::fabs(focus - s_stereoApplied[2]) < 0.5f)

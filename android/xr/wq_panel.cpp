@@ -96,11 +96,11 @@ const Item kGeneral[] = {
 };
 const Item kStereo[] = {
     {kXr, "stereo", "3D en la pantalla", "Una imagen para cada ojo", kSwitch},
-    {kXr, "stereo_strength", "Profundidad 3D", "Más = el fondo más lejos", kStepper, nullptr, 0, 0.004f, 0.03f,
+    {kXr, "stereo_strength", "Profundidad 3D", "Más = el fondo más lejos", kStepper, nullptr, 0, 0.004f, 0.10f,
      0.002f, "%.3f"},
-    {kXr, "stereo_focus", "Salir de la pantalla", "Más = lo cercano sale hacia ti", kStepper, nullptr, 0, 200.0f,
+    {kXr, "stereo_focus", "Salir de la pantalla", "Más = lo cercano sale hacia ti", kStepper, nullptr, 0, 50.0f,
      2500.0f, 100.0f, "%.0f"},
-    {kXr, "cine_3d", "3D intenso en cinemáticas", "Más profundidad y más salida en las escenas", kSwitch},
+    {kXr, "cine_3d", "3D intenso en cinemáticas", "Más profundidad en las escenas", kSwitch},
     {kXr, "cine_screen", "Cinemáticas en pantalla gigante", "En la maqueta; vuelve a la burbuja al acabar", kSwitch},
     {kXr, "auto_screen", "Pantalla automática en 1ª persona", "Telescopio, apuntar, cámara: en 2D", kSwitch},
     {kXr, "birds_free", "Aves fuera de la burbuja", "Las gaviotas vuelan por tu habitación", kSwitch},
