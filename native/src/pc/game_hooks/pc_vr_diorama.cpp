@@ -310,12 +310,25 @@ bool pc_vr_view_begin(view_class* view) {
     wq_xr_table(&table);
     WqXrHead head;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
-    const bool want = table.diorama && view != nullptr && player != nullptr && wq_xr_head(&head);
+    // the game's own first-person views, which the model cannot show: the giant screen meanwhile
+    // (auto_screen): the telescope (the item, or the scope of an event), looking around, the picto box,
+    // aiming the bow, the hookshot, the boomerang and the grappling hook
+    const bool ownView = table.autoScreen &&
+                         (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e |
+                                                             daPyStts0_BOW_AIM_e | daPyStts0_HOOKSHOT_AIM_e |
+                                                             daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
+                          dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 ||
+                          dComIfGp_getScopeType() != 0);
+    const bool want = table.diorama && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
         if (s.wasOn) {
             pc::writef(STDERR_FILENO, "[vr] diorama off (%s)\n",
-                       !table.diorama ? "mode" : view == nullptr ? "no camera" : player == nullptr ? "no Link" : "no head pose");
+                       !table.diorama ? "mode" : view == nullptr ? "no camera" : player == nullptr ? "no Link"
+                       : ownView ? "telescope or first person: the screen" : "no head pose");
             aurora_xr_set_frame_info(0, false);
+            if (ownView) {
+                aurora_xr_set_eye_shift(false, 0.0f, 0.0f);  // a flat picture on the screen meanwhile
+            }
             s.wasOn = false;
             s.rigValid = false;
         }

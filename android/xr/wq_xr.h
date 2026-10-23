@@ -36,6 +36,7 @@ typedef struct WqXrTable {
     bool followYaw;  // the world turns with the game camera (else it keeps its first heading)
     float x;         // metres to the right of straight ahead (moved with the right grip)
     float yaw;       // radians the world is turned by the right grip
+    bool autoScreen; // the game's first-person views (telescope, aiming...) on the giant screen
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).

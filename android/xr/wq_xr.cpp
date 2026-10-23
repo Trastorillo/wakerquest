@@ -95,6 +95,7 @@ struct Settings {
     float tableFade = 0.1f;                      // m, the edges' fade
     bool tableFollowYaw = true;                  // the world turns with the game camera
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
+    bool autoScreen = true;                      // first-person views on the giant screen
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
@@ -163,6 +164,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
     else if (!strcmp(key, "hud_width")) s.hudWidth = clampf(f, 0.2f, 3.0f);
     else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
+    else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
     else if (!strcmp(key, "hud_pose")) {
         float x = 0, y = 0, z = 0, yaw = 0;
@@ -194,6 +196,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "shape")) return s.sphere ? "esfera" : "caja";
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
+    if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "passthrough")) return flag(s.passthrough);
     if (!strcmp(key, "stereo")) return flag(s.stereo);
     if (!strcmp(key, "distance")) return num(s.distance);
@@ -2052,6 +2055,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->followYaw = st.tableFollowYaw;
     out->x = st.tableX;
     out->yaw = st.tableYaw * 0.0174532925f;
+    out->autoScreen = st.autoScreen;
 }
 
 extern "C" bool wq_xr_start(void) {

@@ -103,6 +103,7 @@ const Item kDiorama[] = {
      0.1f, "%.1f m"},
     {kXr, "dialogue_back", "Distancia de los diálogos", "Detrás del centro de la burbuja", kStepper, nullptr, 0, 0.0f,
      1.5f, 0.1f, "%.1f m"},
+    {kXr, "auto_screen", "Pantalla automática en 1ª persona", "Telescopio, apuntar, cámara: en 2D", kSwitch},
     {kAction, "reset_panels", "Restablecer paneles", "El HUD y los diálogos, a su sitio", kButton},
 };
 const Item kControls[] = {
@@ -129,7 +130,7 @@ const Tab kTabs[] = {TAB("General", kGeneral), TAB("Maqueta", kDiorama), TAB("Co
                      TAB("Juego", kGameItems)};
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));
-constexpr int kMaxItems = 9;
+constexpr int kMaxItems = 10;
 
 // The game's keys, for the game thread's mirror (wq_xr_panel_game_keys)
 const char* const kGameKeys[] = {"COS_VR_RESOLUTION", "COS_CAMERA_INVERT_X", "COS_CAMERA_INVERT_Y",
