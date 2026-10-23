@@ -1,0 +1,108 @@
+XR diorama: the HUD replay makes its own EFB copies; the bubble (a sphere) as the mask's shape
+
+- The HUD replay (patch 0026) now resolves its passes: 2D drawn into a texture and then shown (the
+  dialogue box's text, full-screen effects) was left empty by the eyes, and the HUD drew it empty or
+  with the right eye's picture (a silhouette over the panel).
+- aurora_xr_set_diorama_mask's fade has a fourth value: 1 = the bubble, a sphere of radius 1 around the
+  table space's origin, fading over fade[0].
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+index e4f3024..2746280 100644
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -46,9 +46,10 @@ typedef struct AuroraXrFrame {
+  * tableFromHead (row-major 3x4) maps the head's space (metres, the eyes' midpoint) to the table's:
+  * x and z within +-1 over its top, y 0 on it and -1 at the cut below; proj is the frustum both eyes
+  * are drawn with (GXSetProjection's perspective parameters); eyeShift the right eye's clip shift b;
+- * fade the edges' fade in table units (x, z, y). */
++ * fade the edges' fade in table units (x, z, y), and fade[3] 1 for the bubble (patch 0027): then the
++ * shape is the sphere of radius 1 around the table space's origin, fading over fade[0]. */
+ void aurora_xr_set_diorama_mask(const float tableFromHead[12], const float proj[6], float eyeShift,
+-                                const float fade[3]);
++                                const float fade[4]);
+ 
+ /* Patch 0025, from the game thread while it records a frame: the head pose it is drawn for (a tag
+  * the XR layer gave out) and whether it is the diorama. Taken by the frame's present. */
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+index c114e2a..7e82c5b 100644
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -308,10 +308,9 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+     depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, snapshotSize, passInfo.msaaSamples);
+   }
+ 
+-  // The HUD replay writes no texture: they hold the eyes' pictures (and may be used by later frames).
+-  if (hud) {
+-    return;
+-  }
++  // The HUD replay (patch 0027) makes its own EFB copies: the 2D drawn into a texture and then shown
++  // (the dialogue box's text, full-screen effects) was left empty by the eyes, which draw the world
++  // alone, and without its copies the HUD drew those empty or the right eye's (a silhouette).
+ 
+   if (passInfo.resolveTarget) {
+     const auto& dstSize = passInfo.resolveTarget->size;
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+index 06875fc..b2b4946 100644
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -207,10 +207,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+     let ndc = vec4f(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0, d, 1.0);
+     let h = u.table_from_clip * ndc;
+     let t = h.xyz / h.w;
+-    let ax = (1.0 - abs(t.x)) / u.fade.x;
+-    let az = (1.0 - abs(t.z)) / u.fade.y;
+-    let ay = (t.y + 1.0) / u.fade.z;
+-    let a = clamp(min(min(ax, az), ay), 0.0, 1.0);
++    var a: f32;
++    if (u.fade.w > 0.5) {
++        // the bubble (patch 0027): a sphere of radius 1 around the origin
++        a = clamp((1.0 - length(t)) / u.fade.x, 0.0, 1.0);
++    } else {
++        let ax = (1.0 - abs(t.x)) / u.fade.x;
++        let az = (1.0 - abs(t.z)) / u.fade.y;
++        let ay = (t.y + 1.0) / u.fade.z;
++        a = clamp(min(min(ax, az), ay), 0.0, 1.0);
++    }
+     return vec4f(c.rgb, select(a, 0.0, h.w <= 0.0));
+ }
+ )";
+@@ -333,6 +339,7 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+   u.fade[0] = std::max(mk.fade[0], 1e-3f);
+   u.fade[1] = std::max(mk.fade[1], 1e-3f);
+   u.fade[2] = std::max(mk.fade[2], 1e-3f);
++  u.fade[3] = mk.fade[3];  // patch 0027: 1 = the bubble (a sphere)
+   webgpu::g_queue.WriteBuffer(g_maskUniform[eye], 0, &u, sizeof(u));
+   const std::array bindEntries{
+       wgpu::BindGroupEntry{.binding = 0, .buffer = g_maskUniform[eye], .size = sizeof(MaskUniform)},
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+index 1b534e4..24ad528 100644
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -273,12 +273,12 @@ void aurora_xr_set_eye_shift(bool enable, float a, float b) {
+ }
+ 
+ void aurora_xr_set_diorama_mask(const float tableFromHead[12], const float proj[6], float eyeShift,
+-                                const float fade[3]) {
++                                const float fade[4]) {
+   std::lock_guard lock{g_maskMutex};
+   std::copy(tableFromHead, tableFromHead + 12, g_mask.tableFromHead);
+   std::copy(proj, proj + 6, g_mask.proj);
+   g_mask.eyeShift = eyeShift;
+-  std::copy(fade, fade + 3, g_mask.fade);
++  std::copy(fade, fade + 4, g_mask.fade);
+   g_maskValid = true;
+ }
+ 
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+index f1f2fa1..acf31c2 100644
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -40,7 +40,7 @@ struct DioramaMask {
+   float tableFromHead[12]; // row-major 3x4
+   float proj[6];           // GXSetProjection's perspective parameters
+   float eyeShift;          // b (the right eye's; the left's is -b)
+-  float fade[3];           // x, z, y in table units
++  float fade[4];           // x, z, y in table units; [3] 1 = the bubble (patch 0027)
+ };
+ bool diorama_mask(DioramaMask& out) noexcept;
+ 

@@ -26,7 +26,8 @@ typedef struct WqXrHead {
 
 typedef struct WqXrTable {
     bool diorama;    // xr.ini mode = maqueta (and the session runs)
-    float width;     // the table, metres across (x) and deep (z)
+    bool sphere;     // the bubble (shape = esfera): a sphere of diameter `width`; else the table (a box)
+    float width;     // the bubble's diameter, or the table's metres across (x) and deep (z)
     float depth;
     float span;      // metres of the game's world across the table's width
     float distance;  // the table's middle in front of the eyes at the start (metres)
@@ -38,6 +39,9 @@ typedef struct WqXrTable {
 // The latest head pose and frustum (false while the session does not run).
 bool wq_xr_head(WqXrHead* out);
 void wq_xr_table(WqXrTable* out);
+// The options menu's "Realidad virtual" page (pc_menu.cpp): sets one xr.ini key (its line replaced,
+// or added) and has the layer read the file again. Any thread.
+void wq_xr_set(const char* key, const char* value);
 
 #ifdef __cplusplus
 }

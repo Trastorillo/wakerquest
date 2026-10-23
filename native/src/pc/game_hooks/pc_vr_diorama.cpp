@@ -109,6 +109,7 @@ struct State {
     // the table, for the mask and the culling: table coordinates (x, z within +-1 over the top, y 0
     // on it, -1 at the cut below) from the world, and the scale
     bool tableValid = false;
+    bool sphere = false;
     M4 tableFromWorld;
     float k = 0.0f;  // metres per game unit
     float halfX = 0.5f, halfZ = 0.35f, below = 0.175f;
@@ -226,6 +227,14 @@ void toMtx(const M4& a, Mtx out) {
 // Table from stage: its middle at the anchor (table_distance ahead, table_height below the eyes).
 M4 tableFromStage(const WqXrTable& t) {
     M4 m = identity();
+    if (t.sphere) {
+        // the bubble: radius 1 around its middle, 0.35 radii above Link
+        const float r = 0.5f * t.width;
+        m.m[0][0] = m.m[1][1] = m.m[2][2] = 1.0f / r;
+        m.m[1][3] = (t.height - 0.35f * r) / r;
+        m.m[2][3] = t.distance / r;
+        return m;
+    }
     m.m[0][0] = 1.0f / s.halfX;
     m.m[1][1] = 1.0f / s.below;
     m.m[1][3] = t.height / s.below;
@@ -274,8 +283,9 @@ int cullSphereView(const float p[3], float radius) {
     const float r = radius * s.k;
     const float margin = 0.15f;
     s.cullTests++;
-    const bool out = std::fabs(t[0]) - r / s.halfX > 1.0f + margin || std::fabs(t[2]) - r / s.halfZ > 1.0f + margin ||
-                     t[1] + r / s.below < -1.0f - margin;
+    const bool out = s.sphere ? std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) - r / s.halfX > 1.0f + margin
+                              : std::fabs(t[0]) - r / s.halfX > 1.0f + margin ||
+                                    std::fabs(t[2]) - r / s.halfZ > 1.0f + margin || t[1] + r / s.below < -1.0f - margin;
     if (out) s.cullHidden++;
     const uint64_t now = nowNs();
     if (now - s.cullLogNs > 1000000000ull) {
@@ -311,9 +321,10 @@ bool pc_vr_view_begin(view_class* view) {
     updateRig(player->current.pos, view->mViewMtx, table.followYaw);
 
     // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
+    s.sphere = table.sphere;
     s.halfX = 0.5f * table.width;
-    s.halfZ = 0.5f * table.depth;
-    s.below = 0.25f * std::min(table.width, table.depth);
+    s.halfZ = table.sphere ? s.halfX : 0.5f * table.depth;
+    s.below = table.sphere ? s.halfX : 0.25f * std::min(table.width, table.depth);
     s.k = table.width / (table.span * kUnitsPerMetre);
     const M4 stage = stageFromWorld(table);
     const M4 tableStage = tableFromStage(table);
@@ -339,7 +350,9 @@ bool pc_vr_view_begin(view_class* view) {
         float tfh[12];
         for (int i = 0; i < 3; i++)
             for (int j = 0; j < 4; j++) tfh[i * 4 + j] = tableHead.m[i][j];
-        const float fade[3] = {table.fade / s.halfX, table.fade / s.halfZ, table.fade / s.below};
+        const float r = 0.5f * table.width;
+        float fade[4] = {table.fade / s.halfX, table.fade / s.halfZ, table.fade / s.below, 0.0f};
+        if (table.sphere) fade[0] = fade[1] = fade[2] = table.fade / r, fade[3] = 1.0f;
         aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
     }
     aurora_xr_set_frame_info(head.tag, true);

@@ -41,6 +41,7 @@ extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/
 #include <cstring>
 #include <ctime>
 #include <sys/stat.h>
+#include <string>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -80,14 +81,16 @@ struct Settings {
     float hudWidth = 0.9f;          // the diorama's HUD panel, metres across
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
-    int resolution = 1080;
-    // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model on a table in the room
+    int resolution = 1200;
+    // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
+    // (a sphere, as GalaxyQuest's) or on a table (a box)
     bool diorama = false;
-    float tableWidth = 1.0f, tableDepth = 0.7f;  // m (xr.ini in cm)
-    float tableSpan = 30.0f;                     // m of the game's world across the table
-    float tableDistance = 0.8f;                  // m, its middle in front of the eyes
-    float tableHeight = 0.45f;                   // m, its top below the eyes
-    float tableFade = 0.15f;                     // m, the edges' fade
+    bool sphere = true;
+    float tableWidth = 1.0f, tableDepth = 0.7f;  // m: the bubble's diameter, or the table's width and depth
+    float tableSpan = 30.0f;                     // m of the game's world across it
+    float tableDistance = 1.0f;                  // m, its middle in front of the eyes
+    float tableHeight = 0.3f;                    // m, Link (the table's top) below the eyes
+    float tableFade = 0.2f;                      // m, the edges' fade
     bool tableFollowYaw = true;                  // the world turns with the game camera
 };
 
@@ -105,19 +108,21 @@ const char kDefaultSettings[] =
     "stereo = 1\n"
     "stereo_strength = 0.012\n"
     "stereo_focus = 600\n"
-    "# the game's internal height in pixels (720, 900, 1080, 1440...); read when the game starts.\n"
-    "resolution = 1080\n"
-    "# mode = pantalla (a giant screen) or maqueta (the world as a model on a table in the room).\n"
+    "# the game's internal height in pixels (720, 900, 1080, 1200, 1440); read when the game starts.\n"
+    "resolution = 1200\n"
+    "# mode = pantalla (a giant screen) or maqueta (the world as a model in the room).\n"
     "mode = pantalla\n"
-    "# the model: table_width/table_depth in cm, table_span = metres of the game across the table,\n"
-    "# table_distance and table_height (below the eyes) in metres, table_fade = the edges' fade in m,\n"
-    "# table_follow_yaw 1 = the world turns with the game camera.\n"
-    "table_width = 100\n"
+    "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
+    "# in m (the table's width), bubble_span = metres of the game across it, bubble_distance and\n"
+    "# bubble_height (Link below the eyes) in m, bubble_fade = the edge's fade in m; table_depth (cm) for\n"
+    "# the box; table_follow_yaw 1 = the world turns with the game camera. Also in the options menu.\n"
+    "shape = esfera\n"
+    "bubble_size = 1.0\n"
+    "bubble_span = 30\n"
+    "bubble_distance = 1.0\n"
+    "bubble_height = 0.3\n"
+    "bubble_fade = 0.2\n"
     "table_depth = 70\n"
-    "table_span = 30\n"
-    "table_distance = 0.8\n"
-    "table_height = 0.45\n"
-    "table_fade = 0.15\n"
     "table_follow_yaw = 1\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
@@ -133,12 +138,14 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 16000.0f);
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "mode")) s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
+    else if (!strcmp(key, "shape")) s.sphere = strcmp(v, "caja") != 0 && strcmp(v, "box") != 0 && strcmp(v, "table") != 0;
+    else if (!strcmp(key, "bubble_size")) s.tableWidth = clampf(f, 0.2f, 4.0f);
+    else if (!strcmp(key, "bubble_span") || !strcmp(key, "table_span")) s.tableSpan = clampf(f, 2.0f, 500.0f);
+    else if (!strcmp(key, "bubble_distance") || !strcmp(key, "table_distance")) s.tableDistance = clampf(f, 0.2f, 5.0f);
+    else if (!strcmp(key, "bubble_height") || !strcmp(key, "table_height")) s.tableHeight = clampf(f, -1.0f, 2.0f);
+    else if (!strcmp(key, "bubble_fade") || !strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
     else if (!strcmp(key, "table_width")) s.tableWidth = clampf(f, 20.0f, 400.0f) / 100.0f;
     else if (!strcmp(key, "table_depth")) s.tableDepth = clampf(f, 20.0f, 400.0f) / 100.0f;
-    else if (!strcmp(key, "table_span")) s.tableSpan = clampf(f, 2.0f, 500.0f);
-    else if (!strcmp(key, "table_distance")) s.tableDistance = clampf(f, 0.2f, 5.0f);
-    else if (!strcmp(key, "table_height")) s.tableHeight = clampf(f, -1.0f, 2.0f);
-    else if (!strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
     else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
     else if (!strcmp(key, "hud_width")) s.hudWidth = clampf(f, 0.2f, 3.0f);
 }
@@ -258,8 +265,14 @@ bool hasExtension(const std::vector<XrExtensionProperties>& exts, const char* na
     return false;
 }
 
+std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it now
+
 void readSettings(bool force) {
     const time_t now = time(nullptr);
+    if (s_settingsDirty.exchange(false)) {
+        force = true;
+        s.settingsTime = 0;
+    }
     if (!force && now == s.settingsChecked) return;
     s.settingsChecked = now;
     struct stat st;
@@ -1078,7 +1091,15 @@ void runFrame() {
             hud.subImage.imageRect = {{2 * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
             const float tilt = -0.2f;  // leaning back a little, towards the eyes above it
             hud.pose.orientation = {std::sin(tilt / 2), 0.0f, 0.0f, std::cos(tilt / 2)};
-            hud.pose.position = {0.0f, -st.tableHeight + 0.1f + 0.5f * h, -(st.tableDistance + 0.5f * st.tableDepth)};
+            if (st.sphere) {
+                // over the bubble's far side (its middle is 0.35 radii above Link, pc_vr_diorama.cpp)
+                const float r = 0.5f * st.tableWidth;
+                hud.pose.position = {0.0f, -st.tableHeight + 0.35f * r + 0.7f * r + 0.5f * h,
+                                     -(st.tableDistance + 0.6f * r)};
+            } else {
+                hud.pose.position = {0.0f, -st.tableHeight + 0.1f + 0.5f * h,
+                                     -(st.tableDistance + 0.5f * st.tableDepth)};
+            }
             hud.size = {w, h};
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
         }
@@ -1133,6 +1154,37 @@ void threadMain() {
 
 }  // namespace
 
+extern "C" void wq_xr_set(const char* key, const char* value) {
+    static std::mutex fileMutex;
+    std::lock_guard lock{fileMutex};
+    if (s.settingsPath[0] == '\0' || key == nullptr || value == nullptr) return;
+    std::vector<std::string> lines;
+    if (FILE* f = fopen(s.settingsPath, "r")) {
+        char line[512];
+        while (fgets(line, sizeof line, f)) lines.emplace_back(line);
+        fclose(f);
+    }
+    const size_t keyLen = strlen(key);
+    bool replaced = false;
+    for (std::string& l : lines) {
+        const char* p = l.c_str();
+        while (*p == ' ' || *p == '\t') p++;
+        if (strncmp(p, key, keyLen) != 0) continue;
+        const char* q = p + keyLen;
+        while (*q == ' ' || *q == '\t') q++;
+        if (*q != '=') continue;
+        l = std::string(key) + " = " + value + "\n";
+        replaced = true;
+    }
+    if (!replaced) lines.push_back(std::string(key) + " = " + value + "\n");
+    if (FILE* f = fopen(s.settingsPath, "w")) {
+        for (const std::string& l : lines) fputs(l.c_str(), f);
+        fclose(f);
+    }
+    s_settingsDirty = true;
+    xrlog("settings: %s = %s (options menu)", key, value);
+}
+
 extern "C" bool wq_xr_head(WqXrHead* out) {
     std::lock_guard lock{s_shared};
     if (!s_sharedRunning) return false;
@@ -1146,6 +1198,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     std::lock_guard lock{s_shared};
     const Settings& st = s_sharedSettings;
     out->diorama = st.diorama && s_sharedRunning;
+    out->sphere = st.sphere;
     out->width = st.tableWidth;
     out->depth = st.tableDepth;
     out->span = st.tableSpan;
