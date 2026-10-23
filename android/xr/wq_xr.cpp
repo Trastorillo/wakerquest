@@ -121,7 +121,7 @@ struct Settings {
     float windowScale = 1.0f;     // the game's metres per metre of the room (more: the world smaller)
     float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window
-    float windowPopout = 1.0f;    // m, how far
+    float windowPopout = 0.45f;    // m, how far
     float windowFade = 0.03f;     // m, the edges' fade
     bool windowVignette = false;  // a comfort vignette when the camera moves fast (not done yet)
 };
@@ -167,7 +167,7 @@ const char kDefaultSettings[] =
     "window_scale = 1.0\n"
     "window_depth = 0.5\n"
     "window_popout_on = 1\n"
-    "window_popout = 1.0\n";
+    "window_popout = 0.45\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);

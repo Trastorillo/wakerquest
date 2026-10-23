@@ -479,7 +479,7 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
         s.winHead[2] = t[2];
     }
 
-    // C = V_head * WindowPose * T(0, 0, -depth) * S(k)
+    // C = V_head * WindowPose * T(0, 0, +depth) * S(k)
     const M4 c = mul(headFromStage(head), roomView);
     toMtx(c, s.delta);
     // the far plane: the game's own (its projection: P23 / P22 = far) at the window's scale, at least
