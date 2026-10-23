@@ -92,6 +92,7 @@ struct Settings {
     float tableHeight = 0.3f;                    // m, Link (the table's top) below the eyes
     float tableFade = 0.2f;                      // m, the edges' fade
     bool tableFollowYaw = true;                  // the world turns with the game camera
+    bool viewRelative = true;                    // the left stick relative to the player's view of the model
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
 };
@@ -146,6 +147,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "bubble_distance") || !strcmp(key, "table_distance")) s.tableDistance = clampf(f, 0.2f, 5.0f);
     else if (!strcmp(key, "bubble_height") || !strcmp(key, "table_height")) s.tableHeight = clampf(f, -1.0f, 2.0f);
     else if (!strcmp(key, "bubble_fade") || !strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
+    else if (!strcmp(key, "view_relative")) s.viewRelative = on;
     else if (!strcmp(key, "bubble_x")) s.tableX = clampf(f, -5.0f, 5.0f);
     else if (!strcmp(key, "bubble_yaw")) s.tableYaw = f;
     else if (!strcmp(key, "table_width")) s.tableWidth = clampf(f, 20.0f, 400.0f) / 100.0f;
@@ -255,6 +257,10 @@ HeadSnap s_heads[kHeadHistory];
 uint32_t s_nextTag = 1;
 
 std::atomic_int s_rumbleWanted{0};  // set by SDL's thread (the virtual gamepad's Rumble)
+std::atomic<float> s_camHeading{0.0f};  // wq_xr_set_camera_heading (the game thread)
+std::atomic_bool s_camHeadingValid{false};
+float s_viewHeading = 0.0f;  // the player's view of the model, smoothed (the layer's thread)
+bool s_viewHeadingValid = false;
 
 bool ok(XrResult r, const char* what) {
     if (XR_SUCCEEDED(r)) return true;
@@ -478,7 +484,11 @@ void main() {
     vec3 c = t.rgb;
     if (u_linear != 0)
         c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
-    o_color = u_alpha != 0 ? vec4(c * t.a, t.a) : vec4(c, 1.0);
+    float a = t.a;
+    // the HUD's third: over its transparent background, the game's 2D often leaves the alpha unwritten
+    // (the dialogue box, its text): what has colour shows
+    if (u_alpha != 0 && v_uv.x > 0.6667) a = max(a, smoothstep(0.02, 0.12, max(max(t.r, t.g), t.b)));
+    o_color = u_alpha != 0 ? vec4(c * a, a) : vec4(c, 1.0);
 }
 )";
     GLuint v = compile(GL_VERTEX_SHADER, vs), f = compile(GL_FRAGMENT_SHADER, fs);
@@ -949,6 +959,38 @@ void updatePad() {
             }
         }
     }
+    // The diorama, controls relative to the view: the left stick turned from the player's heading on the
+    // model to the game camera's, so pushing it forward takes Link away from the player whichever way
+    // the model or the camera has turned. The player's heading: from the head to the model's middle
+    // (the head's own forward when it is nearly above it), smoothed.
+    if (s.settings.diorama && s.settings.viewRelative && s_camHeadingValid.load()) {
+        WqXrHead head{};
+        {
+            std::lock_guard lock{s_shared};
+            head = s_heads[(s_nextTag - 1) % kHeadHistory].head;
+        }
+        if (head.tag != 0) {
+            float vx = s.settings.tableX - head.pos[0], vz = -s.settings.tableDistance - head.pos[2];
+            if (vx * vx + vz * vz < 0.3f * 0.3f) {
+                const float x = head.rot[0], y = head.rot[1], z = head.rot[2], w = head.rot[3];
+                vx = -2.0f * (x * z + w * y);
+                vz = -(1.0f - 2.0f * (x * x + y * y));
+            }
+            const float viewHeading = std::atan2(vx, -vz);
+            if (!s_viewHeadingValid) {
+                s_viewHeading = viewHeading;
+                s_viewHeadingValid = true;
+            }
+            float d = viewHeading - s_viewHeading;
+            while (d > 3.14159265f) d -= 6.28318531f;
+            while (d < -3.14159265f) d += 6.28318531f;
+            s_viewHeading += 0.1f * d;
+            const float delta = s_viewHeading - s_camHeading.load();
+            const float cs = std::cos(delta), sn = std::sin(delta);
+            const XrVector2f turned{m.x * cs + m.y * sn, -m.x * sn + m.y * cs};
+            m = turned;
+        }
+    }
     // SDL's Y axes point down, OpenXR's up
     SDL_SetJoystickVirtualAxis(s.pad, SDL_GAMEPAD_AXIS_LEFTX, stickAxis(m.x));
     SDL_SetJoystickVirtualAxis(s.pad, SDL_GAMEPAD_AXIS_LEFTY, stickAxis(-m.y));
@@ -1271,6 +1313,11 @@ extern "C" void wq_xr_set(const char* key, const char* value) {
     }
     s_settingsDirty = true;
     xrlog("settings: %s = %s (options menu)", key, value);
+}
+
+extern "C" void wq_xr_set_camera_heading(float heading) {
+    s_camHeading.store(heading);
+    s_camHeadingValid.store(true);
 }
 
 extern "C" bool wq_xr_head(WqXrHead* out) {

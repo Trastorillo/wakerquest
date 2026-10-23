@@ -44,6 +44,9 @@ void wq_xr_table(WqXrTable* out);
 // The options menu's "Realidad virtual" page (pc_menu.cpp): sets one xr.ini key (its line replaced,
 // or added) and has the layer read the file again. Any thread.
 void wq_xr_set(const char* key, const char* value);
+// The diorama (pc_vr_diorama.cpp), every frame: the game camera's heading in the room (radians, 0 =
+// straight ahead, positive to the right), so the left stick can be turned to the player's view.
+void wq_xr_set_camera_heading(float heading);
 
 #ifdef __cplusplus
 }

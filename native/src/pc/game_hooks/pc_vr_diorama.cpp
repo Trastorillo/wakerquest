@@ -321,6 +321,9 @@ bool pc_vr_view_begin(view_class* view) {
         return false;
     }
     updateRig(player->current.pos, view->mViewMtx, table.followYaw);
+    // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
+    // for the left stick relative to the player's view (wq_xr.cpp)
+    wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw);
 
     // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
     s.sphere = table.sphere;
