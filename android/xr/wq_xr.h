@@ -1,6 +1,9 @@
 // WakerQuest's headset layer (wq_xr.cpp): the game on a giant screen in the Meta Quest through
-// OpenXR, and the Touch controllers as a GameCube controller.
+// OpenXR, or as a diorama on a table in the room, and the Touch controllers as a GameCube controller.
 #pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,6 +13,31 @@ extern "C" {
 // thread and returns true: from then on Aurora draws into the layer's buffers (include/aurora/xr.h)
 // while the session runs. Otherwise false, and the game stays in its window. WQ_XR=0 turns it off.
 bool wq_xr_start(void);
+
+// The diorama (native/src/pc/game_hooks/pc_vr_diorama.cpp), any thread.
+typedef struct WqXrHead {
+    uint32_t tag;   // names this pose for aurora_xr_set_frame_info; 0 = none yet
+    float pos[3];   // the eyes' midpoint in the LOCAL space (metres)
+    float rot[4];   // the head's orientation, a quaternion (x, y, z, w)
+    float ipd;      // the distance between the eyes (metres)
+    // the frustum both eyes' pictures are drawn with, as tangents from each eye (left and down < 0)
+    float tanLeft, tanRight, tanDown, tanUp;
+} WqXrHead;
+
+typedef struct WqXrTable {
+    bool diorama;    // xr.ini mode = maqueta (and the session runs)
+    float width;     // the table, metres across (x) and deep (z)
+    float depth;
+    float span;      // metres of the game's world across the table's width
+    float distance;  // the table's middle in front of the eyes at the start (metres)
+    float height;    // its top below the eyes (metres)
+    float fade;      // the edges' fade (metres)
+    bool followYaw;  // the world turns with the game camera (else it keeps its first heading)
+} WqXrTable;
+
+// The latest head pose and frustum (false while the session does not run).
+bool wq_xr_head(WqXrHead* out);
+void wq_xr_table(WqXrTable* out);
 
 #ifdef __cplusplus
 }

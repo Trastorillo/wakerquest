@@ -103,6 +103,8 @@ set_target_properties(cos_openxr_loader PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${_cos_openxr_dir}/prefab/modules/headers/include")
 target_sources(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr/wq_xr.cpp")
 target_include_directories(switchwaker PRIVATE "${COS_ANDROID_DIR}/xr")
+# the diorama's game side (native/src/pc/game_hooks/pc_vr_diorama.cpp) asks the headset layer
+target_include_directories(cos_pc PRIVATE "${COS_ANDROID_DIR}/xr")
 target_link_libraries(switchwaker PRIVATE cos_openxr_loader aurora::core ${AURORA_SDL3_TARGET} EGL GLESv3 nativewindow)
 
 # ---- libmain.so for SDL's Java side ---------------------------------------------------------------------

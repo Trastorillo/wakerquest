@@ -34,6 +34,7 @@
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "pc/game_hooks.h"
 #include "pc/pc_harness.h"
+#include "pc/pc_vr.h"
 #include "pc_internal.h"
 
 #include "d/d_com_inf_game.h"
@@ -302,6 +303,11 @@ void pc_fps60_paint_prepare(view_class* view) {
 
 void pc_fps60_view_begin(view_class* view) {
     sDeltaOn = false;
+    // The diorama in the Meta Quest (pc_vr.h) owns the view delta while it is on.
+    if (pc_vr_view_begin(view)) {
+        sPrepared = false;
+        return;
+    }
     if (!pc_paint_is_extra() || view == nullptr || (!enabled() && !modelsEnabled())) {
         sPrepared = false;
         return;
@@ -357,6 +363,7 @@ void pc_fps60_view_begin(view_class* view) {
 }
 
 void pc_fps60_view_end(void) {
+    pc_vr_view_end();
     if (sDeltaOn) {
         AuroraSetViewDelta(nullptr, nullptr, nullptr);
         sDeltaOn = false;
@@ -369,6 +376,7 @@ void pc_fps60_view_end(void) {
 }
 
 void pc_fps60_sky_begin(void) {
+    pc_vr_sky_begin();
     // COS_FPS60_SKY=0: the sky gets the full delta like the rest (step B's behaviour, for comparison)
     static const bool skyOn = [] {
         const char* v = getenv("COS_FPS60_SKY");
@@ -381,6 +389,7 @@ void pc_fps60_sky_begin(void) {
 }
 
 void pc_fps60_sky_end(void) {
+    pc_vr_sky_end();
     if (sDeltaOn && sSkyOn) {
         AuroraSetViewDelta(&sDelta[0][0], sProjFrom, sProjTo);
     }

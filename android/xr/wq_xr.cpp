@@ -33,7 +33,9 @@ extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/
 #include <jni.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdarg>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -78,6 +80,14 @@ struct Settings {
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
     int resolution = 1080;
+    // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model on a table in the room
+    bool diorama = false;
+    float tableWidth = 1.0f, tableDepth = 0.7f;  // m (xr.ini in cm)
+    float tableSpan = 30.0f;                     // m of the game's world across the table
+    float tableDistance = 0.8f;                  // m, its middle in front of the eyes
+    float tableHeight = 0.45f;                   // m, its top below the eyes
+    float tableFade = 0.15f;                     // m, the edges' fade
+    bool tableFollowYaw = true;                  // the world turns with the game camera
 };
 
 const char kDefaultSettings[] =
@@ -95,7 +105,19 @@ const char kDefaultSettings[] =
     "stereo_strength = 0.012\n"
     "stereo_focus = 600\n"
     "# the game's internal height in pixels (720, 900, 1080, 1440...); read when the game starts.\n"
-    "resolution = 1080\n";
+    "resolution = 1080\n"
+    "# mode = pantalla (a giant screen) or maqueta (the world as a model on a table in the room).\n"
+    "mode = pantalla\n"
+    "# the model: table_width/table_depth in cm, table_span = metres of the game across the table,\n"
+    "# table_distance and table_height (below the eyes) in metres, table_fade = the edges' fade in m,\n"
+    "# table_follow_yaw 1 = the world turns with the game camera.\n"
+    "table_width = 100\n"
+    "table_depth = 70\n"
+    "table_span = 30\n"
+    "table_distance = 0.8\n"
+    "table_height = 0.45\n"
+    "table_fade = 0.15\n"
+    "table_follow_yaw = 1\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
@@ -109,6 +131,14 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.1f);
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 16000.0f);
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
+    else if (!strcmp(key, "mode")) s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
+    else if (!strcmp(key, "table_width")) s.tableWidth = clampf(f, 20.0f, 400.0f) / 100.0f;
+    else if (!strcmp(key, "table_depth")) s.tableDepth = clampf(f, 20.0f, 400.0f) / 100.0f;
+    else if (!strcmp(key, "table_span")) s.tableSpan = clampf(f, 2.0f, 500.0f);
+    else if (!strcmp(key, "table_distance")) s.tableDistance = clampf(f, 0.2f, 5.0f);
+    else if (!strcmp(key, "table_height")) s.tableHeight = clampf(f, -1.0f, 2.0f);
+    else if (!strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
+    else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
 }
 
 // ---- State ---------------------------------------------------------------------------------------
@@ -182,8 +212,25 @@ struct Xr {
     char settingsPath[600] = "";
     time_t settingsTime = 0;
     time_t settingsChecked = 0;
+
+    // the diorama: the swapchain's picture was drawn for head pose `frameTag`
+    bool dioramaFrame = false;
+    uint32_t frameTag = 0;
 };
 Xr s;
+
+// Shared with the game thread (wq_xr_head, wq_xr_table): the settings and the head poses of the last
+// frames, each named by a tag, so a diorama frame is shown with the pose it was drawn for.
+struct HeadSnap {
+    WqXrHead head{};
+    XrPosef eyes[2]{};
+};
+std::mutex s_shared;
+Settings s_sharedSettings;
+bool s_sharedRunning = false;
+constexpr int kHeadHistory = 64;
+HeadSnap s_heads[kHeadHistory];
+uint32_t s_nextTag = 1;
 
 std::atomic_int s_rumbleWanted{0};  // set by SDL's thread (the virtual gamepad's Rumble)
 
@@ -243,7 +290,16 @@ void readSettings(bool force) {
     }
     fclose(f);
     s.settings = next;
-    aurora_xr_set_stereo(next.stereo, next.stereoStrength, next.stereoFocus);
+    {
+        std::lock_guard lock{s_shared};
+        s_sharedSettings = next;
+    }
+    // the screen's 3D; the diorama sets its own eye shift every frame (pc_vr_diorama.cpp)
+    if (!next.diorama) aurora_xr_set_stereo(next.stereo, next.stereoStrength, next.stereoFocus);
+    xrlog("settings: mode %s; table %.0fx%.0f cm, %.0f m of the game across, %.2f m away, %.2f m below the eyes, "
+          "fade %.2f m, %s the camera",
+          next.diorama ? "maqueta" : "pantalla", next.tableWidth * 100.0f, next.tableDepth * 100.0f, next.tableSpan,
+          next.tableDistance, next.tableHeight, next.tableFade, next.tableFollowYaw ? "turning with" : "not turning with");
     xrlog("settings: screen %.1f m wide, %.1f m away, %.1f m up; passthrough %s; refresh %d Hz; 3D %s "
           "(strength %.3f, focus %.0f)",
           next.width, next.distance, next.height, next.passthrough ? "on" : "off", next.refresh,
@@ -606,7 +662,8 @@ void setRefreshRate() {
 
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
 bool updatePassthrough() {
-    const bool want = s.settings.passthrough && s.hasPassthrough;
+    // the diorama sits in the room
+    const bool want = (s.settings.passthrough || s.settings.diorama) && s.hasPassthrough;
     if (want == s.passthroughRunning) return want;
     if (want && !s.passthrough) {
         PFN_xrCreatePassthroughFB create = nullptr;
@@ -667,6 +724,10 @@ void pollEvents() {
                 if (s.running) {
                     setRefreshRate();
                     aurora_xr_present_enable(true);
+                    {
+                        std::lock_guard lock{s_shared};
+                        s_sharedRunning = true;
+                    }
                     xrlog("session running; Aurora presents to the headset (device support %s)",
                           aurora_xr_present_supported() ? "yes" : "not yet known or no");
                 }
@@ -815,6 +876,63 @@ void updateRumble() {
     }
 }
 
+// ---- Head poses (the diorama) ----------------------------------------------------------------------
+
+// The eyes where the runtime predicts them for this frame: the midpoint, the head's orientation, the
+// distance between them and one frustum that holds both eyes' (with a margin for the head turning
+// before a frame drawn now is shown; the compositor reprojects the rest), under a new tag.
+void locateHead() {
+    XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO};
+    li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    li.displayTime = s.frame.predictedDisplayTime;
+    li.space = s.space;
+    XrViewState vs{XR_TYPE_VIEW_STATE};
+    XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+    uint32_t n = 0;
+    if (XR_FAILED(xrLocateViews(s.session, &li, &vs, 2, &n, views)) || n != 2) return;
+    if (!(vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) ||
+        !(vs.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT))
+        return;
+    HeadSnap h;
+    const XrVector3f& a = views[0].pose.position;
+    const XrVector3f& b = views[1].pose.position;
+    h.head.pos[0] = 0.5f * (a.x + b.x);
+    h.head.pos[1] = 0.5f * (a.y + b.y);
+    h.head.pos[2] = 0.5f * (a.z + b.z);
+    const XrQuaternionf& q = views[0].pose.orientation;
+    h.head.rot[0] = q.x;
+    h.head.rot[1] = q.y;
+    h.head.rot[2] = q.z;
+    h.head.rot[3] = q.w;
+    const float d = std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+    h.head.ipd = d > 0.04f && d < 0.09f ? d : 0.063f;
+    const float margin = 1.12f;
+    h.head.tanLeft = std::min(std::tan(views[0].fov.angleLeft), std::tan(views[1].fov.angleLeft)) * margin;
+    h.head.tanRight = std::max(std::tan(views[0].fov.angleRight), std::tan(views[1].fov.angleRight)) * margin;
+    h.head.tanDown = std::min(std::tan(views[0].fov.angleDown), std::tan(views[1].fov.angleDown)) * margin;
+    h.head.tanUp = std::max(std::tan(views[0].fov.angleUp), std::tan(views[1].fov.angleUp)) * margin;
+    h.eyes[0] = views[0].pose;
+    h.eyes[1] = views[1].pose;
+    std::lock_guard lock{s_shared};
+    h.head.tag = s_nextTag++;
+    if (s_nextTag == 0) s_nextTag = 1;
+    s_heads[h.head.tag % kHeadHistory] = h;
+}
+
+// The pose a diorama frame was drawn for (the newest if that one is gone).
+bool headForTag(uint32_t tag, HeadSnap& out) {
+    std::lock_guard lock{s_shared};
+    const HeadSnap& h = s_heads[tag % kHeadHistory];
+    if (tag != 0 && h.head.tag == tag) {
+        out = h;
+        return true;
+    }
+    const HeadSnap& latest = s_heads[(s_nextTag - 1) % kHeadHistory];
+    if (latest.head.tag == 0) return false;
+    out = latest;
+    return true;
+}
+
 // ---- Frames --------------------------------------------------------------------------------------
 
 // The newest Aurora frame into the screen's swapchain. True while the swapchain holds a picture.
@@ -878,8 +996,11 @@ bool copyNewestFrame() {
     if (copied) {
         if (f.stereo != s.stereoFrame || f.sideBySide != s.sideBySide)
             xrlog("picture: %s", f.stereo ? "3D (one eye per half)" : f.sideBySide ? "flat (left half, a menu is open)" : "flat");
+        if (f.diorama != s.dioramaFrame) xrlog("picture: %s", f.diorama ? "the diorama" : "the screen");
         s.sideBySide = f.sideBySide;
         s.stereoFrame = f.stereo;
+        s.dioramaFrame = f.diorama;
+        s.frameTag = f.tag;
         s.haveScreen = true;
         if (++s.frames == 1 || s.frames % 600 == 0)
             xrlog("frame %u from Aurora (serial %u, %ux%u): %u skipped, %u without a fence", s.frames, f.serial,
@@ -895,6 +1016,7 @@ void runFrame() {
     XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
     if (!ok(xrBeginFrame(s.session, &bi), "xrBeginFrame")) return;
     readSettings(false);
+    locateHead();
     updatePad();
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
@@ -909,7 +1031,29 @@ void runFrame() {
     // The screen: one quad for both eyes, or in 3D one per eye over its half of the picture, at the
     // same place, so each eye sees its own picture of the scene.
     XrCompositionLayerQuad quads[2];
-    if (screen) {
+    // The diorama: each eye's half as drawn, for the eye where it was when the frame was drawn, with
+    // the frustum it was drawn with; the compositor reprojects to where the eye is now.
+    XrCompositionLayerProjection proj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    XrCompositionLayerProjectionView projViews[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
+                                                     {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
+    HeadSnap drawnFor;
+    if (screen && s.dioramaFrame && s.sideBySide && headForTag(s.frameTag, drawnFor)) {
+        const int32_t eyeW = int32_t(s.screenW / 2);
+        const XrFovf fov{std::atan(drawnFor.head.tanLeft), std::atan(drawnFor.head.tanRight),
+                         std::atan(drawnFor.head.tanUp), std::atan(drawnFor.head.tanDown)};
+        for (int eye = 0; eye < 2; eye++) {
+            projViews[eye].pose = drawnFor.eyes[eye];
+            projViews[eye].fov = fov;
+            projViews[eye].subImage.swapchain = s.swapchain;
+            // a flat frame (a menu open) has the left eye's picture only, for both
+            const int src = s.stereoFrame ? eye : 0;
+            projViews[eye].subImage.imageRect = {{src * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+        }
+        proj.space = s.space;
+        proj.viewCount = 2;
+        proj.views = projViews;
+        layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&proj;
+    } else if (screen) {
         const Settings& st = s.settings;
         const int32_t eyeW = int32_t(s.sideBySide ? s.screenW / 2 : s.screenW);
         const int eyes = s.stereoFrame ? 2 : 1;
@@ -959,6 +1103,28 @@ void threadMain() {
 }
 
 }  // namespace
+
+extern "C" bool wq_xr_head(WqXrHead* out) {
+    std::lock_guard lock{s_shared};
+    if (!s_sharedRunning) return false;
+    const HeadSnap& latest = s_heads[(s_nextTag - 1) % kHeadHistory];
+    if (latest.head.tag == 0) return false;
+    *out = latest.head;
+    return true;
+}
+
+extern "C" void wq_xr_table(WqXrTable* out) {
+    std::lock_guard lock{s_shared};
+    const Settings& st = s_sharedSettings;
+    out->diorama = st.diorama && s_sharedRunning;
+    out->width = st.tableWidth;
+    out->depth = st.tableDepth;
+    out->span = st.tableSpan;
+    out->distance = st.tableDistance;
+    out->height = st.tableHeight;
+    out->fade = st.tableFade;
+    out->followYaw = st.tableFollowYaw;
+}
 
 extern "C" bool wq_xr_start(void) {
     const char* e = getenv("WQ_XR");

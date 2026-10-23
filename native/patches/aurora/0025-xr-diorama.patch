@@ -1,0 +1,277 @@
+XR presentation: the diorama's frames (head pose tag, stretched eyes) and a general eye shift
+
+For WakerQuest's diorama (native/src/pc/game_hooks/pc_vr_diorama.cpp, android/xr/wq_xr.cpp), which
+draws the world for the headset's eyes through the view delta (patch 0019):
+- aurora_xr_set_frame_info(tag, diorama), from the game thread while it records a frame: taken by
+  the frame's present and published with it (AuroraXrFrame.tag, .diorama), so the XR layer shows the
+  frame as a projection layer for the head pose it was drawn for. A diorama frame's eyes are the EFB
+  stretched over each half of the buffer (as wide as the EFB, no 4:3 letterbox).
+- The eyes' shift (patch 0024) becomes clip.x += eye * (a * clip.w + b), set with
+  aurora_xr_set_eye_shift(enable, a, b); aurora_xr_set_stereo(strength, focus) is a = strength,
+  b = -strength * focus. The immediate word carries a and sign(b) * sqrt(|b| / 64) as two snorm16,
+  so the screen's focus term (several clip units) and the diorama's eye offset (hundredths) both keep
+  their precision.
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+index 0bef47f..6f8837b 100644
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -31,8 +31,21 @@ typedef struct AuroraXrFrame {
+    * right half); when it does not (a menu is open), only the left half holds the frame, for both. */
+   bool sideBySide;
+   bool stereo;
++  /* The diorama (patch 0025): the frame was drawn for the head pose the game named with
++   * aurora_xr_set_frame_info (tag), each eye's picture stretched over its half (no letterbox),
++   * for a projection layer. */
++  bool diorama;
++  uint32_t tag;
+ } AuroraXrFrame;
+ 
++/* Patch 0025, from the game thread while it records a frame: the head pose it is drawn for (a tag
++ * the XR layer gave out) and whether it is the diorama. Taken by the frame's present. */
++void aurora_xr_set_frame_info(uint32_t tag, bool diorama);
++/* Patch 0025: the eyes' clip-space shift as clip.x += eye * (a * clip.w + b) (eye -1 left, +1 right),
++ * any thread; aurora_xr_set_stereo is a = strength, b = -strength * focus. The diorama uses b alone
++ * (half the distance between the eyes, through the projection). */
++void aurora_xr_set_eye_shift(bool enable, float a, float b);
++
+ /* Stereoscopic 3D (patch 0024), from any thread; takes effect from the next frame. The scene's
+  * perspective draws over the whole EFB are drawn once per eye, each shifted in clip space by
+  * clip.x += eye * strength * (clip.w - focus): strength is the shift of what is far away, in NDC
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index 1affdf2..ffd454f 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -339,11 +339,21 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   // XR presentation (patch 0023): a 4:3 target as tall as the present source, for the XR layer's
+   // screen. The surface's viewport stays for a frame that falls back to the surface.
+   const bool xr = webgpu::xr_present::active();
++  // The diorama (patch 0025): each eye's picture is the EFB as drawn for its frustum, stretched over
++  // the eye's whole image (the XR layer shows it with that frustum), for the head pose `xrTag`.
++  uint32_t xrTag = 0;
++  bool xrDiorama = false;
++  if (xr) {
++    webgpu::xr_present::take_frame_info(xrTag, xrDiorama);
++  }
+   const uint32_t xrHeight = xr ? std::max<uint32_t>(presentSource.size.height, 2) & ~1u : 0;
+-  const uint32_t xrWidth = (xrHeight * 4 / 3 + 1) & ~1u;
+-  const auto xrViewport = xr ? webgpu::calculate_present_viewport(xrWidth, xrHeight, presentSource.size.width,
+-                                                                  presentSource.size.height)
+-                             : viewport;
++  const uint32_t xrWidth =
++      xrDiorama ? std::max<uint32_t>(presentSource.size.width, 2) & ~1u : (xrHeight * 4 / 3 + 1) & ~1u;
++  const auto xrViewport = !xr        ? viewport
++                          : xrDiorama ? webgpu::Viewport{0.f, 0.f, static_cast<float>(xrWidth),
++                                                         static_cast<float>(xrHeight), 0.f, 1.f}
++                                      : webgpu::calculate_present_viewport(xrWidth, xrHeight, presentSource.size.width,
++                                                                           presentSource.size.height);
+   // Stereoscopic 3D (patch 0024): while it is on the XR buffers are two eyes wide. A frame is shown in
+   // stereo when nothing is drawn over it (ImGui, the options menu, would be in one eye only); the
+   // render worker then encodes it again for the right eye (gfx/stereo.hpp).
+@@ -361,7 +371,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+ #endif
+ 
+   gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, surfaceViewport = viewport, xr, xrWidth,
+-                  xrHeight, xrViewport, sideBySide, imguiDrawData = std::move(imguiDrawData)](
++                  xrHeight, xrViewport, sideBySide, xrTag, xrDiorama, imguiDrawData = std::move(imguiDrawData)](
+                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+@@ -472,7 +482,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+     webgpu::gpu_prof::after_submit();
+     if (xrFrame) {
+       // XR presentation (patch 0023): the XR layer shows it; nothing to present here.
+-      webgpu::xr_present::end(sideBySide, xrStereo);
++      webgpu::xr_present::end(sideBySide, xrStereo, xrDiorama, xrTag);
+       gfx::after_present();
+     } else if (canPresent && g_surface) {
+       ZoneScopedN("Present");
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+index a61dbfe..4464f7d 100644
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -16,7 +16,7 @@ int g_eye = 0;               // 0 mono, -1 left, +1 right
+ bool g_frameActive = false;  // this frame's left eye was shifted
+ bool g_replaying = false;
+ bool g_presented = false;
+-float g_strength = 0.f, g_focus = 0.f;  // latched per frame
++float g_a = 0.f, g_b = 0.f;  // clip.x += eye * (a * w + b), latched per frame (patch 0025)
+ bool g_efbPass = false;
+ float g_passWidth = 0.f, g_passHeight = 0.f;
+ uint32_t g_word = 0;
+@@ -26,20 +26,22 @@ std::atomic_bool g_request{false};
+ 
+ int16_t snorm16(float v) { return static_cast<int16_t>(std::lround(std::clamp(v, -1.f, 1.f) * 32767.f)); }
+ 
+-// unpack2x16snorm in the shader: x from the low 16 bits; focus in units of 16384 game units
++// unpack2x16snorm in the shader: x = the eye's a (from the low 16 bits); y = sign(b) * sqrt(|b| / 64), so
++// that both a screen's focus term (several clip units) and the diorama's eye offset (a few hundredths)
++// keep their precision (patch 0025)
+ uint32_t make_word(int eye) {
+-  const float k = static_cast<float>(eye) * g_strength;
+-  const uint32_t x = static_cast<uint16_t>(snorm16(k));
+-  const uint32_t y = static_cast<uint16_t>(snorm16(g_focus / 16384.f));
+-  const uint32_t word = x | (y << 16);
++  const float a = static_cast<float>(eye) * g_a;
++  const float b = static_cast<float>(eye) * g_b;
++  const float y = std::copysign(std::sqrt(std::min(std::fabs(b), 64.f) / 64.f), b);
++  const uint32_t word = static_cast<uint16_t>(snorm16(a)) | (static_cast<uint32_t>(static_cast<uint16_t>(snorm16(y))) << 16);
+   return word != 0 ? word : 1u;  // a non-zero word for "shift by nothing"
+ }
+ } // namespace
+ 
+ void begin_frame() noexcept {
+   g_frameActive = webgpu::xr_present::stereo_wanted();
+-  g_strength = webgpu::xr_present::stereo_strength();
+-  g_focus = webgpu::xr_present::stereo_focus();
++  g_a = webgpu::xr_present::stereo_a();
++  g_b = webgpu::xr_present::stereo_b();
+   g_eye = g_frameActive ? -1 : 0;
+   g_replaying = false;
+ }
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+index e6a950d..cb8da2c 100644
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -1075,15 +1075,15 @@ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlph
+         "\n    let clip_base = select(clip_a, clip_b, use_b);"
+         "\n    out.pos = vec4f(clip_base.xy + offset_ndc * clip_base.w, clip_base.zw);";
+   }
+-  // Stereoscopic 3D (patch 0024, gfx/stereo.hpp): the eye's shift (x) and focus (y, in units of
+-  // 16384) in imm._pad, 0 for a draw drawn as recorded. Only perspective projections (w = -z, the
+-  // projection's last column not (0, 0, 0, 1)) move: what is at the focus depth stays, what is far
+-  // moves by the shift. The census uses imm._pad for its own counting.
++  // Stereoscopic 3D (patches 0024, 0025, gfx/stereo.hpp): the eye's clip-space shift in imm._pad,
++  // clip.x += a * clip.w + b with a = x and b = y * |y| * 64; 0 for a draw drawn as recorded. Only
++  // perspective projections (w = -z, the projection's last column not (0, 0, 0, 1)) move. The census
++  // uses imm._pad for its own counting.
+   if (!gfx::census::counters_enabled()) {
+     vtxXfrAttrsPre +=
+         "\n    if (imm._pad != 0u && ubuf.proj[3].z != 0.0) {"
+         "\n        let eye = unpack2x16snorm(imm._pad);"
+-        "\n        out.pos.x += eye.x * (out.pos.w - eye.y * 16384.0);"
++        "\n        out.pos.x += eye.x * out.pos.w + eye.y * abs(eye.y) * 64.0;"
+         "\n    }";
+   }
+   vtxXfrAttrsPre += fmt::format(
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+index a9b56f5..ba790d3 100644
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -20,8 +20,10 @@ namespace {
+ std::atomic_bool g_enabled{false};
+ // Stereoscopic 3D (patch 0024)
+ std::atomic_bool g_stereo{false};
+-std::atomic<float> g_stereoStrength{0.012f};
+-std::atomic<float> g_stereoFocus{600.f};
++std::atomic<float> g_stereoA{0.012f};        // patch 0025: clip.x += eye * (a * w + b)
++std::atomic<float> g_stereoB{-0.012f * 600.f};
++std::atomic<uint32_t> g_frameTag{0};         // patch 0025: aurora_xr_set_frame_info
++std::atomic_bool g_frameDiorama{false};
+ 
+ #ifdef __ANDROID__
+ Module Log("aurora::xr");
+@@ -46,6 +48,8 @@ int g_latest = -1;    // published, not yet taken
+ int g_latestFd = -1;  // its sync file
+ int g_reading = -1;   // taken, not yet done
+ bool g_latestSideBySide = false, g_latestStereo = false;  // patch 0024
++bool g_latestDiorama = false;                              // patch 0025
++uint32_t g_latestTag = 0;
+ uint32_t g_serial = 0;
+ bool g_failed = false;  // creating the buffers failed: the surface for good
+ 
+@@ -164,7 +168,7 @@ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept {
+ #endif
+ }
+ 
+-void end(bool sideBySide, bool stereo) noexcept {
++void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag) noexcept {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+   if (g_writing < 0) {
+@@ -207,17 +211,26 @@ void end(bool sideBySide, bool stereo) noexcept {
+   g_latestFd = fd;
+   g_latestSideBySide = sideBySide;
+   g_latestStereo = stereo;
++  g_latestDiorama = diorama;
++  g_latestTag = tag;
+   g_writing = -1;
+   ++g_serial;
+ #else
+   (void)sideBySide;
+   (void)stereo;
++  (void)diorama;
++  (void)tag;
+ #endif
+ }
+ 
++void take_frame_info(uint32_t& tag, bool& diorama) noexcept {
++  tag = g_frameTag.load(std::memory_order_relaxed);
++  diorama = g_frameDiorama.load(std::memory_order_relaxed);
++}
++
+ bool stereo_wanted() noexcept { return g_stereo.load(std::memory_order_relaxed) && active(); }
+-float stereo_strength() noexcept { return g_stereoStrength.load(std::memory_order_relaxed); }
+-float stereo_focus() noexcept { return g_stereoFocus.load(std::memory_order_relaxed); }
++float stereo_a() noexcept { return g_stereoA.load(std::memory_order_relaxed); }
++float stereo_b() noexcept { return g_stereoB.load(std::memory_order_relaxed); }
+ 
+ void shutdown() noexcept {
+ #ifdef __ANDROID__
+@@ -237,11 +250,20 @@ void aurora_xr_present_enable(bool enable) { g_enabled.store(enable); }
+ bool aurora_xr_present_supported(void) { return g_supported; }
+ 
+ void aurora_xr_set_stereo(bool enable, float strength, float focus) {
+-  g_stereoStrength.store(strength);
+-  g_stereoFocus.store(focus);
++  aurora_xr_set_eye_shift(enable, strength, -strength * focus);
++}
++
++void aurora_xr_set_eye_shift(bool enable, float a, float b) {
++  g_stereoA.store(a);
++  g_stereoB.store(b);
+   g_stereo.store(enable);
+ }
+ 
++void aurora_xr_set_frame_info(uint32_t tag, bool diorama) {
++  g_frameTag.store(tag);
++  g_frameDiorama.store(diorama);
++}
++
+ bool aurora_xr_present_take(AuroraXrFrame* out) {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+@@ -255,6 +277,8 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+   out->serial = g_serial;
+   out->sideBySide = g_latestSideBySide;
+   out->stereo = g_latestStereo;
++  out->diorama = g_latestDiorama;
++  out->tag = g_latestTag;
+   g_reading = g_latest;
+   g_latest = g_latestFd = -1;
+   return true;
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+index fd76b5b..170028e 100644
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -20,13 +20,17 @@ bool active() noexcept;
+ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept;
+ // On the render worker, after the queue submit: publishes the frame to the XR layer. sideBySide:
+ // the buffer is two eyes wide (patch 0024); stereo: both halves hold this frame's eyes.
+-void end(bool sideBySide = false, bool stereo = false) noexcept;
++void end(bool sideBySide = false, bool stereo = false, bool diorama = false, uint32_t tag = 0) noexcept;
++// Patch 0025: the frame info the game set (aurora_xr_set_frame_info), taken once per frame by the
++// present on the thread that ends frames.
++void take_frame_info(uint32_t& tag, bool& diorama) noexcept;
+ // Drops the buffers (device shutdown).
+ void shutdown() noexcept;
+ 
+ // Stereoscopic 3D settings (patch 0024, aurora_xr_set_stereo): wanted only while active().
+ bool stereo_wanted() noexcept;
+-float stereo_strength() noexcept;
+-float stereo_focus() noexcept;
++// patch 0025: clip.x += eye * (a * clip.w + b)
++float stereo_a() noexcept;
++float stereo_b() noexcept;
+ 
+ } // namespace aurora::webgpu::xr_present
