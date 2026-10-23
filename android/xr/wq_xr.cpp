@@ -487,7 +487,11 @@ void main() {
     float a = t.a;
     // the HUD's third: over its transparent background, the game's 2D often leaves the alpha unwritten
     // (the dialogue box, its text): what has colour shows
-    if (u_alpha != 0 && v_uv.x > 0.6667) a = max(a, smoothstep(0.02, 0.12, max(max(t.r, t.g), t.b)));
+    if (u_alpha != 0 && v_uv.x > 0.6667) {
+        // ... and the game paints a full-screen opaque black behind its 2D: pure black is the background
+        float m = max(max(t.r, t.g), t.b);
+        a = m < 0.02 ? 0.0 : max(a, smoothstep(0.02, 0.12, m));
+    }
     o_color = u_alpha != 0 ? vec4(c * a, a) : vec4(c, 1.0);
 }
 )";
