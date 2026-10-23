@@ -478,10 +478,7 @@ void main() {
     vec3 c = t.rgb;
     if (u_linear != 0)
         c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
-    float a = t.a;
-    // the HUD's third: the game paints a full-screen black over it (opaque); keyed out as transparent
-    if (u_alpha != 0 && v_uv.x > 0.6667 && max(max(t.r, t.g), t.b) < 0.03) a = 0.0;
-    o_color = u_alpha != 0 ? vec4(c * a, a) : vec4(c, 1.0);
+    o_color = u_alpha != 0 ? vec4(c * t.a, t.a) : vec4(c, 1.0);
 }
 )";
     GLuint v = compile(GL_VERTEX_SHADER, vs), f = compile(GL_FRAGMENT_SHADER, fs);

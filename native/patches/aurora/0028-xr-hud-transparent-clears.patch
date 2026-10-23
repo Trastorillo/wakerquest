@@ -1,0 +1,30 @@
+XR diorama: the HUD replay's partial clears transparent
+
+Aurora draws partial EFB clears (an EFB copy with clear over less than the whole target) as a quad
+in the clear colour. In the diorama's HUD replay (patch 0026) they painted the game's opaque clear
+colour over the HUD's panel; they clear to transparent there, as its passes do.
+
+diff --git a/lib/gfx/clear.cpp b/lib/gfx/clear.cpp
+index 8b224f7..bf033e1 100644
+--- a/lib/gfx/clear.cpp
++++ b/lib/gfx/clear.cpp
+@@ -1,6 +1,7 @@
+ #include "clear.hpp"
+ 
+ #include "encoding.hpp"
++#include "stereo.hpp"
+ #include "../webgpu/gpu.hpp"
+ #include "tracy/Tracy.hpp"
+ 
+@@ -143,7 +144,10 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass, const wgp
+     return;
+   }
+ 
+-  pass.SetBlendConstant(&data.color);
++  // The diorama's HUD replay (patch 0028): its partial clears transparent too, as its passes' (0026);
++  // the game's clear colour painted the HUD's panel opaque black.
++  const wgpu::Color transparent{0.0, 0.0, 0.0, 0.0};
++  pass.SetBlendConstant(stereo::hud_replay() ? &transparent : &data.color);
+   pass.SetViewport(0.f, 0.f, static_cast<float>(targetSize.width), static_cast<float>(targetSize.height), data.depth,
+                    data.depth);
+   pass.SetScissorRect(data.rect.x, data.rect.y, data.rect.width, data.rect.height);
