@@ -2,18 +2,26 @@
 // messages get one more page of our own text, at run time. The game's text comes from the player's
 // disc and is not changed; only these pages are ours. COS_DEDICATORIA=0 turns it off.
 //
-// Message numbers (the same in every language of GZLP01; the text is Spanish):
-//   2003  the grandmother, end of her first talk (the green clothes on the birthday)
-//   2007  an Outset islander praising the green clothes
+// Every message the game shows asks fopMsgM_msgGet_c::getMessage for its text (an NPC's talk:
+// fopNpc_npc_c::talk -> fopMsgM_messageSet -> fopMsgM_messageTypeSelect, which only checks that the
+// message exists, then the message process d_msg/d_message/d_message_paper/d_scope asks for it when it
+// opens and at each following message). msgNo is the BMG's message number (zel_00.bmg's INF1 entry,
+// group 0), the same in every language of GZLP01; the text is Spanish. Not here: the menus' texts
+// (fopMsgM_itemMsgGet_c) and the cutscenes' messages (d_mesg, JMessage::TControl, by BMG entry index).
+//
+//   grandmother (daNpc_Ba1_c, at home in LinkRM and on the birthday): 2003, 2007, 2008, 2020, 2021,
+//     2032, 2045
 //   10873 "Veo que te interesa esta imagen..."
 //   3514  Tingle's goodbye in his tower ("¡Hasta la vista, duende!")
-//   2008, 2020, 2021, 2032, 2045  the grandmother again, at home (reachable from any save)
-// Each message asked for is logged once in a row ("[cos] msg 2003"), to find more of them.
+// Each page is shown once per game session (the first time its message opens). Every message shown
+// is logged ("[cos] msg 2008"), to find more of them.
 #include "d/dolzel.h" // IWYU pragma: keep
+#include "pc_internal.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 namespace {
 
@@ -36,7 +44,7 @@ const Extra kExtras[] = {
 
 constexpr int kExtraCount = (int)(sizeof(kExtras) / sizeof(kExtras[0]));
 char sBuf[kExtraCount][2048];
-const char* sFor[kExtraCount] = {};
+bool sShown[kExtraCount] = {};  // this session
 
 bool enabled() {
     static const bool on = [] {
@@ -48,14 +56,11 @@ bool enabled() {
 
 } // namespace
 
-// The message with our page after its last one; the original when it is not one of ours. The text's
-// control codes (0x1A, their length, their bytes) are copied as they are; a page holds four lines.
+// The message with our page after its last one, the first time it is shown this session; else the
+// original. The text's control codes (0x1A, their length, their bytes) are copied as they are; a page
+// holds four lines.
 const char* pc_msg_override(u32 msgNo, const char* text) {
-    static u32 sLogged = 0;
-    if (msgNo != sLogged) {
-        sLogged = msgNo;
-        fprintf(stderr, "[cos] msg %u%s\n", (unsigned)msgNo, text == nullptr ? " (none)" : "");
-    }
+    pc::writef(STDERR_FILENO, "[cos] msg %u%s\n", (unsigned)msgNo, text == nullptr ? " (none)" : "");
     if (text == nullptr || !enabled()) {
         return text;
     }
@@ -63,8 +68,8 @@ const char* pc_msg_override(u32 msgNo, const char* text) {
         if (kExtras[i].msgNo != msgNo) {
             continue;
         }
-        if (sFor[i] == text) {
-            return sBuf[i];  // already built for this text
+        if (sShown[i]) {
+            return text;
         }
         char* out = sBuf[i];
         const size_t cap = sizeof(sBuf[i]);
@@ -87,6 +92,9 @@ const char* pc_msg_override(u32 msgNo, const char* text) {
             }
             out[n++] = (char)*p++;
         }
+        if (*p != 0) {
+            return text;  // longer than the buffer
+        }
         // the last page's lines, then empty lines up to the next page
         const int lastPageLines = newlines % 4 + 1;
         const size_t extra = strlen(kExtras[i].page);
@@ -99,7 +107,8 @@ const char* pc_msg_override(u32 msgNo, const char* text) {
         memcpy(out + n, kExtras[i].page, extra);
         n += extra;
         out[n] = '\0';
-        sFor[i] = text;
+        sShown[i] = true;
+        pc::writef(STDERR_FILENO, "[cos] msg %u: dedication page added\n", (unsigned)msgNo);
         return out;
     }
     return text;

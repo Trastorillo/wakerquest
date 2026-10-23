@@ -1,7 +1,12 @@
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "f_op/f_op_msg_mng.h"
 #if TARGET_PC
-const char* pc_msg_override(u32 msgNo, const char* text); // native/src/pc/game_hooks/pc_msg_dedication.cpp
+// native/src/pc/game_hooks/pc_msg_dedication.cpp: called by fopMsgM_msgGet_c::getMessage for every
+// message the game shows (d_msg, d_message, d_message_paper, d_scope, d_picture_box, d_s_open_sub)
+const char* pc_msg_override(u32 msgNo, const char* text);
+// fopMsgM_messageTypeSelect and fopMsgM_searchMessageNumber only ask whether a message exists (the
+// message process then asks for its text again): not a message shown, so not given to pc_msg_override
+static bool pc_msgProbe = false;
 #endif
 #include "JSystem/JKernel/JKRArchive.h"
 #include "JSystem/JUtility/JUTDataHeader.h"
@@ -376,7 +381,14 @@ fpc_ProcID fopMsgM_messageTypeSelect(fopAc_ac_c* i_actor, cXyz* i_pos, u32* i_ms
     } else {
         mesg_header* header = msgGet.getMesgHeader(*i_msgNo);
         if (header != NULL) {
+#if TARGET_PC
+            pc_msgProbe = true;
+            const bool found = msgGet.getMessage(header) != NULL;
+            pc_msgProbe = false;
+            if (found) {
+#else
             if (msgGet.getMessage(header) != NULL) {
+#endif
                 JMSMesgEntry_c entry;
                 entry = msgGet.getMesgEntry(header);
                 dComIfGp_setMesgAnimeAttrInfo(entry.mInitialAnimation);
@@ -412,7 +424,14 @@ u32 fopMsgM_searchMessageNumber(u32 i_msgNo) {
     mesg_header* header;
     for (u32 i = i_msgNo & 0xFFFF; i < 0xFFFF; i++) {
         header = msgGet.getMesgHeader(i);
+#if TARGET_PC
+        pc_msgProbe = true;
+        const bool found = header != NULL && msgGet.getMessage(header) != NULL;
+        pc_msgProbe = false;
+        if (found) {
+#else
         if (header != NULL && msgGet.getMessage(header) != NULL) {
+#endif
             return i;
         }
 
@@ -1543,8 +1562,11 @@ const char* fopMsgM_msgGet_c::getMessage(mesg_header* i_head) {
     }
 
 #if TARGET_PC
-    // WakerQuest's dedication (native/src/pc/game_hooks/pc_msg_dedication.cpp): one more page of our own
-    ret = pc_msg_override(mMsgNo, ret);
+    // WakerQuest's dedication (native/src/pc/game_hooks/pc_msg_dedication.cpp): one more page of our own.
+    // mMsgNo is the BMG's message number (INF1 entry mMsgNo, e.g. 2008; group 0, zel_00.bmg).
+    if (!pc_msgProbe) {
+        ret = pc_msg_override(mMsgNo, ret);
+    }
 #endif
     return ret;
 }
