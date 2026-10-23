@@ -539,7 +539,8 @@ bool pc_vr_view_begin(view_class* view) {
     // (auto_screen): the telescope (the item, or the scope of an event), looking around, the picto box,
     // aiming the bow, the hookshot, the boomerang and the grappling hook
     // ... and the cutscenes (a demo playing, cine_screen), with the screen's 3D stronger (wq_xr.cpp)
-    const bool cutscene = dComIfGp_demo_mode() != 0;
+    // (no demo manager in some scenes, as the title's: none playing)
+    const bool cutscene = dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0;
     wq_xr_set_cinematic(cutscene);
     const bool firstPerson =
         table.autoScreen &&
