@@ -1,0 +1,115 @@
+XR window: the eyes' mask as a portal in the room (mode ventana)
+
+aurora_xr_set_diorama_window and fade[3] 2: the table's space is a window's (x, y within +-1 over its
+rectangle, z in metres, +z toward the player). A point behind its plane stays where the line from the
+eye to it crosses the rectangle, a point in front (coming out) within the rectangle as seen from the
+game camera's eye behind it, up to the pop-out's depth; each eye's position in the table's space comes
+from tableFromHead and half the distance between the eyes (from the eye shift and the projection).
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -55,6 +55,14 @@
+  * around the room). count 0: none. */
+ #define AURORA_XR_FREE_SPHERES 16
+ void aurora_xr_set_diorama_free(const float* spheres, int count);
++/* Patch 0030, from the game thread with the mask: the window (a portal in the room), with fade[3] 2.
++ * The table's space is then the window's: x and y within +-1 over its rectangle, z in metres, the
++ * window's plane at z 0 and +z toward the player; fade is x, y in table units and z in metres. What is
++ * behind the plane shows where the line from the eye to it crosses the rectangle; what is in front of
++ * it (coming out of the window) up to `popout` metres, within the rectangle widened as seen from the
++ * game camera's eye `depth` metres behind it (0 popout: nothing comes out). Each eye's position in the
++ * table's space comes from tableFromHead and its half of the distance between the eyes. */
++void aurora_xr_set_diorama_window(float popout, float depth);
+ 
+ /* Patch 0025, from the game thread while it records a frame: the head pose it is drawn for (a tag
+  * the XR layer gave out) and whether it is the diorama. Taken by the frame's present. */
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -43,6 +43,7 @@
+   float fade[4];           // x, z, y in table units; [3] 1 = the bubble (patch 0027)
+   float free[16][4];       // patch 0029: spheres kept outside the table (x, y, z, radius)
+   int freeCount;
++  float window[2];         // patch 0030: the window's pop-out and the camera's depth behind it (metres)
+ };
+ bool diorama_mask(DioramaMask& out) noexcept;
+ 
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -290,6 +290,12 @@
+   g_mask.freeCount = spheres != nullptr ? count : 0;
+ }
+ 
++void aurora_xr_set_diorama_window(float popout, float depth) {
++  std::lock_guard lock{g_maskMutex};
++  g_mask.window[0] = std::max(popout, 0.f);
++  g_mask.window[1] = std::max(depth, 1e-3f);
++}
++
+ void aurora_xr_set_frame_info(uint32_t tag, bool diorama) {
+   g_frameTag.store(tag);
+   g_frameDiorama.store(diorama);
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -173,6 +173,7 @@
+   float fade[4];
+   float freeCount[4];       // patch 0029: [0] the spheres in use
+   float free[16][4];        // x, y, z, radius in the table's space
++  float eye[4];             // patch 0030: the eye in the table's space (xyz), the camera's depth (w)
+ };
+ 
+ constexpr const char* kMaskShader = R"(
+@@ -181,6 +182,7 @@
+     fade: vec4f,
+     free_count: vec4f,
+     free: array<vec4f, 16>,
++    eye: vec4f,
+ };
+ @group(0) @binding(0) var<uniform> u: U;
+ @group(0) @binding(1) var color_tex: texture_2d<f32>;
+@@ -212,7 +214,25 @@
+     let h = u.table_from_clip * ndc;
+     let t = h.xyz / h.w;
+     var a: f32;
+-    if (u.fade.w > 0.5) {
++    if (u.fade.w > 1.5) {
++        // patch 0030: the window. Behind its plane: where the line from the eye crosses it, within
++        // the rectangle; in front (coming out): within the rectangle as the game camera's eye behind
++        // it sees it, up to the pop-out's depth (free_count.y), each edge fading.
++        let e = u.eye.xyz;
++        if (t.z < 0.0) {
++            let k = e.z / max(e.z - t.z, 1e-6);
++            let q = e.xy + (t.xy - e.xy) * k;
++            let ax = (1.0 - abs(q.x)) / u.fade.x;
++            let ay = (1.0 - abs(q.y)) / u.fade.y;
++            a = select(clamp(min(ax, ay), 0.0, 1.0), 0.0, e.z <= 0.0);
++        } else {
++            let w = (u.eye.w + t.z) / u.eye.w;
++            let ax = (w - abs(t.x)) / u.fade.x;
++            let ay = (w - abs(t.y)) / u.fade.y;
++            let az = (u.free_count.y - t.z) / u.fade.z;
++            a = clamp(min(min(ax, ay), az), 0.0, 1.0);
++        }
++    } else if (u.fade.w > 0.5) {
+         // the bubble (patch 0027): a sphere of radius 1 around the origin
+         a = clamp((1.0 - length(t)) / u.fade.x, 0.0, 1.0);
+     } else {
+@@ -353,6 +373,15 @@
+   u.fade[2] = std::max(mk.fade[2], 1e-3f);
+   u.fade[3] = mk.fade[3];  // patch 0027: 1 = the bubble (a sphere)
+   u.freeCount[0] = static_cast<float>(mk.freeCount);
++  if (mk.fade[3] > 1.5f) {
++    // patch 0030: the window. The eye: the head moved by half the distance between the eyes along its
++    // x (the shift b = -P00 * ipd / 2 is the right eye's), in the table's space.
++    const float half = mk.proj[0] != 0.f ? -mk.eyeShift / mk.proj[0] : 0.f;
++    const float ex = eye == 0 ? -half : half;
++    for (int i = 0; i < 3; i++) u.eye[i] = mk.tableFromHead[i * 4 + 0] * ex + mk.tableFromHead[i * 4 + 3];
++    u.eye[3] = mk.window[1];
++    u.freeCount[1] = mk.window[0];
++  }
+   std::copy(&mk.free[0][0], &mk.free[0][0] + 16 * 4, &u.free[0][0]);
+   webgpu::g_queue.WriteBuffer(g_maskUniform[eye], 0, &u, sizeof(u));
+   const std::array bindEntries{

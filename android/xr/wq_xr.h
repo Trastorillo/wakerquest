@@ -25,7 +25,7 @@ typedef struct WqXrHead {
 } WqXrHead;
 
 typedef struct WqXrTable {
-    bool diorama;    // xr.ini mode = maqueta (and the session runs)
+    bool diorama;    // xr.ini mode = maqueta (and the session runs); false for the window
     bool sphere;     // the bubble (shape = esfera): a sphere of diameter `width`; else the table (a box)
     float width;     // the bubble's diameter, or the table's metres across (x) and deep (z)
     float depth;
@@ -40,6 +40,17 @@ typedef struct WqXrTable {
     bool cineScreen; // and its cutscenes
     bool birdsFree;  // the flying birds drawn around the room, outside the bubble
     float birdRange; // how far: radii of the bubble from its middle
+    // the window (mode = ventana): the world at its own scale seen through a rectangle in the room, the
+    // game camera's eye behind it, each eye looking through it from where it is
+    bool window;
+    float windowWidth, windowHeight;  // the rectangle (metres; 16:9)
+    float windowX, windowY;           // its middle: to the right of straight ahead, above eye height
+    float windowDistance;             // in front of the eyes at the start
+    float windowYaw;                  // radians, turned about the vertical (positive to the left)
+    float windowScale;                // the game's metres per metre of the room (1 = real size)
+    float windowDepth;                // the game camera's eye this far behind the window (metres)
+    float windowPopout;               // what may come out toward the player (metres; 0 = nothing)
+    float windowFade;                 // the edges' fade (metres)
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).

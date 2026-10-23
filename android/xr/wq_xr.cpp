@@ -108,6 +108,21 @@ struct Settings {
     float hudPose[4] = {-0.03f, -0.22f, -1.39f, 0.0f};
     // m, the dialogues' panel moved by hand (a grip on it) from its place above the model; it moves with it
     float dialogueOffset[3] = {0, 0, 0};
+    // the window (mode = ventana, pc_vr_diorama.cpp): the world at its own scale through a rectangle in
+    // the room (16:9), the game camera's eye window_depth behind it; each eye looks through it from
+    // where it is, and what is near comes out of it toward the player (window_popout)
+    bool window = false;
+    float windowWidth = 1.6f;     // m across
+    float windowDistance = 2.0f;  // m, its middle in front of the eyes
+    float windowHeight = 0.0f;    // m above eye height
+    float windowX = 0.0f;         // m to the right (a grip moves it)
+    float windowYaw = 0.0f;       // degrees, turned to the left (a grip turns it)
+    float windowScale = 1.0f;     // the game's metres per metre of the room (more: the world smaller)
+    float windowDepth = 0.5f;     // m, the game camera's eye behind the window
+    bool windowPopoutOn = true;   // near things come out of the window
+    float windowPopout = 1.0f;    // m, how far
+    float windowFade = 0.03f;     // m, the edges' fade
+    bool windowVignette = false;  // a comfort vignette when the camera moves fast (not done yet)
 };
 
 const char kDefaultSettings[] =
@@ -139,7 +154,18 @@ const char kDefaultSettings[] =
     "bubble_height = 0.3\n"
     "bubble_fade = 0.1\n"
     "table_depth = 70\n"
-    "table_follow_yaw = 1\n";
+    "table_follow_yaw = 1\n"
+    "# mode = ventana: the world at its own size through a window in the room. window_width (m, 16:9),\n"
+    "# window_distance, window_height (above the eyes), window_x in m; window_yaw in degrees;\n"
+    "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera behind\n"
+    "# the window (m); window_popout_on 1 = near things come out of it, up to window_popout m.\n"
+    "window_width = 1.6\n"
+    "window_distance = 2.0\n"
+    "window_height = 0.0\n"
+    "window_scale = 1.0\n"
+    "window_depth = 0.5\n"
+    "window_popout_on = 1\n"
+    "window_popout = 1.0\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
@@ -154,7 +180,10 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
     else if (!strcmp(key, "cine_3d")) s.cine3d = on;
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
-    else if (!strcmp(key, "mode")) s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
+    else if (!strcmp(key, "mode")) {
+        s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
+        s.window = !strcmp(v, "ventana") || !strcmp(v, "window");
+    }
     else if (!strcmp(key, "shape")) s.sphere = strcmp(v, "caja") != 0 && strcmp(v, "box") != 0 && strcmp(v, "table") != 0;
     else if (!strcmp(key, "bubble_size")) s.tableWidth = clampf(f, 0.2f, 4.0f);
     else if (!strcmp(key, "bubble_span") || !strcmp(key, "table_span")) s.tableSpan = clampf(f, 2.0f, 500.0f);
@@ -174,6 +203,17 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
     else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
+    else if (!strcmp(key, "window_width")) s.windowWidth = clampf(f, 0.3f, 6.0f);
+    else if (!strcmp(key, "window_distance")) s.windowDistance = clampf(f, 0.3f, 10.0f);
+    else if (!strcmp(key, "window_height")) s.windowHeight = clampf(f, -3.0f, 3.0f);
+    else if (!strcmp(key, "window_x")) s.windowX = clampf(f, -5.0f, 5.0f);
+    else if (!strcmp(key, "window_yaw")) s.windowYaw = f;
+    else if (!strcmp(key, "window_scale")) s.windowScale = clampf(f, 0.1f, 100.0f);
+    else if (!strcmp(key, "window_depth")) s.windowDepth = clampf(f, 0.05f, 5.0f);
+    else if (!strcmp(key, "window_popout_on")) s.windowPopoutOn = on;
+    else if (!strcmp(key, "window_popout")) s.windowPopout = clampf(f, 0.0f, 3.0f);
+    else if (!strcmp(key, "window_fade")) s.windowFade = clampf(f, 0.0f, 0.5f);
+    else if (!strcmp(key, "window_vignette")) s.windowVignette = on;
     else if (!strcmp(key, "hud_pose")) {
         float x = 0, y = 0, z = 0, yaw = 0;
         if (sscanf(v, "%f,%f,%f,%f", &x, &y, &z, &yaw) == 4) {
@@ -200,7 +240,7 @@ std::string settingValue(const Settings& s, const char* key) {
         return std::string(b);
     };
     auto flag = [](bool v) { return std::string(v ? "1" : "0"); };
-    if (!strcmp(key, "mode")) return s.diorama ? "maqueta" : "pantalla";
+    if (!strcmp(key, "mode")) return s.window ? "ventana" : s.diorama ? "maqueta" : "pantalla";
     if (!strcmp(key, "shape")) return s.sphere ? "esfera" : "caja";
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
@@ -224,6 +264,15 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "dialogue_back")) return num(s.dialogueBack);
     if (!strcmp(key, "table_follow_yaw")) return flag(s.tableFollowYaw);
     if (!strcmp(key, "view_relative")) return flag(s.viewRelative);
+    if (!strcmp(key, "window_width")) return num(s.windowWidth);
+    if (!strcmp(key, "window_distance")) return num(s.windowDistance);
+    if (!strcmp(key, "window_height")) return num(s.windowHeight);
+    if (!strcmp(key, "window_scale")) return num(s.windowScale);
+    if (!strcmp(key, "window_depth")) return num(s.windowDepth);
+    if (!strcmp(key, "window_popout_on")) return flag(s.windowPopoutOn);
+    if (!strcmp(key, "window_popout")) return num(s.windowPopout);
+    if (!strcmp(key, "window_fade")) return num(s.windowFade);
+    if (!strcmp(key, "window_vignette")) return flag(s.windowVignette);
     return std::string();
 }
 
@@ -446,12 +495,16 @@ void readSettings(bool force) {
     s_stereoApplied[0] = -1.0f;  // the screen's 3D applied again (updateScreenStereo)
     xrlog("settings: mode %s; table %.0fx%.0f cm, %.0f m of the game across, %.2f m away, %.2f m below the eyes, "
           "fade %.2f m, %s the camera",
-          next.diorama ? "maqueta" : "pantalla", next.tableWidth * 100.0f, next.tableDepth * 100.0f, next.tableSpan,
+          next.window ? "ventana" : next.diorama ? "maqueta" : "pantalla", next.tableWidth * 100.0f, next.tableDepth * 100.0f, next.tableSpan,
           next.tableDistance, next.tableHeight, next.tableFade, next.tableFollowYaw ? "turning with" : "not turning with");
     xrlog("settings: screen %.1f m wide, %.1f m away, %.1f m up; passthrough %s; refresh %d Hz; 3D %s "
           "(strength %.3f, focus %.0f)",
           next.width, next.distance, next.height, next.passthrough ? "on" : "off", next.refresh,
           next.stereo ? "on" : "off", next.stereoStrength, next.stereoFocus);
+    xrlog("settings: window %.2f m wide, %.2f m away, %.2f m up, %.2f m right, %.0f deg; scale %.2f, camera %.2f m "
+          "behind, coming out %s (%.2f m)",
+          next.windowWidth, next.windowDistance, next.windowHeight, next.windowX, next.windowYaw, next.windowScale,
+          next.windowDepth, next.windowPopoutOn ? "on" : "off", next.windowPopout);
 }
 
 // ---- Instance (on the game's thread, before Aurora) ----------------------------------------------
@@ -861,8 +914,8 @@ void updatePerformance() {
 
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
 bool updatePassthrough() {
-    // the diorama sits in the room
-    const bool want = (s.settings.passthrough || s.settings.diorama) && s.hasPassthrough;
+    // the diorama and the window sit in the room
+    const bool want = (s.settings.passthrough || s.settings.diorama || s.settings.window) && s.hasPassthrough;
     if (want == s.passthroughRunning) return want;
     if (want && !s.passthrough) {
         PFN_xrCreatePassthroughFB create = nullptr;
@@ -1076,8 +1129,9 @@ void updatePad() {
                 // the options menu: the triggers are the laser pointer's clicks, not L and R
                 l = r = 0.0f;
                 z = 0.0f;
-            } else if (s.settings.diorama) {
-                // the diorama: the grips move the model or a panel (not the game's Z)
+            } else if (s.settings.diorama || s.settings.window) {
+                // the diorama: the grips move the model or a panel (not the game's Z); the window: the
+                // window
                 updateGrips(gripL, z, getBool(s.stickClick));
                 z = 0.0f;
             }
@@ -1490,6 +1544,36 @@ void saveModel() {
     wq_xr_set("bubble_size", v);
 }
 
+void saveWindow() {
+    const Settings& st = s.settings;
+    char v[32];
+    snprintf(v, sizeof v, "%.3f", st.windowX);
+    wq_xr_set("window_x", v);
+    snprintf(v, sizeof v, "%.3f", st.windowHeight);
+    wq_xr_set("window_height", v);
+    snprintf(v, sizeof v, "%.3f", st.windowDistance);
+    wq_xr_set("window_distance", v);
+    snprintf(v, sizeof v, "%.1f", st.windowYaw);
+    wq_xr_set("window_yaw", v);
+    snprintf(v, sizeof v, "%.2f", st.windowWidth);
+    wq_xr_set("window_width", v);
+}
+
+// The window's pose in the room (its middle, turned about the vertical) and its half sizes.
+XrPosef windowPose(const Settings& st) {
+    const float yaw = st.windowYaw * 0.0174532925f;
+    XrPosef p;
+    p.orientation = {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
+    p.position = {st.windowX, st.windowHeight, -st.windowDistance};
+    return p;
+}
+
+// A point of the window's own space (x right, y up, z toward the player) in the room.
+XrVector3f onWindow(const Settings& st, float x, float y, float z) {
+    const XrPosef p = windowPose(st);
+    return vadd(p.position, qrot(p.orientation, {x, y, z}));
+}
+
 // The diorama's grips. Pressed with the hand's ray (or the hand) on the HUD's or the dialogues' panel:
 // the panel follows the hand (the HUD turned to face the player), saved on release. Otherwise on the
 // model: one hand moves it and turns it about the vertical (the right stick's click while holding
@@ -1547,8 +1631,10 @@ void updateGrips(float gripL, float gripR, bool click) {
     // the model: the hands that hold no panel
     const int hands = (s.gripDown[0] && !s.grabbed[0] ? 1 : 0) | (s.gripDown[1] && !s.grabbed[1] ? 2 : 0);
     if (hands != s.dragHands) {
-        if (s.dragHands && !hands) saveModel();
-        if (hands) xrlog("grip: %s", hands == 3 ? "both hands on the model" : "moving the model");
+        if (s.dragHands && !hands) st.window ? saveWindow() : saveModel();
+        if (hands)
+            xrlog("grip: %s", st.window ? (hands == 3 ? "both hands on the window" : "moving the window")
+                              : hands == 3 ? "both hands on the model" : "moving the model");
         s.dragHands = hands;
         s.dragging = false;  // starts again from the hands as they are
     }
@@ -1568,6 +1654,47 @@ void updateGrips(float gripL, float gripR, bool click) {
         const XrPosef& pose = loc[hands == 1 ? 0 : 1].pose;
         at = pose.position;
         heading = headingOf(pose.orientation);
+    }
+    if (st.window) {
+        // the window: one hand moves it and turns it about the vertical (the right stick's click while
+        // holding puts it back), both hands also change its width
+        if (!s.dragging) {
+            s.dragging = true;
+            s.dragHand = at;
+            s.dragHandYaw = heading;
+            s.dragX = st.windowX;
+            s.dragHeight = st.windowHeight;
+            s.dragDistance = st.windowDistance;
+            s.dragYaw = st.windowYaw;
+            s.dragSpan = span;
+            s.dragSize = s.tickSize = st.windowWidth;
+        }
+        if (hands == 2 && click && !s.clickWas) {
+            const Settings defaults;
+            st.windowX = defaults.windowX;
+            st.windowHeight = defaults.windowHeight;
+            st.windowDistance = defaults.windowDistance;
+            st.windowYaw = defaults.windowYaw;
+            s.dragging = false;
+            xrlog("grip: the window back in its place");
+        } else {
+            st.windowX = s.dragX + (at.x - s.dragHand.x);
+            st.windowHeight = s.dragHeight + (at.y - s.dragHand.y);
+            st.windowDistance = std::max(0.3f, s.dragDistance - (at.z - s.dragHand.z));
+            st.windowYaw = s.dragYaw - wrapPi(heading - s.dragHandYaw) * 57.2957795f;
+            if (hands == 3 && s.dragSpan > 0.05f) {
+                st.windowWidth = clampf(s.dragSize * span / s.dragSpan, 0.3f, 6.0f);
+                if (std::fabs(st.windowWidth / s.tickSize - 1.0f) >= 0.1f) {
+                    s.tickSize = st.windowWidth;
+                    pointerHaptic(0, 0.25f);
+                    pointerHaptic(1, 0.25f);
+                }
+                s.sizeShownUntil = SDL_GetTicks() + 1500;
+            }
+        }
+        publishSettings();
+        s.clickWas = click;
+        return;
     }
     if (!s.dragging) {
         s.dragging = true;
@@ -1641,6 +1768,17 @@ void hostResetPosition() {
     hostSet("bubble_height", "0.3");
     hostSet("bubble_distance", "1.0");
     hostSet("bubble_yaw", "0");
+    // and the window
+    const Settings defaults;
+    char v[32];
+    snprintf(v, sizeof v, "%g", defaults.windowX);
+    hostSet("window_x", v);
+    snprintf(v, sizeof v, "%g", defaults.windowHeight);
+    hostSet("window_height", v);
+    snprintf(v, sizeof v, "%g", defaults.windowDistance);
+    hostSet("window_distance", v);
+    snprintf(v, sizeof v, "%g", defaults.windowYaw);
+    hostSet("window_yaw", v);
 }
 void hostResetPanels() {
     const Settings defaults;
@@ -1798,7 +1936,7 @@ XrQuaternionf facingPlayer(XrVector3f at) {
 // cutscenes (cine_3d), faded in and out over half a second.
 void updateScreenStereo() {
     const Settings& st = s.settings;
-    if (st.diorama && s.dioramaFrame) {
+    if ((st.diorama || st.window) && s.dioramaFrame) {
         s_stereoApplied[0] = -1.0f;  // the diorama's eye shift; the screen's applied again after it
         return;
     }
@@ -1914,6 +2052,26 @@ void runFrame() {
                 layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
                 const int pl = updatePointer(hud.pose, hud.size, pointerQuads);
                 for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
+            } else if (st.window) {
+                // the window: a dialogue's message box (the bottom of the 2D, as the diorama's) on a
+                // panel just above it, or the HUD on a panel just below it, as wide as the window and
+                // turned with it. Neither is taken by a grip (a grip takes the window).
+                const float hh = 0.5f * st.windowWidth * 9.0f / 16.0f;
+                hud.pose.orientation = windowPose(st).orientation;
+                if (s_dialogue.load()) {
+                    const int32_t x0 = int32_t(eyeW * 0.08f), y0 = int32_t(s.screenH * 0.60f);
+                    const int32_t cw = int32_t(eyeW * 0.84f), ch = int32_t(s.screenH * 0.38f);
+                    hud.subImage.imageRect = {{2 * eyeW + x0, y0}, {cw, ch}};
+                    const float w = 0.8f * st.windowWidth, h = w * float(ch) / float(cw);
+                    hud.pose.position = onWindow(st, 0.0f, hh + 0.03f + 0.5f * h, 0.0f);
+                    hud.size = {w, h};
+                } else {
+                    const float w = st.windowWidth, h = w * float(s.screenH) / float(eyeW);
+                    hud.subImage.imageRect = full;
+                    hud.pose.position = onWindow(st, 0.0f, -hh - 0.02f - 0.5f * h, 0.0f);
+                    hud.size = {w, h};
+                }
+                if (!panelOpen) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
             } else if (s_dialogue.load()) {
                 // a dialogue: the message box (the bottom of the 2D) on its own panel above the model,
                 // `dialogue_back` behind its middle (larger with the distance, the text the same size to
@@ -1981,16 +2139,17 @@ void runFrame() {
         const int pl = updatePanelRays(pointerQuads);
         for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
     }
-    // the model's size while both hands scale it, above it
-    if (s.settings.diorama && SDL_GetTicks() < s.sizeShownUntil) {
+    // the model's (or the window's) size while both hands scale it, above it
+    if ((s.settings.diorama || s.settings.window) && SDL_GetTicks() < s.sizeShownUntil) {
         const Settings& st = s.settings;
         const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;
         const float midY = st.sphere ? -st.tableHeight + 0.35f * r : -st.tableHeight + 0.1f;
         XrPosef at;
-        at.position = {st.tableX, midY + r + 0.05f, -st.tableDistance};
+        at.position = st.window ? onWindow(st, 0.0f, 0.5f * st.windowWidth * 9.0f / 16.0f + 0.05f, 0.0f)
+                                : XrVector3f{st.tableX, midY + r + 0.05f, -st.tableDistance};
         at.orientation = facingPlayer(at.position);
         char text[32];
-        snprintf(text, sizeof text, "%.2f m", st.tableWidth);
+        snprintf(text, sizeof text, "%.2f m", st.window ? st.windowWidth : st.tableWidth);
         for (char* c = text; *c; c++)
             if (*c == '.') *c = ',';
         if (wqp::label(text, at, s.space, &labelQuad)) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&labelQuad;
@@ -2103,6 +2262,17 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->cineScreen = st.cineScreen;
     out->birdsFree = st.birdsFree;
     out->birdRange = st.birdRange;
+    out->window = st.window && s_sharedRunning;
+    out->windowWidth = st.windowWidth;
+    out->windowHeight = st.windowWidth * 9.0f / 16.0f;
+    out->windowX = st.windowX;
+    out->windowY = st.windowHeight;
+    out->windowDistance = st.windowDistance;
+    out->windowYaw = st.windowYaw * 0.0174532925f;
+    out->windowScale = st.windowScale;
+    out->windowDepth = st.windowDepth;
+    out->windowPopout = st.windowPopoutOn ? st.windowPopout : 0.0f;
+    out->windowFade = st.windowFade;
 }
 
 extern "C" bool wq_xr_start(void) {

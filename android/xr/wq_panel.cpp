@@ -67,7 +67,7 @@ struct Item {
 };
 
 #define OPTS(o) o, (int)(sizeof(o) / sizeof(o[0]))
-const Option kMode[] = {{"pantalla", "Pantalla"}, {"maqueta", "Maqueta"}};
+const Option kMode[] = {{"pantalla", "Pantalla"}, {"maqueta", "Maqueta"}, {"ventana", "Ventana"}};
 const Option kShape[] = {{"esfera", "Esfera"}, {"caja", "Caja"}};
 const Option kRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
 const Option kResolution[] = {{"540", "0,50"},   {"648", "0,60"},   {"756", "0,70"},   {"864", "0,80"},
@@ -78,7 +78,7 @@ const Option kLanguage[] = {{"auto", "Auto"},       {"es", "Español"}, {"en", "
                             {"fr", "Français"},     {"de", "Deutsch"}, {"it", "Italiano"}};
 
 const Item kGeneral[] = {
-    {kXr, "mode", "Modo", "Pantalla gigante, o el mundo en una burbuja", kStepper, OPTS(kMode)},
+    {kXr, "mode", "Modo", "Pantalla gigante, el mundo en una burbuja, o una ventana", kStepper, OPTS(kMode)},
     {kGame, "COS_VR_RESOLUTION", "Resolución", "1,00 = 1080 líneas; más = más nítido y más GPU", kStepper,
      OPTS(kResolution)},
     {kXr, "refresh", "Frecuencia", "90 Hz: el juego va fluido y sobra GPU", kStepper, OPTS(kRefresh)},
@@ -87,6 +87,12 @@ const Item kGeneral[] = {
     {kXr, "distance", "Distancia de la pantalla", "La pantalla gigante", kStepper, nullptr, 0, 2.0f, 15.0f, 0.5f,
      "%.1f m"},
     {kXr, "width", "Tamaño de la pantalla", "Su ancho", kStepper, nullptr, 0, 2.0f, 12.0f, 0.5f, "%.1f m"},
+    // the window (mode = ventana); its size and place with the grips, the rest in Efectos
+    {kXr, "window_scale", "Escala de la ventana", "Más = el mundo más pequeño; 1 = tamaño real", kStepper, nullptr, 0,
+     0.25f, 5.0f, 0.25f, "%.2f"},
+    {kXr, "window_popout_on", "Salir de la ventana", "Lo cercano sale hacia ti", kSwitch},
+    {kXr, "window_popout", "Cuánto sale", "Metros por delante de la ventana", kStepper, nullptr, 0, 0.1f, 2.0f, 0.1f,
+     "%.1f m"},
 };
 const Item kStereo[] = {
     {kXr, "stereo", "3D en la pantalla", "Una imagen para cada ojo", kSwitch},
@@ -100,6 +106,10 @@ const Item kStereo[] = {
     {kXr, "birds_free", "Aves fuera de la burbuja", "Las gaviotas vuelan por tu habitación", kSwitch},
     {kXr, "bird_range", "Alcance de las aves", "Hasta cuántas veces el radio de la burbuja", kStepper, nullptr, 0, 1.0f,
      8.0f, 0.5f, "%.1f"},
+    {kXr, "window_width", "Tamaño de la ventana", "O agárrala con los dos grips", kStepper, nullptr, 0, 0.4f, 4.0f,
+     0.1f, "%.1f m"},
+    {kXr, "window_depth", "Fondo de la ventana", "La cámara del juego detrás de ella", kStepper, nullptr, 0, 0.1f, 2.0f,
+     0.1f, "%.1f m"},
 };
 const Item kDiorama[] = {
     {kXr, "shape", "Forma", "Una burbuja, o una mesa", kStepper, OPTS(kShape)},
@@ -122,7 +132,7 @@ const Item kControls[] = {
     {kXr, "view_relative", "Stick según tu vista", "Adelante = lejos de ti, como la miras", kSwitch},
     {kGame, "COS_CAMERA_INVERT_X", "Invertir cámara horizontal", "El stick derecho", kSwitch},
     {kGame, "COS_CAMERA_INVERT_Y", "Invertir cámara vertical", "El stick derecho", kSwitch},
-    {kAction, "reset_position", "Recolocar la burbuja", "A su sitio delante de ti (o grip + clic)", kButton},
+    {kAction, "reset_position", "Recolocar burbuja y ventana", "A su sitio delante de ti (o grip + clic)", kButton},
 };
 const Item kGameItems[] = {
     {kGame, "COS_GAME_LANGUAGE", "Idioma del juego", "Al reiniciar el juego", kStepper, OPTS(kLanguage)},

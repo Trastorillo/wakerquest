@@ -16,6 +16,9 @@
 //   compositor reprojects the head's moves since.
 // - Draws with other projections (the 2D, the HUD, the menus' models) are drawn as before. The sun,
 //   the stars and the sky's clouds (built around the camera's eye) are left out.
+// - The window (mode = ventana, windowBegin): the same frames, without the rig: the world at its own
+//   size behind a rectangle in the room, the game camera's eye a little behind it, each eye looking
+//   through it from where it is (the eyes' mask as a portal, Aurora patch 0030), near things coming out.
 // Phase 1: no cut at the table's edges and no culling from the head yet; the HUD stays in the picture.
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "pc/pc_vr.h"
@@ -98,6 +101,7 @@ const float kFollowDeadZone = 100.0f;  // along the ground before the world foll
 const float kJumpDeadZone = 350.0f;    // up and down before the world follows (jumps hold still)
 const float kPosHalfLife = 0.12f, kRiseHalfLife = 0.25f, kYawHalfLife = 0.35f;
 const float kNear = 0.03f, kFar = 200.0f;  // metres
+const float kWindowFar = 3000.0f;          // metres: the window shows the world at its own size
 
 struct State {
     bool rigValid = false;
@@ -123,6 +127,13 @@ struct State {
     bool cullViewValid = false;
     unsigned long cullTests = 0, cullHidden = 0;
     uint64_t cullLogNs = 0;
+    // the window (mode = ventana): its table space (x, y within +-1 over its rectangle, z in metres,
+    // its plane at 0, +z toward the player) and, in metres, its half sizes, the head in that space, the
+    // game camera's eye behind it and what may come out of it
+    bool window = false;
+    float winHalfW = 0.8f, winHalfH = 0.45f;
+    float winHead[3] = {0, 0, 1};
+    float winDepth = 0.5f, winPopout = 1.0f;
 };
 State s;
 
@@ -267,6 +278,80 @@ void xform(const M4& a, const float p[3], float out[3]) {
     for (int r = 0; r < 3; r++) out[r] = a.m[r][0] * p[0] + a.m[r][1] * p[1] + a.m[r][2] * p[2] + a.m[r][3];
 }
 
+// The window (mode = ventana): a rectangle in the room (its pose: windowX, windowY, -windowDistance,
+// turned windowYaw about the vertical) the world is seen through at its own size (windowScale of the
+// game's metres per metre). The game camera's eye sits windowDepth behind the window's middle, looking
+// through it (the camera's view space looks down -z, as the window's own space away from the player):
+// Room from the game camera's view = WindowPose * T(0, 0, -depth) * S(k), k metres per game unit. With
+// the stage being the room (LOCAL), C = V_head * that: no rig, the camera's moves are the world's.
+M4 roomFromWindow(const WqXrTable& t) {
+    const float c = std::cos(t.windowYaw), sn = std::sin(t.windowYaw);
+    M4 m = identity();
+    m.m[0][0] = c, m.m[0][2] = sn;
+    m.m[2][0] = -sn, m.m[2][2] = c;
+    m.m[0][3] = t.windowX;
+    m.m[1][3] = t.windowY;
+    m.m[2][3] = -t.windowDistance;
+    return m;
+}
+
+M4 roomFromCameraView(const WqXrTable& t, float k) {
+    M4 back = identity();
+    back.m[2][3] = -t.windowDepth;
+    M4 scale = identity();
+    scale.m[0][0] = scale.m[1][1] = scale.m[2][2] = k;
+    return mul(mul(roomFromWindow(t), back), scale);
+}
+
+// The window's table space from the room: the window's pose undone, x and y over its half sizes.
+M4 windowTableFromRoom(const WqXrTable& t) {
+    const M4 pose = roomFromWindow(t);
+    M4 inv = identity();
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) inv.m[i][j] = pose.m[j][i];
+    for (int i = 0; i < 3; i++)
+        inv.m[i][3] = -(pose.m[0][i] * pose.m[0][3] + pose.m[1][i] * pose.m[1][3] + pose.m[2][i] * pose.m[2][3]);
+    M4 scale = identity();
+    scale.m[0][0] = 1.0f / (0.5f * t.windowWidth);
+    scale.m[1][1] = 1.0f / (0.5f * t.windowHeight);
+    return mul(scale, inv);
+}
+
+// A sphere (the window's table space, radius in metres) against what the window shows, conservatively
+// (a margin for the head moving before the frame is shown): behind the plane, the four planes through
+// the head and the window's edges; in front, the pop-out's volume (the rectangle widened as the game
+// camera's eye behind it sees it). Nothing beyond the pop-out comes out. 1 culled, 0 drawn.
+int cullWindow(const float t[3], float r) {
+    const float margin = 0.25f;
+    const float p[3] = {t[0] * s.winHalfW, t[1] * s.winHalfH, t[2]};  // metres
+    const float* e = s.winHead;
+    bool seen = false;
+    if (p[2] - r < 0.0f) {
+        if (e[2] < 0.05f) {
+            seen = true;  // the head at (or through) the window's plane: no test
+        } else {
+            seen = true;
+            const float half[2] = {s.winHalfW + margin, s.winHalfH + margin};
+            for (int axis = 0; axis < 2 && seen; axis++)
+                for (int side = -1; side <= 1 && seen; side += 2) {
+                    // the plane through the head and the edge at side * half (along the other axis):
+                    // outward normal (side * e.z, side * (side * half - e)) in (axis, z)
+                    const float edge = side * half[axis];
+                    const float nx = side * e[2], nz = side * (edge - e[axis]);
+                    const float len = std::sqrt(nx * nx + nz * nz);
+                    if (len < 1e-6f) continue;
+                    const float dist = (nx * (p[axis] - edge) + nz * p[2]) / len;
+                    if (dist > r) seen = false;
+                }
+        }
+    }
+    if (!seen && p[2] + r >= 0.0f && p[2] - r <= s.winPopout && s.winPopout > 0.0f) {
+        const float widen = (s.winDepth + std::max(p[2], 0.0f)) / s.winDepth;
+        seen = std::fabs(p[0]) - r <= s.winHalfW * widen + margin && std::fabs(p[1]) - r <= s.winHalfH * widen + margin;
+    }
+    return seen ? 0 : 1;
+}
+
 // The culling's table from the current camera view (dComIfGd_getView, set by camera_draw before the
 // actors draw), false when the diorama is off.
 bool cullSetup() {
@@ -316,13 +401,29 @@ int collectBird(void* actor, void*) {
     return 1;
 }
 
-// A sphere (view space, game units) against the table's box: 1 culled, 0 drawn. The margin keeps
+// A sphere (view space, game units) against the table's box (or what the window shows): 1 culled, 0
+// drawn. The margin keeps
 // what the rig is about to bring onto the table; nothing above the table is cut, nor a bird about the
 // room.
 int cullSphereView(const float p[3], float radius) {
     float t[3];
     xform(s.tableFromView, p, t);
     const float r = radius * s.k;
+    if (s.window) {
+        // the window: what it shows, from the head (and coming out of it)
+        s.cullTests++;
+        const int out = cullWindow(t, r);
+        if (out) s.cullHidden++;
+        const uint64_t now = nowNs();
+        if (now - s.cullLogNs > 1000000000ull) {
+            if (s.cullLogNs != 0)
+                pc::writef(STDERR_FILENO, "[vr] culling by the window: %lu tests, %lu culled in the last second\n",
+                           s.cullTests, s.cullHidden);
+            s.cullTests = s.cullHidden = 0;
+            s.cullLogNs = now;
+        }
+        return out;
+    }
     for (int i = 0; i < sBirds.n; i++) {
         const float* b = sBirds.t[i];
         const float dx = t[0] - b[0], dy = t[1] - b[1], dz = t[2] - b[2];
@@ -345,6 +446,75 @@ int cullSphereView(const float p[3], float radius) {
     return out ? 1 : 0;
 }
 
+// The window's frame (mode = ventana), from pc_vr_view_begin: the view delta from the game camera's view
+// to the head's through the window, the head's frustum (both eyes, as the diorama's: the frustum is the
+// head's, wider than the window, and the eyes' mask cuts it to what each eye sees through the window),
+// the eyes' mask as the window (Aurora patch 0030) and the culling against what it shows.
+bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head) {
+    s.window = true;
+    s.k = 1.0f / (table.windowScale * kUnitsPerMetre);  // metres per game unit
+    s.winHalfW = 0.5f * table.windowWidth;
+    s.winHalfH = 0.5f * table.windowHeight;
+    s.winDepth = table.windowDepth;
+    s.winPopout = table.windowPopout;
+    const M4 roomView = roomFromCameraView(table, s.k);
+    const M4 tableRoom = windowTableFromRoom(table);
+    // the culling's table from the world (cullSetup takes the current camera's view off again)
+    s.tableFromWorld = mul(mul(tableRoom, roomView), fromMtx(view->mViewMtx));
+    s.tableValid = true;
+    s.cullViewValid = false;
+    {
+        float t[3];
+        xform(tableRoom, head.pos, t);
+        s.winHead[0] = t[0] * s.winHalfW;
+        s.winHead[1] = t[1] * s.winHalfH;
+        s.winHead[2] = t[2];
+    }
+
+    // C = V_head * WindowPose * T(0, 0, -depth) * S(k)
+    const M4 c = mul(headFromStage(head), roomView);
+    toMtx(c, s.delta);
+    Mtx44 p;
+    C_MTXFrustum(p, kNear * head.tanUp, kNear * head.tanDown, kNear * head.tanLeft, kNear * head.tanRight, kNear,
+                 kWindowFar);
+    projParams(view->mProjMtx, s.projFrom);
+    projParams(p, s.projTo);
+    const float eyeShift = -p[0][0] * head.ipd * 0.5f;
+    aurora_xr_set_eye_shift(true, 0.0f, eyeShift);
+    {
+        const M4 tableHead = mul(tableRoom, stageFromHead(head));
+        float tfh[12];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 4; j++) tfh[i * 4 + j] = tableHead.m[i][j];
+        float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH,
+                         std::max(table.windowFade, 0.1f * table.windowPopout), 2.0f};
+        aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
+        aurora_xr_set_diorama_window(table.windowPopout, table.windowDepth);
+    }
+    sBirds.n = 0;  // the birds fly in the world behind the window, at its size
+    aurora_xr_set_diorama_free(nullptr, 0);
+    aurora_xr_set_frame_info(head.tag, true);
+    AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
+    // the sky's things built around the camera's eye: drawn as they are, beyond the window
+    memcpy(s.skyDelta, s.delta, sizeof(s.skyDelta));
+    s.on = true;
+    s.skyOn = false;
+
+    const uint64_t now = nowNs();
+    if (!s.wasOn || now - s.lastLogNs > 5000000000ull) {
+        pc::writef(STDERR_FILENO,
+                   "[vr] window: %.2f x %.2f m at (%.2f, %.2f, %.2f), %.0f deg; %.4f m per unit (scale %.2f), camera "
+                   "%.2f m behind, coming out %.2f m; head (%.2f, %.2f, %.2f), %.2f m from the window, tag %u, "
+                   "ipd %.3f\n",
+                   table.windowWidth, table.windowHeight, table.windowX, table.windowY, -table.windowDistance,
+                   table.windowYaw * 57.2958f, s.k, table.windowScale, table.windowDepth, table.windowPopout,
+                   head.pos[0], head.pos[1], head.pos[2], s.winHead[2], head.tag, head.ipd);
+        s.lastLogNs = now;
+    }
+    s.wasOn = true;
+    return true;
+}
+
 } // namespace
 
 bool pc_vr_view_begin(view_class* view) {
@@ -365,11 +535,12 @@ bool pc_vr_view_begin(view_class* view) {
                                             daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
          dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
     const bool ownView = firstPerson || (table.cineScreen && cutscene);
-    const bool want = table.diorama && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
+    const bool modeOn = table.diorama || table.window;
+    const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
         if (s.wasOn) {
-            pc::writef(STDERR_FILENO, "[vr] diorama off (%s)\n",
-                       !table.diorama ? "mode" : view == nullptr ? "no camera" : player == nullptr ? "no Link"
+            pc::writef(STDERR_FILENO, "[vr] %s off (%s)\n", s.window ? "window" : "diorama",
+                       !modeOn ? "mode" : view == nullptr ? "no camera" : player == nullptr ? "no Link"
                        : firstPerson ? "telescope or first person: the screen"
                        : ownView ? "a cutscene: the screen" : "no head pose");
             aurora_xr_set_frame_info(0, false);
@@ -379,11 +550,11 @@ bool pc_vr_view_begin(view_class* view) {
             s.wasOn = false;
             s.rigValid = false;
         }
+        s.window = false;
         s.tableValid = false;
         sBirds.n = 0;
         return false;
     }
-    updateRig(player->current.pos, view->mViewMtx, table.followYaw);
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
     // for the left stick relative to the player's view (wq_xr.cpp)
     const bool freeControl = !pc::menuOpen() && dMenu_flag() == 0 && !dComIfGp_event_runCheck();
@@ -395,6 +566,16 @@ bool pc_vr_view_begin(view_class* view) {
                    dComIfGp_event_runCheck() ? " (event)" : "");
         sMesgWas = mesg;
     }
+    if (table.window) {
+        // the window: the stick as on the screen (the camera looks through the window)
+        wq_xr_set_camera_heading(0.0f, false, mesg != 0);
+        return windowBegin(view, table, head);
+    }
+    if (s.window) {
+        s.window = false;
+        s.rigValid = false;  // from the window to the model: the rig starts again at Link
+    }
+    updateRig(player->current.pos, view->mViewMtx, table.followYaw);
     wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw, freeControl, mesg != 0);
 
     // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
