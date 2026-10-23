@@ -22,6 +22,10 @@
 #if defined(__SWITCH__)
 #include "cos_switch.h"
 #endif
+#if defined(__ANDROID__)
+#include <SDL3/SDL_system.h>
+#include <jni.h>
+#endif
 
 namespace pc {
 
@@ -118,6 +122,23 @@ void exitDisc() {
     playerMessage(text, sizeof text);
     writef(STDERR_FILENO, "[cos] DISC: shown: %s\n", text);
     cos_switch_show_error(text);
+#elif defined(__ANDROID__)
+    // The headset shows nothing of a process that exits: WakerQuestActivity.showDiscError opens the
+    // disc's 2D panel (DiscSetupActivity) with the reason before this process ends.
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    jobject activity = (jobject)SDL_GetAndroidActivity();
+    if (env != nullptr && activity != nullptr) {
+        jclass cls = env->GetObjectClass(activity);
+        jmethodID show = cls ? env->GetMethodID(cls, "showDiscError", "(Ljava/lang/String;)V") : nullptr;
+        if (show != nullptr) {
+            jstring reason = env->NewStringUTF(sDiscError);
+            env->CallVoidMethod(activity, show, reason);
+            writef(STDERR_FILENO, "[cos] DISC: shown in the setup panel\n");
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
 #endif
     pc_exit(PC_EXIT_DISC);
     __builtin_unreachable();

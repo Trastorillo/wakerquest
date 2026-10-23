@@ -46,6 +46,15 @@
                 <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
             </intent-filter>
         </activity>
+        <!-- The disc's setup (DiscSetupActivity): a 2D panel in its own process, opened when the disc
+             is missing or the game's disc check failed. -->
+        <activity
+            android:name="io.github.wakerquest.DiscSetupActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:process=":setup"
+            android:theme="@android:style/Theme.DeviceDefault"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|locale|layoutDirection|fontScale" />
     </application>
 
 </manifest>

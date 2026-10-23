@@ -31,6 +31,22 @@ ext.borealisAndroid = [
 
 apply from: new File(borealisDir, 'platforms/android/gradle/borealis-application.gradle')
 
+// The disc this libmain.so is built for (COS_GAME_ID: GZLE01 or GZLP01), for the Java disc check
+// (DiscCheck.java, R.string.game_id).
+def cmakeCache = new File(cosBuildDir, 'CMakeCache.txt')
+def gameIdMatch = cmakeCache.isFile() ? (cmakeCache.text =~ /(?m)^COS_GAME_ID:STRING=(\w+)/) : null
+if (gameIdMatch == null || !gameIdMatch.find()) {
+    throw new GradleException("No COS_GAME_ID in ${cmakeCache}: configure android/CMakeLists.txt first")
+}
+android {
+    buildFeatures {
+        resValues true
+    }
+    defaultConfig {
+        resValue 'string', 'game_id', gameIdMatch.group(1)
+    }
+}
+
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     // Meta Quest: the Khronos OpenXR loader (Apache 2.0), packaged into the APK; libmain.so links the
