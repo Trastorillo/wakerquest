@@ -126,6 +126,7 @@ const Item kDiorama[] = {
     {kXr, "dialogue_back", "Distancia de los diálogos", "Detrás del centro de la burbuja", kStepper, nullptr, 0, 0.0f,
      1.5f, 0.1f, "%.1f m"},
     {kAction, "reset_panels", "Restablecer paneles", "El HUD y los diálogos, a su sitio", kButton},
+    {kXr, "window_hud_on", "HUD sobre la ventana", "Si no, en paneles debajo y encima", kSwitch},
 };
 const Item kControls[] = {
     {kXr, "table_follow_yaw", "Seguir la cámara", "La burbuja gira con la cámara del juego", kSwitch},

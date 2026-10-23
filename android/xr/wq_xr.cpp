@@ -97,6 +97,7 @@ struct Settings {
     bool tableFollowYaw = true;                  // the world turns with the game camera
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
+    bool windowHudOn = true;                     // the window: the HUD and dialogues over it (else on panels)
     bool cineScreen = true;                      // and cutscenes
     bool birdsFree = true;                       // the flying birds around the room, outside the bubble
     float birdRange = 3.0f;                      // how far, in the bubble's radii
@@ -201,6 +202,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "hud_width")) s.hudWidth = clampf(f, 0.2f, 3.0f);
     else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
+    else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
     else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
     else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
@@ -247,6 +249,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
+    if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
     if (!strcmp(key, "birds_free")) return flag(s.birdsFree);
     if (!strcmp(key, "bird_range")) return num(s.birdRange);
@@ -2060,7 +2063,13 @@ void runFrame() {
                 // turned with it. Neither is taken by a grip (a grip takes the window).
                 const float hh = 0.5f * st.windowWidth * 9.0f / 16.0f;
                 hud.pose.orientation = windowPose(st).orientation;
-                if (s_dialogue.load()) {
+                if (st.windowHudOn) {
+                    // window_hud_on: the HUD, dialogues and all, over the window itself, as on a TV: its
+                    // rectangle a centimetre in front, moving and scaling with it
+                    hud.subImage.imageRect = full;
+                    hud.pose.position = onWindow(st, 0.0f, 0.0f, 0.01f);
+                    hud.size = {st.windowWidth, 2.0f * hh};
+                } else if (s_dialogue.load()) {
                     const int32_t x0 = int32_t(eyeW * 0.08f), y0 = int32_t(s.screenH * 0.60f);
                     const int32_t cw = int32_t(eyeW * 0.84f), ch = int32_t(s.screenH * 0.38f);
                     hud.subImage.imageRect = {{2 * eyeW + x0, y0}, {cw, ch}};
