@@ -11,8 +11,10 @@
 //     waits for that fence on the GPU (EGL_ANDROID_native_fence_sync), samples the buffer through an
 //     EGLImage and copies it to the screen's swapchain; when the copy has run it hands the buffer
 //     back (aurora_xr_present_done).
-//   - The screen is a quad layer in the LOCAL space, 4:3, by default 4.5 m wide and 5 m away, over the
-//     room (XR_FB_passthrough) when the headset has it.
+//   - The screen is a quad layer in the LOCAL space, at the picture's aspect (16:9 in widescreen, Aurora
+//     patch 0032), by default 4.5 m wide and 5 m away, over the room (XR_FB_passthrough) when the
+//     headset has it, in a wooden frame (screen_frame). The left grip moves and turns it, both grips
+//     scale it, as the window's (mode = ventana); the right grip alone stays the game's Z.
 //   - The controllers drive an SDL virtual gamepad, which Aurora sees as any other controller: left
 //     stick = control stick, right stick = C-stick, A/B/X/Y as labelled, triggers = L and R (analog),
 //     right grip = Z, the left controller's menu button = START. Aurora's rumble reaches both hands.
@@ -71,8 +73,11 @@ float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v
 
 struct Settings {
     float distance = 5.0f;   // m in front of where the player looked at the start
-    float width = 4.5f;      // m; the height follows the picture (4:3)
+    float width = 4.5f;      // m; the height follows the picture (16:9 widescreen, 4:3 without)
     float height = 0.0f;     // m above eye height
+    float screenX = 0.0f;    // m to the right (the left grip moves it, as the window's)
+    float screenYaw = 0.0f;  // degrees, turned to the left (the left grip turns it)
+    bool screenFrame = true; // the wooden frame around it (drawn here, procedurally)
     bool passthrough = true; // the room around the screen instead of black
     int refresh = 90;        // Hz, the headset's nearest at or below; 90 shows the game's 30 fps evenly
     bool gpuBoost = true;    // XR_EXT_performance_settings: the GPU at its sustained high level
@@ -154,6 +159,11 @@ const char kDefaultSettings[] =
     "distance = 5.0\n"
     "width = 4.5\n"
     "height = 0.0\n"
+    "# screen_x (m to the right) and screen_yaw (degrees): the left grip moves and turns the screen, both\n"
+    "# grips change its width (saved here); screen_frame 1 = a red wooden frame around it.\n"
+    "screen_x = 0.0\n"
+    "screen_yaw = 0.0\n"
+    "screen_frame = 1\n"
     "passthrough = 1\n"
     "refresh = 90\n"
     "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
@@ -215,6 +225,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
     if (!strcmp(key, "distance")) s.distance = clampf(f, 0.5f, 30.0f);
     else if (!strcmp(key, "width")) s.width = clampf(f, 0.5f, 40.0f);
     else if (!strcmp(key, "height")) s.height = clampf(f, -10.0f, 10.0f);
+    else if (!strcmp(key, "screen_x")) s.screenX = clampf(f, -10.0f, 10.0f);
+    else if (!strcmp(key, "screen_yaw")) s.screenYaw = std::remainder(f, 360.0f);  // -180..180
+    else if (!strcmp(key, "screen_frame")) s.screenFrame = on;
     else if (!strcmp(key, "passthrough")) s.passthrough = on;
     else if (!strcmp(key, "refresh")) s.refresh = int(f);
     else if (!strcmp(key, "stereo")) s.stereo = on;
@@ -318,6 +331,10 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "stereo")) return flag(s.stereo);
     if (!strcmp(key, "distance")) return num(s.distance);
     if (!strcmp(key, "width")) return num(s.width);
+    if (!strcmp(key, "height")) return num(s.height);
+    if (!strcmp(key, "screen_x")) return num(s.screenX);
+    if (!strcmp(key, "screen_yaw")) return num(s.screenYaw);
+    if (!strcmp(key, "screen_frame")) return flag(s.screenFrame);
     if (!strcmp(key, "bubble_size")) return num(s.tableWidth);
     if (!strcmp(key, "bubble_span")) return num(s.tableSpan);
     if (!strcmp(key, "bubble_distance")) return num(s.tableDistance);
@@ -433,6 +450,10 @@ struct Xr {
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
     float dragSpan = 0.0f, dragSize = 0.0f, tickSize = 0.0f;  // both hands: their distance, the size then
     uint64_t sizeShownUntil = 0;                             // the size's label (ms, SDL_GetTicks)
+    // the giant screen (mode = pantalla): the right grip joins the left one's hold (both hands scale
+    // the screen) only when pressed while the left holds it; otherwise it is the game's Z
+    bool rightJoined = false, zWas = false;
+    XrSwapchain frameSwapchain = XR_NULL_HANDLE;  // the screen's wooden frame, drawn once
     bool clickWas = false;
     // the panels where they are shown this frame (for the grips and the rays)
     bool hudShown = false, dialogueShown = false;
@@ -571,9 +592,10 @@ void readSettings(bool force) {
           "fade %.2f m, %s the camera",
           next.window ? "ventana" : next.diorama ? "maqueta" : "pantalla", next.tableWidth * 100.0f, next.tableDepth * 100.0f, next.tableSpan,
           next.tableDistance, next.tableHeight, next.tableFade, next.tableFollowYaw ? "turning with" : "not turning with");
-    xrlog("settings: screen %.1f m wide, %.1f m away, %.1f m up; passthrough %s; refresh %d Hz; 3D %s "
-          "(strength %.3f, focus %.0f)",
-          next.width, next.distance, next.height, next.passthrough ? "on" : "off", next.refresh,
+    xrlog("settings: screen %.1f m wide, %.1f m away, %.1f m up, %.2f m right, %.0f deg, frame %s; passthrough %s; "
+          "refresh %d Hz; 3D %s (strength %.3f, focus %.0f)",
+          next.width, next.distance, next.height, next.screenX, next.screenYaw, next.screenFrame ? "on" : "off",
+          next.passthrough ? "on" : "off", next.refresh,
           next.stereo ? "on" : "off", next.stereoStrength, next.stereoFocus);
     xrlog("settings: window %.2f m wide, %.2f m away, %.2f m up, %.2f m right, %.0f deg; scale %.2f, camera %.2f m "
           "behind, coming out %s (%.2f m)",
@@ -1209,6 +1231,15 @@ void updatePad() {
                 // window. Not the model while a special scene shows the window instead
                 updateGrips(gripL, z, getBool(s.stickClick));
                 z = 0.0f;
+            } else if (!s.settings.diorama) {
+                // the giant screen: the left grip takes it; the right grip pressed while the left holds
+                // joins (both hands scale it) and is not Z until let go; pressed alone it is Z
+                const bool zDown = z > (s.zWas ? 0.4f : 0.6f);
+                if (zDown && !s.zWas && s.gripDown[0]) s.rightJoined = true;
+                if (!zDown) s.rightJoined = false;
+                s.zWas = zDown;
+                updateGrips(gripL, s.rightJoined ? z : 0.0f, getBool(s.stickClick));
+                if (s.rightJoined) z = 0.0f;
             }
         }
     }
@@ -1391,6 +1422,160 @@ void main() {
         xrReleaseSwapchainImage(chain, &rel);
     }
     return chain;
+}
+
+// The giant screen's frame: one plank of red-painted wood, as the King of Red Lions' hull, drawn once
+// by a shader into a static swapchain (our own procedural art: cel-shaded bands, a wavy grain, plank
+// joints and brass nails; nothing taken from the game). kFrameTexW x kFrameTexH, as long as 25
+// thicknesses: the frame's four bars show the part of it as long as each bar, so the wood keeps one
+// scale. y = 1 is the outer edge, y = 0 the edge against the picture. Opaque, so the compositor need
+// not blend it.
+constexpr uint32_t kFrameTexW = 1600, kFrameTexH = 64;
+XrSwapchain makeFrameTexture() {
+    static const char* vs = R"(#version 300 es
+out vec2 v_px;
+void main() {
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    v_px = p * vec2(1600.0, 64.0);
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+)";
+    static const char* fs = R"(#version 300 es
+precision highp float;
+uniform int u_linear;
+in vec2 v_px;
+out vec4 o_color;
+float hash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+void main() {
+    float x = v_px.x, a = v_px.y / 64.0;  // a: 0 at the picture, 1 at the outer edge
+    // planks 560 px long, each its own shade and grain
+    float plank = floor((x + 90.0) / 560.0);
+    float px = mod(x + 90.0, 560.0);
+    float seed = hash(plank + 3.0);
+    // a cel-shaded profile across the bar (a rounded log seen from the front): shadow by the
+    // picture, the body, a light band toward the outer edge
+    vec3 body = vec3(0.70, 0.12, 0.09) * (0.92 + 0.16 * seed);
+    vec3 c = body;
+    if (a < 0.30) c = body * 0.72;
+    if (a > 0.70 && a < 0.86) c = mix(body, vec3(0.95, 0.38, 0.26), 0.55);
+    // the grain: wavy lines along the plank, in two flat tones
+    float g = sin(a * 26.0 + 2.2 * sin(px * 0.011 + seed * 6.28) + 0.9 * sin(px * 0.037 + seed * 17.0));
+    if (g > 0.82) c *= 0.80;
+    // a knot here and there
+    vec2 k = vec2(px - (140.0 + 280.0 * seed), (a - 0.5) * 64.0);
+    float kr = length(k * vec2(0.45, 1.0));
+    if (seed > 0.35 && kr < 7.0) c *= kr < 3.5 ? 0.62 : 0.80;
+    // brass nails, two per plank, at its ends, with a dark rim and a highlight
+    float nx = min(abs(px - 34.0), abs(px - 526.0));
+    float nr = length(vec2(nx, (a - 0.5) * 64.0));
+    if (nr < 8.5) c = nr > 6.5 ? vec3(0.20, 0.07, 0.03)
+                 : length(vec2(nx + 2.0, (a - 0.5) * 64.0 - 2.0)) < 2.5 ? vec3(1.0, 0.93, 0.62)
+                 : vec3(0.86, 0.64, 0.22);
+    // the joints between planks, and the dark outlines of the toon look on both edges
+    if (px < 3.0 || px > 557.0) c = vec3(0.22, 0.05, 0.04);
+    if (a < 0.06 || a > 0.95) c = vec3(0.16, 0.04, 0.03);
+    if (u_linear != 0) c = pow(c, vec3(2.2));
+    o_color = vec4(c, 1.0);
+}
+)";
+    GLuint v = compile(GL_VERTEX_SHADER, vs), f = compile(GL_FRAGMENT_SHADER, fs);
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, v);
+    glAttachShader(prog, f);
+    glLinkProgram(prog);
+    glDeleteShader(v);
+    glDeleteShader(f);
+    GLint linked = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        xrlog("frame program did not link");
+        glDeleteProgram(prog);
+        return XR_NULL_HANDLE;
+    }
+    XrSwapchainCreateInfo sc{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    sc.createFlags = XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT;
+    sc.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+    sc.format = s.srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+    sc.sampleCount = 1;
+    sc.width = kFrameTexW;
+    sc.height = kFrameTexH;
+    sc.faceCount = 1;
+    sc.arraySize = 1;
+    sc.mipCount = 1;
+    XrSwapchain chain = XR_NULL_HANDLE;
+    if (!ok(xrCreateSwapchain(s.session, &sc, &chain), "xrCreateSwapchain (frame)")) {
+        glDeleteProgram(prog);
+        return XR_NULL_HANDLE;
+    }
+    uint32_t n = 0;
+    xrEnumerateSwapchainImages(chain, 0, &n, nullptr);
+    std::vector<XrSwapchainImageOpenGLESKHR> images(n, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
+    xrEnumerateSwapchainImages(chain, n, &n, (XrSwapchainImageBaseHeader*)images.data());
+    uint32_t idx = 0;
+    XrSwapchainImageAcquireInfo acq{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wait.timeout = XR_INFINITE_DURATION;
+    if (XR_SUCCEEDED(xrAcquireSwapchainImage(chain, &acq, &idx)) && XR_SUCCEEDED(xrWaitSwapchainImage(chain, &wait))) {
+        GLuint fbo = 0;
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, images[idx].image, 0);
+        glViewport(0, 0, GLsizei(kFrameTexW), GLsizei(kFrameTexH));
+        glDisable(GL_BLEND);
+        glDisable(GL_SCISSOR_TEST);
+        glUseProgram(prog);
+        glUniform1i(glGetUniformLocation(prog, "u_linear"), s.srgb ? 1 : 0);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDeleteFramebuffers(1, &fbo);
+        XrSwapchainImageReleaseInfo rel{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        xrReleaseSwapchainImage(chain, &rel);
+    }
+    glDeleteProgram(prog);
+    xrlog("screen frame: drawn (%ux%u)", kFrameTexW, kFrameTexH);
+    return chain;
+}
+
+// The frame's four bars around a screen quad (same pose and size): top and bottom as wide as the
+// frame, the sides between them, each turned in its plane so the plank's outer edge faces out.
+// Returns the layers written.
+int frameLayers(const XrPosef& pose, XrExtent2Df size, XrCompositionLayerQuad* out) {
+    if (!s.frameSwapchain) {
+        static bool tried = false;
+        if (tried) return 0;
+        tried = true;
+        s.frameSwapchain = makeFrameTexture();
+        if (!s.frameSwapchain) return 0;
+    }
+    const float t = 0.045f * size.width;  // the bar's thickness
+    const float hw = 0.5f * size.width, hh = 0.5f * size.height;
+    struct Bar {
+        float x, y, len, roll;
+    } bars[4] = {
+        {0.0f, hh + 0.5f * t, size.width + 2.0f * t, 0.0f},         // top
+        {0.0f, -hh - 0.5f * t, size.width + 2.0f * t, 3.14159265f}, // bottom
+        {-hw - 0.5f * t, 0.0f, size.height, 1.5707963f},             // left
+        {hw + 0.5f * t, 0.0f, size.height, -1.5707963f},             // right
+    };
+    for (int i = 0; i < 4; i++) {
+        const Bar& b = bars[i];
+        XrCompositionLayerQuad& q = out[i];
+        q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        q.space = s.space;
+        q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        q.subImage.swapchain = s.frameSwapchain;
+        const int32_t w = int32_t(std::min(float(kFrameTexW), std::round(float(kFrameTexH) * b.len / t)));
+        q.subImage.imageRect = {{0, 0}, {std::max(w, 1), int32_t(kFrameTexH)}};
+        const XrQuaternionf roll{0.0f, 0.0f, std::sin(0.5f * b.roll), std::cos(0.5f * b.roll)};
+        const XrQuaternionf& o = pose.orientation;  // o * roll
+        q.pose.orientation = {o.w * roll.x + o.x * roll.w + o.y * roll.z - o.z * roll.y,
+                              o.w * roll.y - o.x * roll.z + o.y * roll.w + o.z * roll.x,
+                              o.w * roll.z + o.x * roll.y - o.y * roll.x + o.z * roll.w,
+                              o.w * roll.w - o.x * roll.x - o.y * roll.y - o.z * roll.z};
+        q.pose.position = vadd(pose.position, qrot(o, {b.x, b.y, 0.0f}));
+        q.size = {b.len, t};
+    }
+    return 4;
 }
 
 void pointerHaptic(int hand, float amplitude) {
@@ -1649,6 +1834,35 @@ XrVector3f onWindow(const Settings& st, float x, float y, float z) {
     return vadd(p.position, qrot(p.orientation, {x, y, z}));
 }
 
+// The giant screen's pose in the room (its middle, turned about the vertical), as the window's.
+XrPosef screenPose(const Settings& st) {
+    const float yaw = st.screenYaw * 0.0174532925f;
+    XrPosef p;
+    p.orientation = {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
+    p.position = {st.screenX, st.height, -st.distance};
+    return p;
+}
+
+XrVector3f onScreen(const Settings& st, float x, float y, float z) {
+    const XrPosef p = screenPose(st);
+    return vadd(p.position, qrot(p.orientation, {x, y, z}));
+}
+
+void saveScreen() {
+    const Settings& st = s.settings;
+    char v[32];
+    snprintf(v, sizeof v, "%.3f", st.screenX);
+    wq_xr_set("screen_x", v);
+    snprintf(v, sizeof v, "%.3f", st.height);
+    wq_xr_set("height", v);
+    snprintf(v, sizeof v, "%.3f", st.distance);
+    wq_xr_set("distance", v);
+    snprintf(v, sizeof v, "%.1f", st.screenYaw);
+    wq_xr_set("screen_yaw", v);
+    snprintf(v, sizeof v, "%.2f", st.width);
+    wq_xr_set("width", v);
+}
+
 // The diorama's grips. Pressed with the hand's ray (or the hand) on the HUD's or the dialogues' panel:
 // the panel follows the hand (the HUD turned to face the player), saved on release. Otherwise on the
 // model: one hand moves it and turns it about the vertical (the right stick's click while holding
@@ -1706,9 +1920,10 @@ void updateGrips(float gripL, float gripR, bool click) {
     // the model: the hands that hold no panel
     const int hands = (s.gripDown[0] && !s.grabbed[0] ? 1 : 0) | (s.gripDown[1] && !s.grabbed[1] ? 2 : 0);
     if (hands != s.dragHands) {
-        if (s.dragHands && !hands) st.window ? saveWindow() : saveModel();
+        if (s.dragHands && !hands) st.window ? saveWindow() : st.diorama ? saveModel() : saveScreen();
         if (hands)
             xrlog("grip: %s", st.window ? (hands == 3 ? "both hands on the window" : "moving the window")
+                              : !st.diorama ? (hands == 3 ? "both hands on the screen" : "moving the screen")
                               : hands == 3 ? "both hands on the model" : "moving the model");
         s.dragHands = hands;
         s.dragging = false;  // starts again from the hands as they are
@@ -1761,6 +1976,47 @@ void updateGrips(float gripL, float gripR, bool click) {
                 st.windowWidth = clampf(s.dragSize * span / s.dragSpan, 0.3f, 6.0f);
                 if (std::fabs(st.windowWidth / s.tickSize - 1.0f) >= 0.1f) {
                     s.tickSize = st.windowWidth;
+                    pointerHaptic(0, 0.25f);
+                    pointerHaptic(1, 0.25f);
+                }
+                s.sizeShownUntil = SDL_GetTicks() + 1500;
+            }
+        }
+        publishSettings();
+        s.clickWas = click;
+        return;
+    }
+    if (!st.diorama) {
+        // the giant screen, as the window: one hand moves it and turns it about the vertical (the
+        // right stick's click while holding puts it back), both hands also change its width
+        if (!s.dragging) {
+            s.dragging = true;
+            s.dragHand = at;
+            s.dragHandYaw = heading;
+            s.dragX = st.screenX;
+            s.dragHeight = st.height;
+            s.dragDistance = st.distance;
+            s.dragYaw = st.screenYaw;
+            s.dragSpan = span;
+            s.dragSize = s.tickSize = st.width;
+        }
+        if (hands != 3 && click && !s.clickWas) {
+            const Settings defaults;
+            st.screenX = defaults.screenX;
+            st.height = defaults.height;
+            st.distance = defaults.distance;
+            st.screenYaw = defaults.screenYaw;
+            s.dragging = false;
+            xrlog("grip: the screen back in its place");
+        } else {
+            st.screenX = clampf(s.dragX + (at.x - s.dragHand.x), -10.0f, 10.0f);
+            st.height = clampf(s.dragHeight + (at.y - s.dragHand.y), -10.0f, 10.0f);
+            st.distance = clampf(s.dragDistance - (at.z - s.dragHand.z), 0.5f, 30.0f);
+            st.screenYaw = s.dragYaw - wrapPi(heading - s.dragHandYaw) * 57.2957795f;
+            if (hands == 3 && s.dragSpan > 0.05f) {
+                st.width = clampf(s.dragSize * span / s.dragSpan, 0.5f, 40.0f);
+                if (std::fabs(st.width / s.tickSize - 1.0f) >= 0.1f) {
+                    s.tickSize = st.width;
                     pointerHaptic(0, 0.25f);
                     pointerHaptic(1, 0.25f);
                 }
@@ -1854,6 +2110,15 @@ void hostResetPosition() {
     hostSet("window_distance", v);
     snprintf(v, sizeof v, "%g", defaults.windowYaw);
     hostSet("window_yaw", v);
+    // and the giant screen (its width stays)
+    snprintf(v, sizeof v, "%g", defaults.screenX);
+    hostSet("screen_x", v);
+    snprintf(v, sizeof v, "%g", defaults.height);
+    hostSet("height", v);
+    snprintf(v, sizeof v, "%g", defaults.distance);
+    hostSet("distance", v);
+    snprintf(v, sizeof v, "%g", defaults.screenYaw);
+    hostSet("screen_yaw", v);
 }
 void hostResetPanels() {
     const Settings defaults;
@@ -2049,9 +2314,9 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[12];
+    const XrCompositionLayerBaseHeader* layers[16];
     uint32_t layerCount = 0;
-    XrCompositionLayerQuad pointerQuads[2], panelQuad, labelQuad;
+    XrCompositionLayerQuad pointerQuads[2], panelQuad, labelQuad, frameQuads[4];
     s.hudShown = s.dialogueShown = false;
     // the options menu opens 1 m in front of the player, at eye height, facing them (the diorama)
     const bool menuOpen = s_menuOpen.load();
@@ -2218,6 +2483,15 @@ void runFrame() {
         const Settings& st = s.settings;
         const int32_t eyeW = int32_t(s.sideBySide ? s.screenW / 2 : s.screenW);
         const int eyes = s.stereoFrame ? 2 : 1;
+        // where the grips put it (screen_x, height, distance, screen_yaw), as wide as `width`, as tall
+        // as the picture (Aurora's buffer has its aspect, patch 0032: no bars in widescreen)
+        const XrPosef screenAt = screenPose(st);
+        const XrExtent2Df screenSize{st.width, st.width * float(s.screenH) / float(eyeW)};
+        // the wooden frame first (behind nothing: around the picture), then the picture
+        if (st.screenFrame) {
+            const int fl = frameLayers(screenAt, screenSize, frameQuads);
+            for (int i = 0; i < fl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&frameQuads[i];
+        }
         for (int eye = 0; eye < eyes; eye++) {
             XrCompositionLayerQuad& quad = quads[eye];
             quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -2227,9 +2501,8 @@ void runFrame() {
                                             : XR_EYE_VISIBILITY_RIGHT;
             quad.subImage.swapchain = s.swapchain;
             quad.subImage.imageRect = {{eye * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
-            quad.pose.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
-            quad.pose.position = {0.0f, st.height, -st.distance};
-            quad.size = {st.width, st.width * float(s.screenH) / float(eyeW)};
+            quad.pose = screenAt;
+            quad.size = screenSize;
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
         }
         // the options menu on the screen: the laser pointer at it
@@ -2248,20 +2521,32 @@ void runFrame() {
         const int pl = updatePanelRays(pointerQuads);
         for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
     }
-    // the model's (or the window's) size while both hands scale it, above it
-    if ((s.settings.diorama || s.settings.window) && SDL_GetTicks() < s.sizeShownUntil) {
+    // the model's (or the window's, or the screen's) size while both hands scale it, above it
+    if (SDL_GetTicks() < s.sizeShownUntil) {
         const Settings& st = s.settings;
+        const bool flat = !st.diorama && !st.window;
         const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;
         const float midY = st.sphere ? -st.tableHeight + 0.35f * r : -st.tableHeight + 0.1f;
+        const float screenH = s.screenW > 0 ? st.width * float(s.screenH) / float(s.sideBySide ? s.screenW / 2 : s.screenW)
+                                            : st.width * 9.0f / 16.0f;
         XrPosef at;
         at.position = st.window ? onWindow(st, 0.0f, 0.5f * st.windowWidth * 9.0f / 16.0f + 0.05f, 0.0f)
+                      : flat    ? onScreen(st, 0.0f, 0.5f * screenH + 0.06f * st.width + 0.1f, 0.0f)
                                 : XrVector3f{st.tableX, midY + r + 0.05f, -st.tableDistance};
         at.orientation = facingPlayer(at.position);
         char text[32];
-        snprintf(text, sizeof text, "%.2f m", st.window ? st.windowWidth : st.tableWidth);
+        snprintf(text, sizeof text, "%.2f m", st.window ? st.windowWidth : flat ? st.width : st.tableWidth);
         for (char* c = text; *c; c++)
             if (*c == '.') *c = ',';
-        if (wqp::label(text, at, s.space, &labelQuad)) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&labelQuad;
+        if (wqp::label(text, at, s.space, &labelQuad)) {
+            // the screen's far away: the label as large to the eye as the window's at 2 m
+            if (flat) {
+                const float k = std::max(1.0f, st.distance / 2.0f);
+                labelQuad.size.width *= k;
+                labelQuad.size.height *= k;
+            }
+            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&labelQuad;
+        }
     }
     XrFrameEndInfo ei{XR_TYPE_FRAME_END_INFO};
     ei.displayTime = s.frame.predictedDisplayTime;

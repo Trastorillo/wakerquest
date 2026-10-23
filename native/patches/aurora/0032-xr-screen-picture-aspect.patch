@@ -1,0 +1,23 @@
+XR screen: the target at the picture's own aspect, not 4:3
+
+The XR layer's screen (WakerQuest's flat screen, patch 0023) had a 4:3 target as tall as the present
+source, with the picture fitted in it. In widescreen (COS_ASPECT 16:9, the frame buffer fitted to that
+aspect, patch 0006) the 16:9 picture was squeezed into the 4:3 width: black bars above and below it on
+the headset's screen, and a quarter of the picture's columns lost. The target is now the present
+source's own size, as the diorama's already was: the picture fills it at full resolution, and the XR
+layer sizes its screen from the buffer, so the screen is 16:9 without bars (4:3 at COS_ASPECT 4:3).
+
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -348,7 +348,8 @@
+   }
+   const uint32_t xrHeight = xr ? std::max<uint32_t>(presentSource.size.height, 2) & ~1u : 0;
+-  const uint32_t xrWidth =
+-      xrDiorama ? std::max<uint32_t>(presentSource.size.width, 2) & ~1u : (xrHeight * 4 / 3 + 1) & ~1u;
++  // The screen too (patch 0032): the present source's own size, so a widescreen picture (patch 0006)
++  // fills it instead of being fitted into 4:3 with bars above and below.
++  const uint32_t xrWidth = std::max<uint32_t>(presentSource.size.width, 2) & ~1u;
+   const auto xrViewport = !xr        ? viewport
+                           : xrDiorama ? webgpu::Viewport{0.f, 0.f, static_cast<float>(xrWidth),
+                                                          static_cast<float>(xrHeight), 0.f, 1.f}

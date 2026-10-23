@@ -84,9 +84,11 @@ const Item kGeneral[] = {
     {kXr, "refresh", "Frecuencia", "90 Hz: el juego va fluido y sobra GPU", kStepper, OPTS(kRefresh)},
     {kXr, "gpu_boost", "Más potencia de GPU", "Sube el reloj de la GPU; gasta más batería", kSwitch},
     {kXr, "passthrough", "Tu habitación", "Alrededor de la pantalla gigante", kSwitch},
-    {kXr, "distance", "Distancia de la pantalla", "La pantalla gigante", kStepper, nullptr, 0, 2.0f, 15.0f, 0.5f,
+    // the giant screen: also moved with the left grip and scaled with both (wq_xr.cpp)
+    {kXr, "distance", "Distancia de la pantalla", "O muévela con el grip izquierdo", kStepper, nullptr, 0, 1.0f, 20.0f,
+     0.5f, "%.1f m"},
+    {kXr, "width", "Tamaño de la pantalla", "O agárrala con los dos grips", kStepper, nullptr, 0, 1.0f, 20.0f, 0.5f,
      "%.1f m"},
-    {kXr, "width", "Tamaño de la pantalla", "Su ancho", kStepper, nullptr, 0, 2.0f, 12.0f, 0.5f, "%.1f m"},
     // the window (mode = ventana); its size and place with the grips, the rest in Efectos
     {kXr, "window_scale", "Escala de la ventana", "Más = el mundo más pequeño; 1 = tamaño real", kStepper, nullptr, 0,
      0.25f, 5.0f, 0.25f, "%.2f"},
@@ -134,7 +136,7 @@ const Item kControls[] = {
     {kGame, "COS_CAMERA_INVERT_X", "Invertir cámara horizontal", "El stick derecho", kSwitch},
     {kGame, "COS_CAMERA_INVERT_Y", "Invertir cámara vertical", "El stick derecho", kSwitch},
     {kXr, "special_scenes", "Escenas especiales en 3D real", "El Rey Helmaroc en Isla Initia, de cerca", kSwitch},
-    {kAction, "reset_position", "Recolocar burbuja y ventana", "A su sitio delante de ti (o grip + clic)", kButton},
+    {kAction, "reset_position", "Recolocar burbuja y ventana", "Y la pantalla (o grip + clic)", kButton},
     {kXr, "seethrough_on", "Ver a Link a través de obstáculos", "Un hueco en lo que tape a Link", kSwitch},
     {kXr, "seethrough_radius", "Tamaño del hueco", "Metros del juego alrededor de Link", kStepper, nullptr, 0, 0.4f,
      4.0f, 0.2f, "%.1f m"},
@@ -150,6 +152,10 @@ const Item kGameItems[] = {
     {kXr, "talk_zoom", "Cuánto acerca", "Menos = más cerca", kStepper, nullptr, 0, 0.2f, 1.0f, 0.1f, "%.1f"},
     {kXr, "talk_screen", "Pantalla junto a la burbuja", "Los diálogos en 2D, a su izquierda", kSwitch},
     {kXr, "special_window", "Helmaroc por la ventana", "Si no, la burbuja se acerca al pájaro", kSwitch},
+    // the giant screen's (General is full)
+    {kXr, "screen_frame", "Marco", "Madera roja alrededor de la pantalla", kSwitch},
+    {kXr, "height", "Altura de la pantalla", "Sobre tus ojos; o con un grip", kStepper, nullptr, 0, -3.0f, 3.0f,
+     0.1f, "%.1f m"},
 };
 #undef OPTS
 
