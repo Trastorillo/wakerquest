@@ -453,8 +453,8 @@ void applyFps60(const char*, const char* v, void*) { pc_fps60_set(strcmp(v, "1")
 // Realidad virtual (pc_vr.h): each row sets its xr.ini key (`user`), read again at once by the headset
 // layer; the resolution also changes the internal resolution now.
 void applyVr(const char*, const char* v, void* user) { pc_vr_setting((const char*)user, v); }
-void applyVrResolution(const char*, const char* v, void*) {
-    pc_vr_setting("resolution", v);
+// The VR internal resolution (lines) applied now.
+void setVrScale(const char* v) {
     const float scale = (float)atof(v) / 480.0f;
 #if defined(__ANDROID__)
     // In the headset this row is the internal resolution: a Gráficos > Resolución interna saved in
@@ -467,8 +467,45 @@ void applyVrResolution(const char*, const char* v, void*) {
 #endif
     setFrameBufferScale(scale);
 }
-// The Rendimiento preset (android/xr/wq_xr.cpp kPresetKeys): the headset layer writes its values and
-// sends the resolution back (pc_vr_apply_resolution). The row (not saved) shows xr.ini's perf_preset,
+// xr.ini holds one resolution per mode (android/xr/wq_xr.cpp activeResolution): the row sets the current
+// mode's, and shows it (syncVrResolution).
+bool sVrResolutionSync = false;
+int sVrResolutionSeen = 0;     // xr.ini's for the mode in effect, last frame
+int sVrResolutionApplied = 0;  // the lines applied (0: none yet, the start's COS_FB_SCALE)
+void applyVrResolution(const char*, const char* v, void*) {
+    if (sVrResolutionSync) {
+        return;
+    }
+    pc_vr_setting(pc_vr_resolution_key(), v);
+    setVrScale(v);
+    sVrResolutionApplied = atoi(v);
+}
+// Every frame: the mode's resolution applied when it changes (the mode, the 3D, a preset, xr.ini edited
+// by hand), and mirrored into the row. Not at the first frame: the start set it (COS_FB_SCALE).
+void syncVrResolution() {
+    const int lines = pc_vr_resolution();
+    if (lines < 0 || lines == sVrResolutionSeen) {
+        return;
+    }
+    const bool first = sVrResolutionSeen == 0;
+    sVrResolutionSeen = lines;
+    char v[16];
+    snprintf(v, sizeof v, "%d", lines);
+    if (!first && lines > 0 && lines != sVrResolutionApplied) {
+        writef(STDERR_FILENO, "[vr] resolution: %d lines (%s)\n", lines, pc_vr_resolution_key());
+        setVrScale(v);
+    }
+    if (first || lines > 0) {
+        sVrResolutionApplied = lines;
+    }
+    if (lines > 0 && strcmp(pc_settings_get("COS_VR_RESOLUTION"), v) != 0) {
+        sVrResolutionSync = true;
+        pc_settings_set("COS_VR_RESOLUTION", v);
+        sVrResolutionSync = false;
+    }
+}
+// The Rendimiento preset (android/xr/wq_xr.cpp kPresetKeys): the headset layer writes its values; the
+// game applies the resolutions when it reads them (syncVrResolution). The row (not saved) shows xr.ini's perf_preset,
 // mirrored every frame (syncVrPreset: personal once a value is changed by hand), which chooses nothing.
 bool sVrPresetSync = false;
 void applyVrPreset(const char*, const char* v, void*) {
@@ -553,7 +590,7 @@ const PcSettingChoice kVrStereo[] = {{"0", "Desactivado", "Off"}, {"0.006", "Sua
 // As GalaxyQuest's VR panel: a scale of the picture (1,00 = 1080 lines), with the lines it gives
 const PcSettingChoice kVrResolution[] = {
     {"540", "0,50  ·  540 líneas"},   {"648", "0,60  ·  648 líneas"},   {"756", "0,70  ·  756 líneas"},
-    {"864", "0,80  ·  864 líneas"},   {"972", "0,90  ·  972 líneas"},   {"1080", "1,00  ·  1080 líneas"},
+    {"864", "0,80  ·  864 líneas"},   {"918", "0,85  ·  918 líneas"},   {"972", "0,90  ·  972 líneas"},   {"1080", "1,00  ·  1080 líneas"},
     {"1188", "1,10  ·  1188 líneas"}, {"1296", "1,20  ·  1296 líneas"}, {"1404", "1,30  ·  1404 líneas"},
     {"1512", "1,40  ·  1512 líneas"}, {"1620", "1,50  ·  1620 líneas"}, {"1728", "1,60  ·  1728 líneas"},
     {"1944", "1,80  ·  1944 líneas"}, {"2160", "2,00  ·  2160 líneas"}};
@@ -610,11 +647,12 @@ const PcSettingDesc kBuiltins[] = {
     {"COS_VR_STEREO", "3D en la pantalla gigante", "Profundidad del 3D en el modo pantalla.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrStereo), "0.012", applyVrStereo, nullptr, 9, "3D on the giant screen",
      "Depth of the 3D in screen mode."},
-    {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas). Más alta = "
-     "más nítida y más trabajo para la GPU. Se aplica al momento.",
+    {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas) en el modo actual: "
+     "cada modo (pantalla, pantalla en 3D, burbuja, ventana) guarda la suya. Más alta = más nítida y más trabajo "
+     "para la GPU. Se aplica al momento.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1080", applyVrResolution, nullptr, 10, "Resolution",
-     "Scale of the game's picture in the headset (1.00 = 1080 lines). Higher = sharper and more GPU work. "
-     "Applies at once."},
+     "Scale of the game's picture in the headset (1.00 = 1080 lines) in the current mode: each mode (screen, "
+     "screen in 3D, bubble, window) keeps its own. Higher = sharper and more GPU work. Applies at once."},
     {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 72 Hz calienta menos y gasta menos batería; 90 Hz muestra los 30 fps más regulares.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "72", applyVr, (void*)"refresh", 10, "Refresh rate",
      "The headset's refresh rate. 72 Hz runs cooler and saves battery; 90 Hz shows the game's 30 fps more evenly."},
@@ -2049,6 +2087,7 @@ void menuFrame() {
     // "Más opciones" opens this menu
     const int vrPanel = pc_vr_panel_frame();
     syncVrPreset();  // the Rendimiento row: xr.ini's preset
+    syncVrResolution();  // the mode's resolution (xr.ini), applied when the mode or the 3D changes
     if ((vrPanel & 2) != 0 && !m.open) {
         setOpen(true);
     }
@@ -2249,7 +2288,7 @@ void menuFrameEnd(unsigned int frame) {
 } // namespace pc
 
 void pc_vr_apply_resolution(const char* v) {
-    // through the row when it changes (applyVrResolution); applied again when it does not (a preset's,
+    // through the row when it changes (applyVrResolution); applied again when it does not (the panel's,
     // with settings.ini's COS_FB_SCALE or xr.ini edited by hand in between)
     if (strcmp(pc_settings_get("COS_VR_RESOLUTION"), v) == 0 || pc_settings_set("COS_VR_RESOLUTION", v) != 0) {
         pc::applyVrResolution("COS_VR_RESOLUTION", v, nullptr);

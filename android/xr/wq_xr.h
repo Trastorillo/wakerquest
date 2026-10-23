@@ -78,6 +78,11 @@ void wq_xr_set(const char* key, const char* value);
 // The Rendimiento preset in effect (xr.ini's perf_preset: "ahorro", "equilibrado", "maximo" or
 // "personal"), or "" without the headset layer. Any thread.
 const char* wq_xr_perf_preset(void);
+// The internal resolution (lines) of the mode in effect: window_resolution in the window,
+// stereo_resolution on the giant screen in 3D, resolution otherwise; -1 without the headset layer. And
+// its xr.ini key (the options menu's Resolucion row sets it). Any thread.
+int wq_xr_resolution(void);
+const char* wq_xr_resolution_key(void);
 // The diorama (pc_vr_diorama.cpp), every frame: the game camera's heading in the room (radians, 0 =
 // straight ahead, positive to the right), so the left stick can be turned to the player's view.
 // rotate: the player controls Link freely (no options menu, pause menu or event): only then is the

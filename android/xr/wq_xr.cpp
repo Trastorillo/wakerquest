@@ -85,15 +85,21 @@ struct Settings {
     int perfPreset = 0;
     int refresh = 72;        // Hz, the headset's nearest at or below; 72 runs cooler (90 shows 30 fps evenly)
     bool gpuBoost = false;   // XR_EXT_performance_settings: the GPU at its sustained high level (heat)
+    bool cpuLow = false;     // the CPU at its sustained low level (Ahorro); else the CPU is left as it is
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
     bool stereo = false;  // off by default: twice the drawing, and the flat screen's only stutters
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
     float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
     bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
     float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
-    // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
-    // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
-    int resolution = 1080;  // 1.00 of 1080 lines (the menu's scale): 30 fps with less heat than 1512
+    // the game's internal height in pixels in the headset (COS_FB_SCALE = lines / 480), one per mode
+    // (activeResolution): resolution for the flat giant screen and the bubble, stereo_resolution for the
+    // giant screen in 3D, window_resolution for the window. Applied at start and again when the mode or
+    // the 3D changes (pc_menu.cpp syncVrResolution); 0 = the headset window's own (4128x2208, too much).
+    // -1 (a file without the key, older ones): resolution's.
+    int resolution = 1080;        // 1.00 of 1080 lines (the menu's scale)
+    int stereoResolution = -1;    // the 3D draws every frame twice: 918 (0.85) by default
+    int windowResolution = -1;    // the window draws a wider view per eye: 864 (0.80) by default
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
     bool diorama = false;
@@ -141,7 +147,7 @@ struct Settings {
     float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = false;  // near things come out of the window (off: cut at its plane)
     float windowPopout = 0.45f;    // m, how far
-    float windowDrawDistance = 400.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
+    float windowDrawDistance = 300.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
     // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset).
     // In the bubble, it closes in on the bird (special_zoom of its span); with special_window, through
@@ -170,18 +176,24 @@ const char kDefaultSettings[] =
     "screen_frame = 1\n"
     "passthrough = 1\n"
     "# perf_preset = ahorro, equilibrado, maximo or personal: the settings panel's Rendimiento, which sets\n"
-    "# refresh, gpu_boost, resolution, stereo, cine_3d, bubble_span and window_draw_distance when chosen\n"
-    "# (changing one of those by hand makes it personal); the values below always win at start.\n"
+    "# refresh, gpu_boost, cpu_low, the resolutions, stereo, cine_3d, bubble_span and window_draw_distance\n"
+    "# when chosen (changing one of those by hand makes it personal); the values below always win at start.\n"
+    "# gpu_boost 1 = the GPU at its sustained high level; cpu_low 1 = the CPU at its sustained low one.\n"
     "perf_preset = equilibrado\n"
     "refresh = 72\n"
     "gpu_boost = 0\n"
+    "cpu_low = 0\n"
     "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
     "# stereo_focus = the distance in the game that stays on the screen (100-3000).\n"
     "stereo = 0\n"
     "stereo_strength = 0.012\n"
     "stereo_focus = 600\n"
-    "# the game's internal height in pixels (720, 900, 1080, 1200, 1440); read when the game starts.\n"
+    "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
+    "# the 3D changes: resolution = the giant screen and the bubble, stereo_resolution = the giant screen\n"
+    "# in 3D, window_resolution = the window. The options menu's Resolucion sets the current mode's.\n"
     "resolution = 1080\n"
+    "stereo_resolution = 918\n"
+    "window_resolution = 864\n"
     "# mode = pantalla (a giant screen), maqueta (the world as a model in the room) or ventana (a window).\n"
     "mode = pantalla\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
@@ -208,7 +220,7 @@ const char kDefaultSettings[] =
     "window_depth = 0.5\n"
     "window_popout_on = 0\n"
     "window_popout = 0.45\n"
-    "window_draw_distance = 400\n"
+    "window_draw_distance = 300\n"
     "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
     "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
     "# cutscenes on the giant screen instead.\n"
@@ -236,12 +248,15 @@ struct PresetKey {
 };
 const PresetKey kPresetKeys[] = {
     {"refresh", {"72", "72", "90"}},
-    {"gpu_boost", {"0", "0", "1"}},  // 0: the CPU at its sustained low level too (updatePerformance)
-    {"resolution", {"864", "1080", "1404"}},
+    {"gpu_boost", {"0", "0", "1"}},
+    {"cpu_low", {"1", "0", "0"}},  // only Ahorro sets the CPU's level (updatePerformance)
+    {"resolution", {"864", "1080", "1512"}},
+    {"stereo_resolution", {"756", "918", "1404"}},
+    {"window_resolution", {"756", "864", "1404"}},
     {"stereo", {"0", "0", "1"}},
     {"cine_3d", {"0", "1", "1"}},
     {"bubble_span", {"25", "30", "40"}},
-    {"window_draw_distance", {"300", "400", "800"}},
+    {"window_draw_distance", {"250", "300", "800"}},
 };
 
 // 1..3 for a preset's name, 0 (personal) for anything else
@@ -278,6 +293,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
     else if (!strcmp(key, "cine_3d")) s.cine3d = on;
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
+    else if (!strcmp(key, "stereo_resolution")) s.stereoResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
+    else if (!strcmp(key, "window_resolution")) s.windowResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
+    else if (!strcmp(key, "cpu_low")) s.cpuLow = on;
     else if (!strcmp(key, "mode")) {
         s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
         s.window = !strcmp(v, "ventana") || !strcmp(v, "window");
@@ -342,6 +360,18 @@ void applySetting(Settings& s, const char* key, const char* v) {
     }
 }
 
+// The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
+const char* activeResolutionKey(const Settings& s) {
+    return s.window ? "window_resolution" : !s.diorama && s.stereo ? "stereo_resolution" : "resolution";
+}
+int resolutionOf(const Settings& s, const char* key) {
+    const int v = !strcmp(key, "window_resolution") ? s.windowResolution
+                  : !strcmp(key, "stereo_resolution") ? s.stereoResolution
+                                                      : s.resolution;
+    return v < 0 ? s.resolution : v;
+}
+int activeResolution(const Settings& s) { return resolutionOf(s, activeResolutionKey(s)); }
+
 // The value in effect of an xr.ini key (the settings panel's), as the file would hold it.
 std::string settingValue(const Settings& s, const char* key) {
     char b[48];
@@ -355,6 +385,9 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "perf_preset")) return kPresetNames[s.perfPreset];
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
+    if (!strcmp(key, "cpu_low")) return flag(s.cpuLow);
+    if (!strcmp(key, "resolution") || !strcmp(key, "stereo_resolution") || !strcmp(key, "window_resolution"))
+        return num(float(resolutionOf(s, key)));
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
@@ -642,6 +675,9 @@ void readSettings(bool force) {
           next.width, next.distance, next.height, next.screenX, next.screenYaw, next.screenFrame ? "on" : "off",
           next.passthrough ? "on" : "off", next.refresh,
           next.stereo ? "on" : "off", next.stereoStrength, next.stereoFocus);
+    xrlog("settings: resolution %d lines (3D %d, window %d), now %s; GPU boost %s, CPU low %s",
+          next.resolution, resolutionOf(next, "stereo_resolution"), resolutionOf(next, "window_resolution"),
+          activeResolutionKey(next), next.gpuBoost ? "on" : "off", next.cpuLow ? "on" : "off");
     xrlog("settings: window %.2f m wide, %.2f m away, %.2f m up, %.2f m right, %.0f deg; scale %.2f, camera %.2f m "
           "behind, coming out %s (%.2f m)",
           next.windowWidth, next.windowDistance, next.windowHeight, next.windowX, next.windowYaw, next.windowScale,
@@ -1040,10 +1076,11 @@ void setRefreshRate() {
     if (ok(request(s.session, best), "xrRequestDisplayRefreshRateFB")) xrlog("refresh rate %.0f Hz", best);
 }
 
-// The GPU's and the CPU's clocks (gpu_boost): both at their sustained high level, or both at the
-// sustained low one, cooler (the game is GPU-bound in the diorama: both eyes and the HUD each frame).
-// Applied when it changes.
-void setPerfLevel(XrPerfSettingsLevelEXT gpu, XrPerfSettingsLevelEXT cpu) {
+// The GPU's clock (gpu_boost): its sustained high level, or the sustained low one, cooler (the game is
+// GPU-bound in the diorama: both eyes and the HUD each frame). The CPU's (cpu_low, Ahorro) only when
+// asked: its sustained low level; back to the sustained high one when turned off again.
+// cpuSet false: the CPU left as it is. Applied when they change.
+void setPerfLevel(XrPerfSettingsLevelEXT gpu, XrPerfSettingsLevelEXT cpu, bool cpuSet = true) {
     PFN_xrPerfSettingsSetPerformanceLevelEXT setLevel = nullptr;
     xrGetInstanceProcAddr(s.instance, "xrPerfSettingsSetPerformanceLevelEXT", (PFN_xrVoidFunction*)&setLevel);
     if (!setLevel) return;
@@ -1052,16 +1089,18 @@ void setPerfLevel(XrPerfSettingsLevelEXT gpu, XrPerfSettingsLevelEXT cpu) {
     };
     if (ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, gpu), "xrPerfSettingsSetPerformanceLevelEXT (GPU)"))
         xrlog("GPU level: %s", name(gpu));
-    if (ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, cpu), "xrPerfSettingsSetPerformanceLevelEXT (CPU)"))
+    if (cpuSet && ok(setLevel(s.session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, cpu), "xrPerfSettingsSetPerformanceLevelEXT (CPU)"))
         xrlog("CPU level: %s", name(cpu));
 }
 
 void updatePerformance() {
-    const int want = s.settings.gpuBoost ? 1 : 0;
+    const int want = (s.settings.gpuBoost ? 1 : 0) | (s.settings.cpuLow ? 2 : 0);
     if (!s.hasPerf || want == s.perfApplied) return;
+    // the CPU only once cpu_low has been on (never set otherwise)
+    const bool cpuSet = (want & 2) != 0 || (s.perfApplied >= 0 && (s.perfApplied & 2) != 0);
     s.perfApplied = want;
-    const XrPerfSettingsLevelEXT level = want ? XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT : XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT;
-    setPerfLevel(level, level);
+    setPerfLevel((want & 1) ? XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT : XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT,
+                 (want & 2) ? XR_PERF_SETTINGS_LEVEL_SUSTAINED_LOW_EXT : XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT, cpuSet);
 }
 
 // The runtime warns that the headset is getting hot (XR_EXT_performance_settings): both clocks down to
@@ -2701,14 +2740,12 @@ extern "C" void wq_xr_set(const char* key, const char* value) {
         return v;
     };
     if (!strcmp(key, "perf_preset")) {
-        // a preset chosen: its values written now; the resolution also through the game's setting
-        // (COS_VR_RESOLUTION, pc_vr_apply_resolution: applied at once, and settings.ini's
-        // COS_FB_SCALE no longer over it at the next start)
+        // a preset chosen: its values written now; the resolutions applied by the game once the layer
+        // has read them (pc_menu.cpp syncVrResolution, next frame)
         const int preset = presetIndex(value);
         set("perf_preset", kPresetNames[preset]);
         if (preset > 0) {
             for (const PresetKey& k : kPresetKeys) set(k.key, k.value[preset - 1]);
-            wqp::gameChange("COS_VR_RESOLUTION", presetValue(preset, "resolution"));
         }
     } else {
         set(key, value);
@@ -2738,6 +2775,17 @@ extern "C" const char* wq_xr_perf_preset(void) {
     if (s.settingsPath[0] == '\0') return "";
     std::lock_guard lock{s_shared};
     return kPresetNames[s_sharedSettings.perfPreset];
+}
+
+extern "C" int wq_xr_resolution(void) {
+    if (s.settingsPath[0] == '\0') return -1;
+    std::lock_guard lock{s_shared};
+    return activeResolution(s_sharedSettings);
+}
+
+extern "C" const char* wq_xr_resolution_key(void) {
+    std::lock_guard lock{s_shared};
+    return activeResolutionKey(s_sharedSettings);
 }
 
 extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue) {
@@ -2840,13 +2888,15 @@ extern "C" bool wq_xr_start(void) {
     }
     readSettings(true);
     // The internal resolution in the headset (pc_main.cpp applyFrameBufferScale reads COS_FB_SCALE
-    // after aurora_initialize), unless the player chose one (the options menu's settings.ini, or the
-    // environment): the headset's window is large, and stereo draws every frame twice.
-    if (s.settings.resolution > 0 && getenv("COS_FB_SCALE") == nullptr) {
+    // after aurora_initialize), the mode's (activeResolution), unless the player chose one (the options
+    // menu's settings.ini, or the environment): the headset's window is large, and stereo draws every
+    // frame twice. Later mode and 3D changes: pc_menu.cpp syncVrResolution.
+    const int lines = activeResolution(s.settings);
+    if (lines > 0 && getenv("COS_FB_SCALE") == nullptr) {
         char scale[32];
-        snprintf(scale, sizeof scale, "%.4f", s.settings.resolution / 480.0);
+        snprintf(scale, sizeof scale, "%.4f", lines / 480.0);
         setenv("COS_FB_SCALE", scale, 1);
-        xrlog("internal resolution: %d lines (COS_FB_SCALE=%s)", s.settings.resolution, scale);
+        xrlog("internal resolution: %d lines, %s (COS_FB_SCALE=%s)", lines, activeResolutionKey(s.settings), scale);
     }
     // The Touch controllers also appear to Android as a gamepad (vendor 0x2833, product 0x0160) that
     // sends nothing useful in VR; the virtual gamepad stands in for them.

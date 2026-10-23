@@ -71,7 +71,7 @@ const Option kMode[] = {{"pantalla", "Pantalla"}, {"maqueta", "Maqueta"}, {"vent
 const Option kShape[] = {{"esfera", "Esfera"}, {"caja", "Caja"}};
 const Option kRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
 const Option kResolution[] = {{"540", "0,50"},   {"648", "0,60"},   {"756", "0,70"},   {"864", "0,80"},
-                              {"972", "0,90"},   {"1080", "1,00"},  {"1188", "1,10"},  {"1296", "1,20"},
+                              {"918", "0,85"},   {"972", "0,90"},   {"1080", "1,00"},  {"1188", "1,10"},  {"1296", "1,20"},
                               {"1404", "1,30"},  {"1512", "1,40"},  {"1620", "1,50"},  {"1728", "1,60"},
                               {"1944", "1,80"},  {"2160", "2,00"}};
 // the Rendimiento preset (wq_xr.cpp kPresetKeys): refresh, GPU, resolution, 3D, the bubble's world, the
@@ -84,7 +84,7 @@ const Option kLanguage[] = {{"auto", "Auto"},       {"es", "Español"}, {"en", "
 const Item kGeneral[] = {
     {kXr, "perf_preset", "Rendimiento", "Ahorro: menos calor; Máximo: más nitidez y 3D", kStepper, OPTS(kPerfPreset)},
     {kXr, "mode", "Modo", "Pantalla gigante, el mundo en una burbuja, o una ventana", kStepper, OPTS(kMode)},
-    {kGame, "COS_VR_RESOLUTION", "Resolución", "1,00 = 1080 líneas; más = más nítido y más GPU", kStepper,
+    {kGame, "COS_VR_RESOLUTION", "Resolución", "La de este modo (y del 3D); 1,00 = 1080 líneas", kStepper,
      OPTS(kResolution)},
     {kXr, "refresh", "Frecuencia", "72 Hz: menos calor; 90 Hz: más fluido", kStepper, OPTS(kRefresh)},
     {kXr, "gpu_boost", "Más potencia de GPU", "Sube el reloj de la GPU; gasta más batería", kSwitch},
