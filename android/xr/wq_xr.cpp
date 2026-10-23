@@ -81,7 +81,7 @@ struct Settings {
     float hudWidth = 0.9f;          // the diorama's HUD panel, metres across
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
-    int resolution = 1200;
+    int resolution = 1188;  // 1.10 of 1080 lines (the menu's scale)
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
     bool diorama = false;
@@ -283,6 +283,7 @@ bool hasExtension(const std::vector<XrExtensionProperties>& exts, const char* na
 }
 
 std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it now
+bool s_refreshDirty = false;               // the refresh rate changed while running
 
 void readSettings(bool force) {
     const time_t now = time(nullptr);
@@ -323,11 +324,13 @@ void readSettings(bool force) {
         applySetting(next, key, v);
     }
     fclose(f);
+    const bool refreshChanged = next.refresh != s.settings.refresh;
     s.settings = next;
     {
         std::lock_guard lock{s_shared};
         s_sharedSettings = next;
     }
+    if (refreshChanged && !force) s_refreshDirty = true;  // the menu's Frecuencia, applied now
     // the screen's 3D; the diorama sets its own eye shift every frame (pc_vr_diorama.cpp)
     if (!next.diorama) aurora_xr_set_stereo(next.stereo, next.stereoStrength, next.stereoFocus);
     xrlog("settings: mode %s; table %.0fx%.0f cm, %.0f m of the game across, %.2f m away, %.2f m below the eyes, "
@@ -1172,6 +1175,10 @@ void runFrame() {
     XrFrameBeginInfo bi{XR_TYPE_FRAME_BEGIN_INFO};
     if (!ok(xrBeginFrame(s.session, &bi), "xrBeginFrame")) return;
     readSettings(false);
+    if (s_refreshDirty) {
+        s_refreshDirty = false;
+        setRefreshRate();
+    }
     locateHead();
     updatePad();
     updateRumble();

@@ -523,8 +523,14 @@ const PcSettingChoice kVrHeight[] = {{"0.0", "A la altura de los ojos"}, {"0.15"
 const PcSettingChoice kVrFade[] = {{"0.05", "5 cm"}, {"0.1", "10 cm"}, {"0.2", "20 cm"}, {"0.3", "30 cm"}};
 const PcSettingChoice kVrStereo[] = {{"0", "Desactivado", "Off"}, {"0.006", "Suave", "Soft"},
                                      {"0.012", "Normal"}, {"0.02", "Intenso", "Strong"}};
-const PcSettingChoice kVrResolution[] = {{"720", "720 líneas"}, {"900", "900 líneas"}, {"1080", "1080 líneas"},
-                                         {"1200", "1200 líneas"}, {"1440", "1440 líneas"}};
+// As GalaxyQuest's VR panel: a scale of the picture (1,00 = 1080 lines), with the lines it gives
+const PcSettingChoice kVrResolution[] = {
+    {"540", "0,50  ·  540 líneas"},   {"648", "0,60  ·  648 líneas"},   {"756", "0,70  ·  756 líneas"},
+    {"864", "0,80  ·  864 líneas"},   {"972", "0,90  ·  972 líneas"},   {"1080", "1,00  ·  1080 líneas"},
+    {"1188", "1,10  ·  1188 líneas"}, {"1296", "1,20  ·  1296 líneas"}, {"1404", "1,30  ·  1404 líneas"},
+    {"1512", "1,40  ·  1512 líneas"}, {"1620", "1,50  ·  1620 líneas"}, {"1728", "1,60  ·  1728 líneas"},
+    {"1944", "1,80  ·  1944 líneas"}, {"2160", "2,00  ·  2160 líneas"}};
+const PcSettingChoice kVrRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
 const PcSettingChoice kVrHud[] = {{"0.6", "60 cm"}, {"0.9", "90 cm"}, {"1.2", "1,2 m"}, {"1.5", "1,5 m"}};
 const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
 
@@ -568,9 +574,14 @@ const PcSettingDesc kBuiltins[] = {
     {"COS_VR_STEREO", "3D en la pantalla gigante", "Profundidad del 3D en el modo pantalla.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrStereo), "0.012", applyVrStereo, nullptr, 9, "3D on the giant screen",
      "Depth of the 3D in screen mode."},
-    {"COS_VR_RESOLUTION", "Resolución", "Líneas a las que se dibuja el juego en las gafas. Se aplica al momento.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1200", applyVrResolution, nullptr, 10, "Resolution",
-     "Lines the game is drawn at in the headset. Applies at once."},
+    {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas). Más alta = "
+     "más nítida y más trabajo para la GPU. Se aplica al momento.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1188", applyVrResolution, nullptr, 10, "Resolution",
+     "Scale of the game's picture in the headset (1.00 = 1080 lines). Higher = sharper and more GPU work. "
+     "Applies at once."},
+    {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 120 Hz muestra los 30 y 60 fps del juego sin saltos.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "120", applyVr, (void*)"refresh", 10, "Refresh rate",
+     "The headset's refresh rate. 120 Hz shows the game's 30 and 60 fps evenly."},
     {"COS_VR_HUD", "Tamaño del HUD", "El ancho del panel con los corazones y los menús en el modo maqueta.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "0.9", applyVr, (void*)"hud_width", 11, "HUD size",
      "The width of the panel with the hearts and menus in diorama mode."},
@@ -828,12 +839,27 @@ const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Cal
                                                 "Controles", "Realidad virtual"};
 const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Quality of life", "Debug",
                                                   "Controls", "Virtual reality"};
-const int kTabOrder[PC_SETTING_TABS] = {PC_SETTING_TAB_VR, PC_SETTING_TAB_GRAPHICS, PC_SETTING_TAB_CONTROLS,
-                                        PC_SETTING_TAB_PERFORMANCE, PC_SETTING_TAB_QOL, PC_SETTING_TAB_DEBUG};
+#if defined(__ANDROID__)
+// WakerQuest (Meta Quest): the tabs that mean something in the headset, with names of their own; no
+// operation modes (docked/handheld), no performance or debug pages.
+constexpr bool kQuest = true;
+const int kTabOrder[] = {PC_SETTING_TAB_VR, PC_SETTING_TAB_GRAPHICS, PC_SETTING_TAB_QOL, PC_SETTING_TAB_CONTROLS};
+#else
+constexpr bool kQuest = false;
+const int kTabOrder[] = {PC_SETTING_TAB_VR, PC_SETTING_TAB_GRAPHICS, PC_SETTING_TAB_CONTROLS,
+                         PC_SETTING_TAB_PERFORMANCE, PC_SETTING_TAB_QOL, PC_SETTING_TAB_DEBUG};
+#endif
+constexpr int kTabCount = (int)(sizeof(kTabOrder) / sizeof(kTabOrder[0]));
+
+const char* tabName(int t) {
+    if (kQuest && t == PC_SETTING_TAB_GRAPHICS) return T("Imagen", "Picture");
+    if (kQuest && t == PC_SETTING_TAB_QOL) return T("Juego / mejoras", "Game / improvements");
+    return T(kTabNames[t], kTabNamesEn[t]);
+}
 
 // The position on screen of a tab.
 int tabPosition(int tab) {
-    for (int i = 0; i < PC_SETTING_TABS; i++) {
+    for (int i = 0; i < kTabCount; i++) {
         if (kTabOrder[i] == tab) {
             return i;
         }
@@ -884,7 +910,7 @@ bool inPlay() {
 
 std::vector<Row> rowsOf(int tab) {
     std::vector<Row> rows;
-    if (tab == PC_SETTING_TAB_GRAPHICS) {
+    if (tab == PC_SETTING_TAB_GRAPHICS && !kQuest) {
         rows.push_back({RowKind::EditMode});
     }
     if (tab == PC_SETTING_TAB_QOL) {
@@ -900,6 +926,11 @@ std::vector<Row> rowsOf(int tab) {
     for (int i = 0; i < pc_settings_count(); i++) {
         const PcSettingDesc* d = pc_settings_at(i);
         if (d == nullptr || d->tab != tab) {
+            continue;
+        }
+        // the Quest: no settings per operation mode (the internal resolution is the VR page's) nor the
+        // Switch's own
+        if (kQuest && (d->flags & (PC_SETTING_PER_MODE | PC_SETTING_SWITCH_ONLY))) {
             continue;
         }
         if (d->flags & PC_SETTING_REMAP) {
@@ -1270,7 +1301,7 @@ void handleInput(uint32_t keys) {
         return;
     }
     if (p & (kTabLeft | kTabRight)) {
-        m.tab = kTabOrder[(tabPosition(m.tab) + ((p & kTabRight) ? 1 : PC_SETTING_TABS - 1)) % PC_SETTING_TABS];
+        m.tab = kTabOrder[(tabPosition(m.tab) + ((p & kTabRight) ? 1 : kTabCount - 1)) % kTabCount];
         m.scrollToRow = true;
         writef(STDERR_FILENO, "[cos] menu: tab %s\n", kTabNames[m.tab]);
     }
@@ -1479,26 +1510,28 @@ void drawMenu() {
     ImGui::SameLine();
     ImGui::TextColored(kDim, "SwitchWaker %s", cos_switch_version());
 #endif
-    const std::string mode = std::string(T("Modo: ", "Mode: ")) + modeName(pc_settings_mode());
-    ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::CalcTextSize(mode.c_str()).x - ImGui::GetStyle().WindowPadding.x);
-    ImGui::TextColored(kDim, "%s", mode.c_str());
+    if (!kQuest) {  // the Quest has no operation modes
+        const std::string mode = std::string(T("Modo: ", "Mode: ")) + modeName(pc_settings_mode());
+        ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::CalcTextSize(mode.c_str()).x - ImGui::GetStyle().WindowPadding.x);
+        ImGui::TextColored(kDim, "%s", mode.c_str());
+    }
 
     // Tabs.
     // Each tab as wide as its name, the rest of the row shared out evenly (five names in a narrow 4:3 window).
     float namesW = 0.0f;
-    for (int t = 0; t < PC_SETTING_TABS; t++) {
-        namesW += ImGui::CalcTextSize(T(kTabNames[t], kTabNamesEn[t])).x;
+    for (int pos = 0; pos < kTabCount; pos++) {
+        namesW += ImGui::CalcTextSize(tabName(kTabOrder[pos])).x;
     }
     const float tabSpare = std::max(0.0f, (ImGui::GetContentRegionAvail().x - namesW -
-                                           (PC_SETTING_TABS - 1) * ImGui::GetStyle().ItemSpacing.x) /
-                                              PC_SETTING_TABS);
-    for (int pos = 0; pos < PC_SETTING_TABS; pos++) {
+                                           (kTabCount - 1) * ImGui::GetStyle().ItemSpacing.x) /
+                                              kTabCount);
+    for (int pos = 0; pos < kTabCount; pos++) {
         const int t = kTabOrder[pos];
         if (pos > 0) {
             ImGui::SameLine();
         }
         const bool sel = t == m.tab;
-        const char* name = T(kTabNames[t], kTabNamesEn[t]);
+        const char* name = tabName(t);
         // Wind Waker's look: the selected tab in gold, the others in the menu's blue
         ImGui::PushStyleColor(ImGuiCol_Button, sel ? ImVec4(0.78f, 0.60f, 0.20f, 1.0f) : ImVec4(0.08f, 0.17f, 0.40f, 1.0f));
         if (ImGui::Button(name, ImVec2(ImGui::CalcTextSize(name).x + tabSpare, 0)) && !m.warpPage &&
@@ -1926,6 +1959,7 @@ void menuInit() {
         return;
     }
     m.initialized = true;
+    m.tab = kTabOrder[0];  // the Quest's first page is Realidad virtual
     for (const PcSettingDesc& d : kBuiltins) {
         // A module that registered the key already (e.g. the HD texture loader) keeps its row.
         bool known = false;
