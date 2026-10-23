@@ -60,6 +60,11 @@ typedef struct WqXrTable {
 // The latest head pose and frustum (false while the session does not run).
 bool wq_xr_head(WqXrHead* out);
 void wq_xr_table(WqXrTable* out);
+// The game, with each frame drawn for head pose `tag` (before aurora_xr_set_frame_info): whether it is a
+// window's frame (the window mode's, or a special scene's: the HUD over the window) and the frustum it
+// drew both eyes with when not the head's (tangents left, right, down, up, as WqXrHead's; the window's
+// fitted one), or NULL for the head's. The XR layer composites the frame with the same.
+void wq_xr_set_frame_view(uint32_t tag, bool window, const float* tangents);
 // The options menu's "Realidad virtual" page (pc_menu.cpp): sets one xr.ini key (its line replaced,
 // or added) and has the layer read the file again. Any thread.
 void wq_xr_set(const char* key, const char* value);

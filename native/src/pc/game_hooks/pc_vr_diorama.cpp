@@ -454,6 +454,52 @@ int cullSphereView(const float p[3], float radius) {
     return out ? 1 : 0;
 }
 
+// The window's frustum fitted to what it can show (its rectangle, and the pop-out's front: the rectangle
+// narrowed toward the camera's eye at the pop-out's depth), seen from both eyes, as tangents from the
+// head's axes (left and down < 0) with a margin for the head moving before the frame is shown, within
+// the head's own (which has its margin already). False (the head's frustum) when a corner is at or
+// behind the eyes' plane, or the window is out of view. The same pixels then cover only the window:
+// more of them per degree.
+bool fitWindowFrustum(const WqXrTable& table, const WqXrHead& head, float popout, float out[4]) {
+    const M4 headWindow = mul(headFromStage(head), roomFromWindow(table));
+    const float hw = 0.5f * table.windowWidth, hh = 0.5f * table.windowHeight;
+    float corners[8][3];
+    int n = 0;
+    for (int sy = -1; sy <= 1; sy += 2)
+        for (int sx = -1; sx <= 1; sx += 2) {
+            const float c[3] = {sx * hw, sy * hh, 0.0f};
+            xform(headWindow, c, corners[n++]);
+        }
+    if (popout > 0.0f) {
+        const float narrow = (table.windowDepth - popout) / table.windowDepth;
+        for (int sy = -1; sy <= 1; sy += 2)
+            for (int sx = -1; sx <= 1; sx += 2) {
+                const float c[3] = {sx * hw * narrow, sy * hh * narrow, popout};
+                xform(headWindow, c, corners[n++]);
+            }
+    }
+    float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+    for (int i = 0; i < n; i++) {
+        const float z = -corners[i][2];
+        if (z < 0.05f) return false;
+        for (int eye = -1; eye <= 1; eye += 2) {
+            const float tx = (corners[i][0] - eye * 0.5f * head.ipd) / z, ty = corners[i][1] / z;
+            lo[0] = std::min(lo[0], tx), hi[0] = std::max(hi[0], tx);
+            lo[1] = std::min(lo[1], ty), hi[1] = std::max(hi[1], ty);
+        }
+    }
+    // the margin: 8% of the span on each side and 0.03 (about 2 degrees)
+    for (int a = 0; a < 2; a++) {
+        const float m = 0.08f * (hi[a] - lo[a]) + 0.03f;
+        lo[a] -= m, hi[a] += m;
+    }
+    out[0] = std::max(lo[0], head.tanLeft);
+    out[1] = std::min(hi[0], head.tanRight);
+    out[2] = std::max(lo[1], head.tanDown);
+    out[3] = std::min(hi[1], head.tanUp);
+    return out[1] - out[0] > 0.02f && out[3] - out[2] > 0.02f;
+}
+
 // The window's frame (mode = ventana), from pc_vr_view_begin: the view delta from the game camera's view
 // to the head's through the window, the head's frustum (both eyes, as the diorama's: the frustum is the
 // head's, wider than the window, and the eyes' mask cuts it to what each eye sees through the window),
@@ -487,8 +533,14 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     projParams(view->mProjMtx, s.projFrom);
     const float gameFar = std::fabs(s.projFrom[4]) > 1e-9f ? std::fabs(s.projFrom[5] / s.projFrom[4]) : 0.0f;
     const float far = std::max(kWindowFar, gameFar * s.k);
+    // the frustum fitted to the window (the XR layer submits the eyes with the same tangents, given
+    // with the frame's tag: wq_xr_set_frame_view), else the head's
+    const float popout = std::max(0.0f, std::min(table.windowPopout, table.windowDepth - kWindowCameraGap));
+    float fov[4] = {head.tanLeft, head.tanRight, head.tanDown, head.tanUp};
+    const bool fitted = fitWindowFrustum(table, head, popout, fov);
+    wq_xr_set_frame_view(head.tag, true, fitted ? fov : nullptr);
     Mtx44 p;
-    C_MTXFrustum(p, kNear * head.tanUp, kNear * head.tanDown, kNear * head.tanLeft, kNear * head.tanRight, kNear, far);
+    C_MTXFrustum(p, kNear * fov[3], kNear * fov[2], kNear * fov[0], kNear * fov[1], kNear, far);
     projParams(p, s.projTo);
     const float eyeShift = -p[0][0] * head.ipd * 0.5f;
     aurora_xr_set_eye_shift(true, 0.0f, eyeShift);
@@ -500,8 +552,7 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
         float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH,
                          std::max(table.windowFade, 0.1f * table.windowPopout), 2.0f};
         aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
-        aurora_xr_set_diorama_window(std::max(0.0f, std::min(table.windowPopout, table.windowDepth - kWindowCameraGap)),
-                                     table.windowDepth);
+        aurora_xr_set_diorama_window(popout, table.windowDepth);
     }
     sBirds.n = 0;  // the birds fly in the world behind the window, at its size
     aurora_xr_set_diorama_free(nullptr, 0);
@@ -516,10 +567,11 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     if (!s.wasOn || now - s.lastLogNs > 5000000000ull) {
         pc::writef(STDERR_FILENO,
                    "[vr] window: %.2f x %.2f m at (%.2f, %.2f, %.2f), %.0f deg; %.4f m per unit (scale %.2f), camera "
-                   "%.2f m in front, coming out %.2f m, far %.0f m; head (%.2f, %.2f, %.2f), %.2f m from the window, tag %u, "
+                   "%.2f m in front, coming out %.2f m, far %.0f m; frustum %s (%.2f %.2f %.2f %.2f); head (%.2f, %.2f, %.2f), %.2f m from the window, tag %u, "
                    "ipd %.3f\n",
                    table.windowWidth, table.windowHeight, table.windowX, table.windowY, -table.windowDistance,
                    table.windowYaw * 57.2958f, s.k, table.windowScale, table.windowDepth, table.windowPopout, far,
+                   fitted ? "fitted to the window" : "the head's", fov[0], fov[1], fov[2], fov[3],
                    head.pos[0], head.pos[1], head.pos[2], s.winHead[2], head.tag, head.ipd);
         s.lastLogNs = now;
     }
@@ -569,7 +621,11 @@ bool pc_vr_view_begin(view_class* view) {
     // camera comes out at the player: the Helmaroc King taking Aryll on Outset (a demo with the bird, the
     // d_a_dk or d_a_demo_dk actor). Over cine_screen and auto_screen while it plays; the mode as it was
     // after it.
-    const bool special = cutscene && table.specialScenes &&
+    // (on Outset alone: the sea stage's room 44; the bird's other demos, in the Forsaken Fortress, stay
+    // as they are)
+    const char* stageName = dComIfGp_getStartStageName();
+    const bool special = cutscene && table.specialScenes && stageName != nullptr && strcmp(stageName, "sea") == 0 &&
+                         dComIfGp_roomControl_getStayNo() == 44 &&
                          (fopAcM_SearchByName(fpcNm_DK_e) != nullptr || fopAcM_SearchByName(fpcNm_DEMO_DK_e) != nullptr);
     static bool sSpecialWas = false;
     if (special != sSpecialWas) {
@@ -649,7 +705,8 @@ bool pc_vr_view_begin(view_class* view) {
     // C = V_head * Stage * World * V_game^-1: the game camera's view space to the head's (metres)
     const M4 c = mul(mul(headFromStage(head), stage), rigidInverse(view->mViewMtx));
     toMtx(c, s.delta);
-    // the frustum both eyes are drawn with
+    // the frustum both eyes are drawn with: the head's (no fit for the model)
+    wq_xr_set_frame_view(head.tag, false, nullptr);
     Mtx44 p;
     C_MTXFrustum(p, kNear * head.tanUp, kNear * head.tanDown, kNear * head.tanLeft, kNear * head.tanRight, kNear, kFar);
     projParams(view->mProjMtx, s.projFrom);

@@ -422,6 +422,12 @@ Xr s;
 struct HeadSnap {
     WqXrHead head{};
     XrPosef eyes[2]{};
+    // wq_xr_set_frame_view: the game drew this pose's frame through the window (the HUD goes over it),
+    // and the frustum it drew it with, when not the head's (the window's, fitted to it): left, right,
+    // down, up tangents
+    bool windowFrame = false;
+    bool fitted = false;
+    float fit[4] = {0, 0, 0, 0};
 };
 std::mutex s_shared;
 Settings s_sharedSettings;
@@ -1153,9 +1159,9 @@ void updatePad() {
                 // the options menu: the triggers are the laser pointer's clicks, not L and R
                 l = r = 0.0f;
                 z = 0.0f;
-            } else if (s.settings.diorama || s.settings.window) {
+            } else if ((s.settings.diorama && !s_special.load()) || s.settings.window) {
                 // the diorama: the grips move the model or a panel (not the game's Z); the window: the
-                // window
+                // window. Not the model while a special scene shows the window instead
                 updateGrips(gripL, z, getBool(s.stickClick));
                 z = 0.0f;
             }
@@ -2039,8 +2045,12 @@ void runFrame() {
     if (screen && s.dioramaFrame && s.sideBySide && headForTag(s.frameTag, drawnFor)) {
         // left | right | HUD (Aurora patch 0026), or left | right
         const int32_t eyeW = int32_t(s.screenW / (s.hudFrame ? 3 : 2));
-        const XrFovf fov{std::atan(drawnFor.head.tanLeft), std::atan(drawnFor.head.tanRight),
-                         std::atan(drawnFor.head.tanUp), std::atan(drawnFor.head.tanDown)};
+        // the frustum the frame was drawn with: the head's, or the one the game fitted to the window
+        const XrFovf fov = drawnFor.fitted
+                               ? XrFovf{std::atan(drawnFor.fit[0]), std::atan(drawnFor.fit[1]), std::atan(drawnFor.fit[3]),
+                                        std::atan(drawnFor.fit[2])}
+                               : XrFovf{std::atan(drawnFor.head.tanLeft), std::atan(drawnFor.head.tanRight),
+                                        std::atan(drawnFor.head.tanUp), std::atan(drawnFor.head.tanDown)};
         for (int eye = 0; eye < 2; eye++) {
             projViews[eye].pose = drawnFor.eyes[eye];
             projViews[eye].fov = fov;
@@ -2076,8 +2086,8 @@ void runFrame() {
                 layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
                 const int pl = updatePointer(hud.pose, hud.size, pointerQuads);
                 for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
-            } else if (st.window || !st.diorama || s_special.load()) {
-                // (a diorama frame outside the maqueta is a special scene's, through the window)
+            } else if (drawnFor.windowFrame || st.window) {
+                // (the frame says so: the window mode's, or a special scene's in any mode)
                 // the window: a dialogue's message box (the bottom of the 2D, as the diorama's) on a
                 // panel just above it, or the HUD on a panel just below it, as wide as the window and
                 // turned with it. Neither is taken by a grip (a grip takes the window).
@@ -2260,7 +2270,7 @@ extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialog
 extern "C" void wq_xr_set_cinematic(bool cinematic) { s_cinematic.store(cinematic); }
 
 extern "C" void wq_xr_set_special(bool special) {
-    if (s_special.exchange(special) != special) xrlog("special scene %s", special ? "on: through the window" : "off");
+    s_special.store(special);  // logged by the game ("[vr] special scene")
 }
 
 extern "C" void wq_xr_menu_state(bool open, float width, float height, bool hovered) {
@@ -2277,6 +2287,15 @@ extern "C" bool wq_xr_head(WqXrHead* out) {
     if (latest.head.tag == 0) return false;
     *out = latest.head;
     return true;
+}
+
+extern "C" void wq_xr_set_frame_view(uint32_t tag, bool window, const float* tangents) {
+    std::lock_guard lock{s_shared};
+    HeadSnap& h = s_heads[tag % kHeadHistory];
+    if (tag == 0 || h.head.tag != tag) return;
+    h.windowFrame = window;
+    h.fitted = tangents != nullptr;
+    if (tangents != nullptr) memcpy(h.fit, tangents, sizeof h.fit);
 }
 
 extern "C" void wq_xr_table(WqXrTable* out) {
