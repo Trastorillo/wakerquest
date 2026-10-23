@@ -133,6 +133,7 @@ const Item kControls[] = {
     {kXr, "view_relative", "Stick según tu vista", "Adelante = lejos de ti, como la miras", kSwitch},
     {kGame, "COS_CAMERA_INVERT_X", "Invertir cámara horizontal", "El stick derecho", kSwitch},
     {kGame, "COS_CAMERA_INVERT_Y", "Invertir cámara vertical", "El stick derecho", kSwitch},
+    {kXr, "special_scenes", "Escenas especiales en 3D real", "El Rey Helmaroc en Isla Initia, por la ventana", kSwitch},
     {kAction, "reset_position", "Recolocar burbuja y ventana", "A su sitio delante de ti (o grip + clic)", kButton},
 };
 const Item kGameItems[] = {

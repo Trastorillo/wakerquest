@@ -527,6 +527,25 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     return true;
 }
 
+// A demo starting: which one (the stage, the room, the running event's name), for the special scenes
+// to come.
+void logDemoStart() {
+    dEvt_control_c* evt = g_dComIfG_gameInfo.play.getEvent();
+    dEvent_manager_c& mng = g_dComIfG_gameInfo.play.getEvtManager();
+    const s16 id = evt != nullptr ? evt->mEventId : -1;
+    dEvDtEvent_c* data = id >= 0 ? mng.getEventData(id) : nullptr;
+    char name[sizeof(data->mName) + 1] = "?";
+    if (data != nullptr) {
+        memcpy(name, data->mName, sizeof(data->mName));
+        name[sizeof(data->mName)] = '\0';
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    pc::writef(STDERR_FILENO, "[vr] demo start: stage %s, room %d, event %d \"%s\", Helmaroc King %s\n",
+               stage != nullptr ? stage : "?", dComIfGp_roomControl_getStayNo(), (int)id, name,
+               fopAcM_SearchByName(fpcNm_DK_e) != nullptr || fopAcM_SearchByName(fpcNm_DEMO_DK_e) != nullptr ? "here"
+                                                                                                          : "not here");
+}
+
 } // namespace
 
 bool pc_vr_view_begin(view_class* view) {
@@ -542,13 +561,29 @@ bool pc_vr_view_begin(view_class* view) {
     // (no demo manager in some scenes, as the title's: none playing)
     const bool cutscene = dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0;
     wq_xr_set_cinematic(cutscene);
+    static bool sDemoWas = false;
+    if (cutscene && !sDemoWas) logDemoStart();
+    sDemoWas = cutscene;
+    // The special scenes (special_scenes): cutscenes shown through the window in any mode, the window's
+    // pose and size with a deep camera and a large pop-out at the world's own size, so what comes at the
+    // camera comes out at the player: the Helmaroc King taking Aryll on Outset (a demo with the bird, the
+    // d_a_dk or d_a_demo_dk actor). Over cine_screen and auto_screen while it plays; the mode as it was
+    // after it.
+    const bool special = cutscene && table.specialScenes &&
+                         (fopAcM_SearchByName(fpcNm_DK_e) != nullptr || fopAcM_SearchByName(fpcNm_DEMO_DK_e) != nullptr);
+    static bool sSpecialWas = false;
+    if (special != sSpecialWas) {
+        pc::writef(STDERR_FILENO, "[vr] special scene %s\n", special ? "on: the window, 3D for real" : "off");
+        sSpecialWas = special;
+    }
+    wq_xr_set_special(special);
     const bool firstPerson =
         table.autoScreen &&
         (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
                                             daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
          dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
-    const bool ownView = firstPerson || (table.cineScreen && cutscene);
-    const bool modeOn = table.diorama || table.window;
+    const bool ownView = !special && (firstPerson || (table.cineScreen && cutscene));
+    const bool modeOn = table.diorama || table.window || special;
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
         if (s.wasOn) {
@@ -557,8 +592,9 @@ bool pc_vr_view_begin(view_class* view) {
                        : firstPerson ? "telescope or first person: the screen"
                        : ownView ? "a cutscene: the screen" : "no head pose");
             aurora_xr_set_frame_info(0, false);
-            if (ownView) {
-                aurora_xr_set_eye_shift(false, 0.0f, 0.0f);  // the screen's own 3D meanwhile (wq_xr.cpp)
+            if (ownView || !modeOn) {
+                // the screen's own 3D meanwhile (wq_xr.cpp), or after a special scene on the screen
+                aurora_xr_set_eye_shift(false, 0.0f, 0.0f);
             }
             s.wasOn = false;
             s.rigValid = false;
@@ -579,9 +615,16 @@ bool pc_vr_view_begin(view_class* view) {
                    dComIfGp_event_runCheck() ? " (event)" : "");
         sMesgWas = mesg;
     }
-    if (table.window) {
+    if (table.window || special) {
         // the window: the stick as on the screen (the camera looks through the window)
         wq_xr_set_camera_heading(0.0f, false, mesg != 0);
+        if (special) {
+            WqXrTable w = table;
+            w.windowScale = 1.0f;
+            w.windowDepth = table.windowDepthSpecial;
+            w.windowPopout = table.windowPopoutSpecial;
+            return windowBegin(view, w, head);
+        }
         return windowBegin(view, table, head);
     }
     if (s.window) {

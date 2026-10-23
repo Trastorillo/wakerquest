@@ -51,6 +51,10 @@ typedef struct WqXrTable {
     float windowDepth;                // the game camera's eye this far in front of the window (metres)
     float windowPopout;               // what may come out toward the player (metres; 0 = nothing)
     float windowFade;                 // the edges' fade (metres)
+    // the special scenes (special_scenes): some cutscenes (the Helmaroc King on Outset) through the
+    // window in any mode, at the world's own size, the camera this deep and this much coming out
+    bool specialScenes;
+    float windowDepthSpecial, windowPopoutSpecial;
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).
@@ -67,6 +71,9 @@ void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue);
 // The game, every frame (pc_vr_diorama.cpp): an event (a cutscene) runs; the giant screen's 3D is
 // stronger meanwhile (cine_3d).
 void wq_xr_set_cinematic(bool cinematic);
+// The game, every frame (pc_vr_diorama.cpp): a special scene plays, drawn through the window whatever the
+// mode (its frames are window frames: the HUD over the window, the room around it).
+void wq_xr_set_special(bool special);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);

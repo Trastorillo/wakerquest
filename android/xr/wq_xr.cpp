@@ -123,6 +123,12 @@ struct Settings {
     float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window
     float windowPopout = 0.45f;    // m, how far
+    // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset)
+    // through the window in any mode, at the world's own size, the camera deep in front of it and much
+    // coming out (never past the camera: the pop-out stops 2 cm short of window_depth_special)
+    bool specialScenes = true;
+    float windowDepthSpecial = 2.0f;   // m
+    float windowPopoutSpecial = 1.8f;  // m
     float windowFade = 0.03f;     // m, the edges' fade
     bool windowVignette = false;  // a comfort vignette when the camera moves fast (not done yet)
 };
@@ -168,7 +174,12 @@ const char kDefaultSettings[] =
     "window_scale = 1.0\n"
     "window_depth = 0.5\n"
     "window_popout_on = 1\n"
-    "window_popout = 0.45\n";
+    "window_popout = 0.45\n"
+    "# special_scenes 1 = some cutscenes (the Helmaroc King on Outset) through the window in any mode,\n"
+    "# at real size, the camera window_depth_special m in front of it, window_popout_special m coming out.\n"
+    "special_scenes = 1\n"
+    "window_depth_special = 2.0\n"
+    "window_popout_special = 1.8\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
@@ -216,6 +227,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_depth")) s.windowDepth = clampf(f, 0.05f, 5.0f);
     else if (!strcmp(key, "window_popout_on")) s.windowPopoutOn = on;
     else if (!strcmp(key, "window_popout")) s.windowPopout = clampf(f, 0.0f, 3.0f);
+    else if (!strcmp(key, "special_scenes")) s.specialScenes = on;
+    else if (!strcmp(key, "window_depth_special")) s.windowDepthSpecial = clampf(f, 0.1f, 5.0f);
+    else if (!strcmp(key, "window_popout_special")) s.windowPopoutSpecial = clampf(f, 0.0f, 5.0f);
     else if (!strcmp(key, "window_fade")) s.windowFade = clampf(f, 0.0f, 0.5f);
     else if (!strcmp(key, "window_vignette")) s.windowVignette = on;
     else if (!strcmp(key, "hud_pose")) {
@@ -276,6 +290,9 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "window_depth")) return num(s.windowDepth);
     if (!strcmp(key, "window_popout_on")) return flag(s.windowPopoutOn);
     if (!strcmp(key, "window_popout")) return num(s.windowPopout);
+    if (!strcmp(key, "special_scenes")) return flag(s.specialScenes);
+    if (!strcmp(key, "window_depth_special")) return num(s.windowDepthSpecial);
+    if (!strcmp(key, "window_popout_special")) return num(s.windowPopoutSpecial);
     if (!strcmp(key, "window_fade")) return num(s.windowFade);
     if (!strcmp(key, "window_vignette")) return flag(s.windowVignette);
     return std::string();
@@ -446,6 +463,7 @@ bool hasExtension(const std::vector<XrExtensionProperties>& exts, const char* na
 
 std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it now
 std::atomic_bool s_cinematic{false};       // wq_xr_set_cinematic: the game runs an event (a cutscene)
+std::atomic_bool s_special{false};         // wq_xr_set_special: a special scene, through the window
 float s_stereoApplied[3] = {-1.0f, 0.0f, 0.0f};  // the screen's 3D as last given to Aurora: on, strength, focus
 float s_cineRamp = 0.0f;                   // 0..1, the cutscenes' 3D faded in and out
 bool s_refreshDirty = false;               // the refresh rate changed while running
@@ -920,7 +938,8 @@ void updatePerformance() {
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
 bool updatePassthrough() {
     // the diorama and the window sit in the room
-    const bool want = (s.settings.passthrough || s.settings.diorama || s.settings.window) && s.hasPassthrough;
+    const bool want = (s.settings.passthrough || s.settings.diorama || s.settings.window || s_special.load()) &&
+                      s.hasPassthrough;
     if (want == s.passthroughRunning) return want;
     if (want && !s.passthrough) {
         PFN_xrCreatePassthroughFB create = nullptr;
@@ -1941,7 +1960,7 @@ XrQuaternionf facingPlayer(XrVector3f at) {
 // cutscenes (cine_3d), faded in and out over half a second.
 void updateScreenStereo() {
     const Settings& st = s.settings;
-    if ((st.diorama || st.window) && s.dioramaFrame) {
+    if ((st.diorama || st.window || s_special.load()) && s.dioramaFrame) {
         s_stereoApplied[0] = -1.0f;  // the diorama's eye shift; the screen's applied again after it
         return;
     }
@@ -2057,7 +2076,8 @@ void runFrame() {
                 layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
                 const int pl = updatePointer(hud.pose, hud.size, pointerQuads);
                 for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
-            } else if (st.window) {
+            } else if (st.window || !st.diorama || s_special.load()) {
+                // (a diorama frame outside the maqueta is a special scene's, through the window)
                 // the window: a dialogue's message box (the bottom of the 2D, as the diorama's) on a
                 // panel just above it, or the HUD on a panel just below it, as wide as the window and
                 // turned with it. Neither is taken by a grip (a grip takes the window).
@@ -2239,6 +2259,10 @@ extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialog
 
 extern "C" void wq_xr_set_cinematic(bool cinematic) { s_cinematic.store(cinematic); }
 
+extern "C" void wq_xr_set_special(bool special) {
+    if (s_special.exchange(special) != special) xrlog("special scene %s", special ? "on: through the window" : "off");
+}
+
 extern "C" void wq_xr_menu_state(bool open, float width, float height, bool hovered) {
     s_menuOpen.store(open);
     s_menuW.store(width);
@@ -2283,6 +2307,9 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->windowScale = st.windowScale;
     out->windowDepth = st.windowDepth;
     out->windowPopout = st.windowPopoutOn ? st.windowPopout : 0.0f;
+    out->specialScenes = st.specialScenes;
+    out->windowDepthSpecial = st.windowDepthSpecial;
+    out->windowPopoutSpecial = st.windowPopoutSpecial;
     out->windowFade = st.windowFade;
 }
 
