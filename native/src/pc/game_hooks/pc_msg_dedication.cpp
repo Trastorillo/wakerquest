@@ -6,6 +6,7 @@
 //   2003  the grandmother, end of her first talk (the green clothes on the birthday)
 //   2007  an Outset islander praising the green clothes
 //   10873 "Veo que te interesa esta imagen..."
+//   3514  Tingle's goodbye in his tower ("¡Hasta la vista, duende!")
 #include "d/dolzel.h" // IWYU pragma: keep
 
 #include <cstdlib>
@@ -22,6 +23,7 @@ const Extra kExtras[] = {
     {2003, "Ah, y antes de que se me olvide...\n\xA1Saludos a Shaak4, nerestraw\ny compa\xF1\xED" "a!"},
     {2007, "\xBFNecesitas mucho espacio para\njugar en VR? Aqu\xED en la isla\ntenemos todo el mar."},
     {10873, "Dicen que en un canal llamado\nShaak4 VR ense\xF1" "an a vivir\nla magia desde dentro."},
+    {3514, "\xA1La gente odia la VR!\n\xA1Industria retr\xF3grada!\nKurul\xFAn... \xA1PA!"},
 };
 
 constexpr int kExtraCount = (int)(sizeof(kExtras) / sizeof(kExtras[0]));

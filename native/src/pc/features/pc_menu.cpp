@@ -1431,7 +1431,26 @@ std::string rowHelp(const Row& r) {
     return help;
 }
 
+// Wind Waker's look (WakerQuest): the deep blue of its menus with a rounded gold frame.
+struct WindWakerStyle {
+    WindWakerStyle() {
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.03f, 0.09f, 0.26f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.86f, 0.69f, 0.27f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.86f, 0.69f, 0.27f, 0.6f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.55f, 0.43f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.70f, 0.55f, 0.20f, 1.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 18.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 3.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+    }
+    ~WindWakerStyle() {
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(5);
+    }
+};
+
 void drawMenu() {
+    const WindWakerStyle style;
     ImGuiIO& io = ImGui::GetIO();
     // About 20 px text at 720 lines (the Switch's screen, the Mac's default window).
     const float scale = std::max(1.0f, io.DisplaySize.y / 720.0f * 1.7f);
@@ -1476,7 +1495,8 @@ void drawMenu() {
         }
         const bool sel = t == m.tab;
         const char* name = T(kTabNames[t], kTabNamesEn[t]);
-        ImGui::PushStyleColor(ImGuiCol_Button, sel ? ImVec4(0.20f, 0.42f, 0.70f, 1.0f) : ImVec4(0.16f, 0.18f, 0.22f, 1.0f));
+        // Wind Waker's look: the selected tab in gold, the others in the menu's blue
+        ImGui::PushStyleColor(ImGuiCol_Button, sel ? ImVec4(0.78f, 0.60f, 0.20f, 1.0f) : ImVec4(0.08f, 0.17f, 0.40f, 1.0f));
         if (ImGui::Button(name, ImVec2(ImGui::CalcTextSize(name).x + tabSpare, 0)) && !m.warpPage &&
             m.captureAction < 0) {
             m.tab = t;
