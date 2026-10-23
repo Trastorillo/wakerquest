@@ -106,9 +106,9 @@ const Item kStereo[] = {
     {kXr, "birds_free", "Aves fuera de la burbuja", "Las gaviotas vuelan por tu habitación", kSwitch},
     {kXr, "bird_range", "Alcance de las aves", "Hasta cuántas veces el radio de la burbuja", kStepper, nullptr, 0, 1.0f,
      8.0f, 0.5f, "%.1f"},
-    {kXr, "window_width", "Tamaño de la ventana", "O agárrala con los dos grips", kStepper, nullptr, 0, 0.4f, 4.0f,
+    {kXr, "window_width", "Tamaño de la ventana", "O agárrala con los dos grips", kStepper, nullptr, 0, 0.3f, 6.0f,
      0.1f, "%.1f m"},
-    {kXr, "window_depth", "Fondo de la ventana", "La cámara del juego detrás de ella", kStepper, nullptr, 0, 0.1f, 2.0f,
+    {kXr, "window_depth", "Fondo de la ventana", "La cámara del juego delante; tope de lo que sale", kStepper, nullptr, 0, 0.1f, 2.0f,
      0.1f, "%.1f m"},
 };
 const Item kDiorama[] = {
@@ -147,11 +147,13 @@ struct Tab {
     int count;
 };
 #define TAB(name, items) {name, items, (int)(sizeof(items) / sizeof(items[0]))}
-const Tab kTabs[] = {TAB("General", kGeneral), TAB("Efectos", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
+constexpr Tab kTabs[] = {TAB("General", kGeneral), TAB("Efectos", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
                      TAB("Juego", kGameItems)};
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));
 constexpr int kMaxItems = 10;
+constexpr bool tabsFit(int i = 0) { return i >= kTabCount || (kTabs[i].count <= kMaxItems && tabsFit(i + 1)); }
+static_assert(tabsFit(), "a tab has more rows than the panel holds (kMaxItems)");
 
 // The game's keys, for the game thread's mirror (wq_xr_panel_game_keys)
 const char* const kGameKeys[] = {"COS_VR_RESOLUTION", "COS_CAMERA_INVERT_X", "COS_CAMERA_INVERT_Y",

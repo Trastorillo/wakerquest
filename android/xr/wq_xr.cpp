@@ -109,7 +109,8 @@ struct Settings {
     // m, the dialogues' panel moved by hand (a grip on it) from its place above the model; it moves with it
     float dialogueOffset[3] = {0, 0, 0};
     // the window (mode = ventana, pc_vr_diorama.cpp): the world at its own scale through a rectangle in
-    // the room (16:9), the game camera's eye window_depth behind it; each eye looks through it from
+    // the room (16:9), the game camera's eye window_depth in front of it looking through it (what it sees
+    // nearer than that comes out, up to window_popout); each eye looks through it from
     // where it is, and what is near comes out of it toward the player (window_popout)
     bool window = false;
     float windowWidth = 1.6f;     // m across
@@ -118,7 +119,7 @@ struct Settings {
     float windowX = 0.0f;         // m to the right (a grip moves it)
     float windowYaw = 0.0f;       // degrees, turned to the left (a grip turns it)
     float windowScale = 1.0f;     // the game's metres per metre of the room (more: the world smaller)
-    float windowDepth = 0.5f;     // m, the game camera's eye behind the window
+    float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window
     float windowPopout = 1.0f;    // m, how far
     float windowFade = 0.03f;     // m, the edges' fade
@@ -141,7 +142,7 @@ const char kDefaultSettings[] =
     "stereo_focus = 600\n"
     "# the game's internal height in pixels (720, 900, 1080, 1200, 1440); read when the game starts.\n"
     "resolution = 1512\n"
-    "# mode = pantalla (a giant screen) or maqueta (the world as a model in the room).\n"
+    "# mode = pantalla (a giant screen), maqueta (the world as a model in the room) or ventana (a window).\n"
     "mode = pantalla\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
     "# in m (the table's width), bubble_span = metres of the game across it, bubble_distance and\n"
@@ -157,8 +158,9 @@ const char kDefaultSettings[] =
     "table_follow_yaw = 1\n"
     "# mode = ventana: the world at its own size through a window in the room. window_width (m, 16:9),\n"
     "# window_distance, window_height (above the eyes), window_x in m; window_yaw in degrees;\n"
-    "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera behind\n"
-    "# the window (m); window_popout_on 1 = near things come out of it, up to window_popout m.\n"
+    "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera in front\n"
+    "# of the window (m); window_popout_on 1 = near things come out of it, up to window_popout m (and\n"
+    "# never past the camera).\n"
     "window_width = 1.6\n"
     "window_distance = 2.0\n"
     "window_height = 0.0\n"
@@ -207,7 +209,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_distance")) s.windowDistance = clampf(f, 0.3f, 10.0f);
     else if (!strcmp(key, "window_height")) s.windowHeight = clampf(f, -3.0f, 3.0f);
     else if (!strcmp(key, "window_x")) s.windowX = clampf(f, -5.0f, 5.0f);
-    else if (!strcmp(key, "window_yaw")) s.windowYaw = f;
+    else if (!strcmp(key, "window_yaw")) s.windowYaw = std::remainder(f, 360.0f);  // -180..180
     else if (!strcmp(key, "window_scale")) s.windowScale = clampf(f, 0.1f, 100.0f);
     else if (!strcmp(key, "window_depth")) s.windowDepth = clampf(f, 0.05f, 5.0f);
     else if (!strcmp(key, "window_popout_on")) s.windowPopoutOn = on;

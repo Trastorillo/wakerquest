@@ -17,8 +17,9 @@
 // - Draws with other projections (the 2D, the HUD, the menus' models) are drawn as before. The sun,
 //   the stars and the sky's clouds (built around the camera's eye) are left out.
 // - The window (mode = ventana, windowBegin): the same frames, without the rig: the world at its own
-//   size behind a rectangle in the room, the game camera's eye a little behind it, each eye looking
-//   through it from where it is (the eyes' mask as a portal, Aurora patch 0030), near things coming out.
+//   size behind a rectangle in the room, the game camera's eye a little in front of it (on the player's
+//   side) looking through it, each eye looking through it from where it is (the eyes' mask as a portal,
+//   Aurora patch 0030), what is between the camera and the window coming out of it.
 // Phase 1: no cut at the table's edges and no culling from the head yet; the HUD stays in the picture.
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "pc/pc_vr.h"
@@ -101,7 +102,7 @@ const float kFollowDeadZone = 100.0f;  // along the ground before the world foll
 const float kJumpDeadZone = 350.0f;    // up and down before the world follows (jumps hold still)
 const float kPosHalfLife = 0.12f, kRiseHalfLife = 0.25f, kYawHalfLife = 0.35f;
 const float kNear = 0.03f, kFar = 200.0f;  // metres
-const float kWindowFar = 3000.0f;          // metres: the window shows the world at its own size
+const float kWindowFar = 3000.0f;          // metres at least: the window shows the world at its own size
 
 struct State {
     bool rigValid = false;
@@ -129,7 +130,7 @@ struct State {
     uint64_t cullLogNs = 0;
     // the window (mode = ventana): its table space (x, y within +-1 over its rectangle, z in metres,
     // its plane at 0, +z toward the player) and, in metres, its half sizes, the head in that space, the
-    // game camera's eye behind it and what may come out of it
+    // game camera's eye in front of it and what may come out of it
     bool window = false;
     float winHalfW = 0.8f, winHalfH = 0.45f;
     float winHead[3] = {0, 0, 1};
@@ -280,10 +281,12 @@ void xform(const M4& a, const float p[3], float out[3]) {
 
 // The window (mode = ventana): a rectangle in the room (its pose: windowX, windowY, -windowDistance,
 // turned windowYaw about the vertical) the world is seen through at its own size (windowScale of the
-// game's metres per metre). The game camera's eye sits windowDepth behind the window's middle, looking
-// through it (the camera's view space looks down -z, as the window's own space away from the player):
-// Room from the game camera's view = WindowPose * T(0, 0, -depth) * S(k), k metres per game unit. With
-// the stage being the room (LOCAL), C = V_head * that: no rig, the camera's moves are the world's.
+// game's metres per metre). The game camera's eye sits windowDepth in front of the window's middle (on
+// the player's side), looking through it (the camera's view space looks down -z, as the window's own
+// space away from the player): Room from the game camera's view = WindowPose * T(0, 0, depth) * S(k), k
+// metres per game unit. What the camera sees nearer than depth lies in front of the window (it comes
+// out); what is behind the camera, past z = depth, is never shown. With the stage being the room
+// (LOCAL), C = V_head * that: no rig, the camera's moves are the world's.
 M4 roomFromWindow(const WqXrTable& t) {
     const float c = std::cos(t.windowYaw), sn = std::sin(t.windowYaw);
     M4 m = identity();
@@ -297,7 +300,7 @@ M4 roomFromWindow(const WqXrTable& t) {
 
 M4 roomFromCameraView(const WqXrTable& t, float k) {
     M4 back = identity();
-    back.m[2][3] = -t.windowDepth;
+    back.m[2][3] = t.windowDepth;
     M4 scale = identity();
     scale.m[0][0] = scale.m[1][1] = scale.m[2][2] = k;
     return mul(mul(roomFromWindow(t), back), scale);
@@ -319,8 +322,11 @@ M4 windowTableFromRoom(const WqXrTable& t) {
 
 // A sphere (the window's table space, radius in metres) against what the window shows, conservatively
 // (a margin for the head moving before the frame is shown): behind the plane, the four planes through
-// the head and the window's edges; in front, the pop-out's volume (the rectangle widened as the game
-// camera's eye behind it sees it). Nothing beyond the pop-out comes out. 1 culled, 0 drawn.
+// the head and the window's edges; in front, the pop-out's volume (the camera's near frustum: the
+// rectangle narrowing toward the game camera's eye, depth in front of it). Nothing beyond the pop-out,
+// nor behind the camera, comes out. 1 culled, 0 drawn.
+const float kWindowCameraGap = 0.02f;  // m: the pop-out stops this short of the game camera's eye
+
 int cullWindow(const float t[3], float r) {
     const float margin = 0.25f;
     const float p[3] = {t[0] * s.winHalfW, t[1] * s.winHalfH, t[2]};  // metres
@@ -345,9 +351,11 @@ int cullWindow(const float t[3], float r) {
                 }
         }
     }
-    if (!seen && p[2] + r >= 0.0f && p[2] - r <= s.winPopout && s.winPopout > 0.0f) {
-        const float widen = (s.winDepth + std::max(p[2], 0.0f)) / s.winDepth;
-        seen = std::fabs(p[0]) - r <= s.winHalfW * widen + margin && std::fabs(p[1]) - r <= s.winHalfH * widen + margin;
+    const float popout = std::min(s.winPopout, s.winDepth - kWindowCameraGap);
+    if (!seen && popout > 0.0f && p[2] + r >= 0.0f && p[2] - r <= popout) {
+        // the rectangle's scale at the sphere's nearest height to the window (the widest it is there)
+        const float narrow = (s.winDepth - std::max(p[2] - r, 0.0f)) / s.winDepth;
+        seen = std::fabs(p[0]) - r <= s.winHalfW * narrow + margin && std::fabs(p[1]) - r <= s.winHalfH * narrow + margin;
     }
     return seen ? 0 : 1;
 }
@@ -474,10 +482,13 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     // C = V_head * WindowPose * T(0, 0, -depth) * S(k)
     const M4 c = mul(headFromStage(head), roomView);
     toMtx(c, s.delta);
-    Mtx44 p;
-    C_MTXFrustum(p, kNear * head.tanUp, kNear * head.tanDown, kNear * head.tanLeft, kNear * head.tanRight, kNear,
-                 kWindowFar);
+    // the far plane: the game's own (its projection: P23 / P22 = far) at the window's scale, at least
+    // kWindowFar
     projParams(view->mProjMtx, s.projFrom);
+    const float gameFar = std::fabs(s.projFrom[4]) > 1e-9f ? std::fabs(s.projFrom[5] / s.projFrom[4]) : 0.0f;
+    const float far = std::max(kWindowFar, gameFar * s.k);
+    Mtx44 p;
+    C_MTXFrustum(p, kNear * head.tanUp, kNear * head.tanDown, kNear * head.tanLeft, kNear * head.tanRight, kNear, far);
     projParams(p, s.projTo);
     const float eyeShift = -p[0][0] * head.ipd * 0.5f;
     aurora_xr_set_eye_shift(true, 0.0f, eyeShift);
@@ -489,7 +500,8 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
         float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH,
                          std::max(table.windowFade, 0.1f * table.windowPopout), 2.0f};
         aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
-        aurora_xr_set_diorama_window(table.windowPopout, table.windowDepth);
+        aurora_xr_set_diorama_window(std::max(0.0f, std::min(table.windowPopout, table.windowDepth - kWindowCameraGap)),
+                                     table.windowDepth);
     }
     sBirds.n = 0;  // the birds fly in the world behind the window, at its size
     aurora_xr_set_diorama_free(nullptr, 0);
@@ -504,10 +516,10 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     if (!s.wasOn || now - s.lastLogNs > 5000000000ull) {
         pc::writef(STDERR_FILENO,
                    "[vr] window: %.2f x %.2f m at (%.2f, %.2f, %.2f), %.0f deg; %.4f m per unit (scale %.2f), camera "
-                   "%.2f m behind, coming out %.2f m; head (%.2f, %.2f, %.2f), %.2f m from the window, tag %u, "
+                   "%.2f m in front, coming out %.2f m, far %.0f m; head (%.2f, %.2f, %.2f), %.2f m from the window, tag %u, "
                    "ipd %.3f\n",
                    table.windowWidth, table.windowHeight, table.windowX, table.windowY, -table.windowDistance,
-                   table.windowYaw * 57.2958f, s.k, table.windowScale, table.windowDepth, table.windowPopout,
+                   table.windowYaw * 57.2958f, s.k, table.windowScale, table.windowDepth, table.windowPopout, far,
                    head.pos[0], head.pos[1], head.pos[2], s.winHead[2], head.tag, head.ipd);
         s.lastLogNs = now;
     }
