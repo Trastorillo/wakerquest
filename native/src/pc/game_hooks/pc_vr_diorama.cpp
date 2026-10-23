@@ -39,6 +39,7 @@
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
 #include "d/d_meter.h"
+#include "m_Do/m_Do_lib.h"
 
 #include <algorithm>
 
@@ -135,6 +136,16 @@ struct State {
     float winHalfW = 0.8f, winHalfH = 0.45f;
     float winHead[3] = {0, 0, 1};
     float winDepth = 0.5f, winPopout = 1.0f;
+    float winDrawUnits = 80000.0f;  // the window's draw distance (game units from the camera)
+    unsigned long cullFarHidden = 0;
+    // the bubble's focus (the talk zoom, a special scene): the pivot drawn toward `focus` and the span
+    // times `focusZoom`, by focusAmt (0 following Link .. 1 on the focus), eased in and out
+    float focusAmt = 0.0f;
+    float focus[3] = {0, 0, 0};
+    bool focusValid = false;
+    float focusZoom = 1.0f;
+    uint64_t focusNs = 0;
+    float view[3] = {0, 0, 0};  // the pivot drawn with: the rig's, or toward the focus
 };
 State s;
 
@@ -204,7 +215,41 @@ void updateRig(const cXyz& link, const Mtx view, bool followYaw) {
     }
 }
 
-// Stage from world: the world's axes scaled to metres, the pivot at the table's middle.
+// The bubble's focus (the talk zoom, a special scene), every frame: `target` (or none) and the span's
+// zoom while on it. The pivot glides toward it and the span shrinks over about a second (smoothstep
+// of a linear ramp), the target followed with a short half-life; then back to the rig's pivot (Link).
+// The rig keeps following Link meanwhile, so the way back lands on him.
+const float kFocusSeconds = 1.0f, kFocusHalfLife = 0.2f;
+
+void updateFocus(const float* target, float zoom) {
+    const uint64_t now = nowNs();
+    double dt = s.focusNs ? double(now - s.focusNs) * 1e-9 : 0.0;
+    s.focusNs = now;
+    if (dt > 0.25) dt = 0.25;
+    if (target != nullptr) {
+        if (!s.focusValid || s.focusAmt <= 0.0f) {
+            memcpy(s.focus, target, sizeof s.focus);
+        } else {
+            const float k = blend(dt, kFocusHalfLife);
+            for (int i = 0; i < 3; i++) s.focus[i] += (target[i] - s.focus[i]) * k;
+        }
+        s.focusValid = true;
+        s.focusZoom = zoom;
+    }
+    const float want = target != nullptr ? 1.0f : 0.0f;
+    const float step = float(dt) / kFocusSeconds;
+    s.focusAmt = want > s.focusAmt ? std::min(want, s.focusAmt + step) : std::max(want, s.focusAmt - step);
+    if (s.focusAmt <= 0.0f) s.focusValid = false;
+}
+
+// The eased focus amount (0 .. 1)
+float focusEase() {
+    const float a = s.focusValid ? s.focusAmt : 0.0f;
+    return a * a * (3.0f - 2.0f * a);
+}
+
+// Stage from world: the world's axes scaled to metres, the pivot (s.view: the rig's, or toward the
+// focus) at the table's middle.
 M4 stageFromWorld(const WqXrTable& t) {
     float r[3], u[3], b[3];
     axes(s.yaw + t.yaw, r, u, b);  // the grip's turn on top of the camera's heading
@@ -217,7 +262,7 @@ M4 stageFromWorld(const WqXrTable& t) {
     }
     const float anchor[3] = {t.x, -t.height, -t.distance};
     for (int row = 0; row < 3; row++)
-        m.m[row][3] = anchor[row] - (m.m[row][0] * s.pivot[0] + m.m[row][1] * s.pivot[1] + m.m[row][2] * s.pivot[2]);
+        m.m[row][3] = anchor[row] - (m.m[row][0] * s.view[0] + m.m[row][1] * s.view[1] + m.m[row][2] * s.view[2]);
     return m;
 }
 
@@ -418,16 +463,25 @@ int cullSphereView(const float p[3], float radius) {
     xform(s.tableFromView, p, t);
     const float r = radius * s.k;
     if (s.window) {
-        // the window: what it shows, from the head (and coming out of it)
+        // the window: what it shows, from the head (and coming out of it), as far as the game itself
+        // draws it (its clipper's far, which actors' culling sets to their own draw distances and the
+        // camera's frustum test would have applied) and the window's draw distance (the horizon:
+        // window_draw_distance), which keeps the large models (the sea, the islands' low detail)
         s.cullTests++;
-        const int out = cullWindow(t, r);
+        const float depth = -p[2] - radius;  // game units in front of the game camera
+        const float kKeepRadius = 5000.0f;   // 50 m: the sea's and the islands' models
+        const bool far = depth > mDoLib_clipper::mClipper.getFar() || (depth > s.winDrawUnits && radius < kKeepRadius);
+        const int out = far ? 1 : cullWindow(t, r);
         if (out) s.cullHidden++;
+        if (far) s.cullFarHidden++;
         const uint64_t now = nowNs();
         if (now - s.cullLogNs > 1000000000ull) {
             if (s.cullLogNs != 0)
-                pc::writef(STDERR_FILENO, "[vr] culling by the window: %lu tests, %lu culled in the last second\n",
-                           s.cullTests, s.cullHidden);
-            s.cullTests = s.cullHidden = 0;
+                pc::writef(STDERR_FILENO,
+                           "[vr] culling by the window: %lu tests, %lu culled in the last second (%lu by distance, "
+                           "beyond %.0f m)\n",
+                           s.cullTests, s.cullHidden, s.cullFarHidden, s.winDrawUnits / kUnitsPerMetre);
+            s.cullTests = s.cullHidden = s.cullFarHidden = 0;
             s.cullLogNs = now;
         }
         return out;
@@ -493,24 +547,50 @@ bool fitWindowFrustum(const WqXrTable& table, const WqXrHead& head, float popout
         const float m = 0.08f * (hi[a] - lo[a]) + 0.03f;
         lo[a] -= m, hi[a] += m;
     }
-    out[0] = std::max(lo[0], head.tanLeft);
-    out[1] = std::min(hi[0], head.tanRight);
-    out[2] = std::max(lo[1], head.tanDown);
-    out[3] = std::min(hi[1], head.tanUp);
-    return out[1] - out[0] > 0.02f && out[3] - out[2] > 0.02f;
+    // out is left as it was (the head's) when the fit fails: the window out of the head's frustum
+    const float f[4] = {std::max(lo[0], head.tanLeft), std::min(hi[0], head.tanRight), std::max(lo[1], head.tanDown),
+                        std::min(hi[1], head.tanUp)};
+    if (f[1] - f[0] <= 0.02f || f[3] - f[2] <= 0.02f) return false;
+    memcpy(out, f, sizeof f);
+    return true;
+}
+
+// See Link through what stands in front of him (seethrough_radius, Aurora patch 0031): with the view
+// delta, Link's middle in the head's space (headFromWorld: the head from the game's world) and a cone
+// from the eyes' midpoint toward him, radius game metres wide at him. The world's fragments within it
+// and nearer than him by more than a margin (his own size: his draws, his shield, the ground at his
+// feet stay) are discarded, dithered over a soft edge: the trees, the grass and the walls between the
+// eyes and Link are cut away, and Link and what is behind him show. The same volume for both eyes.
+const float kLinkMiddle = 60.0f;      // game units above his feet
+const float kSeeMargin = 100.0f;      // game units before him: what is nearer is cut
+const float kSeeSoftDepth = 40.0f;    // game units: the cut fades in over this toward him
+const float kSeeSoftEdge = 0.35f;     // of the radius, dithered at the cone's edge
+
+void seeThrough(const M4& headFromWorld, const fopAc_ac_c* player, float radiusMetres, float k) {
+    if (radiusMetres <= 0.0f || player == nullptr) return;  // off: Aurora turns it off every frame
+    const float p[3] = {player->current.pos.x, player->current.pos.y + kLinkMiddle, player->current.pos.z};
+    float l[3];
+    xform(headFromWorld, p, l);
+    const float dist = std::sqrt(l[0] * l[0] + l[1] * l[1] + l[2] * l[2]);
+    if (dist < 1e-3f) return;
+    const float r = radiusMetres * kUnitsPerMetre * k;  // metres in the head's space
+    const f32 params[8] = {l[0], l[1], l[2], kSeeSoftDepth * k, r / dist, kSeeMargin * k, kSeeSoftEdge, 0.0f};
+    AuroraSetSeeThrough(params);
 }
 
 // The window's frame (mode = ventana), from pc_vr_view_begin: the view delta from the game camera's view
 // to the head's through the window, the head's frustum (both eyes, as the diorama's: the frustum is the
 // head's, wider than the window, and the eyes' mask cuts it to what each eye sees through the window),
 // the eyes' mask as the window (Aurora patch 0030) and the culling against what it shows.
-bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head) {
+bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head, const fopAc_ac_c* player) {
     s.window = true;
     s.k = 1.0f / (table.windowScale * kUnitsPerMetre);  // metres per game unit
     s.winHalfW = 0.5f * table.windowWidth;
     s.winHalfH = 0.5f * table.windowHeight;
     s.winDepth = table.windowDepth;
     s.winPopout = table.windowPopout;
+    // the draw distance: the same metres of the room whatever the scale (the game's metres times it)
+    s.winDrawUnits = table.windowDrawDistance * table.windowScale * kUnitsPerMetre;
     const M4 roomView = roomFromCameraView(table, s.k);
     const M4 tableRoom = windowTableFromRoom(table);
     // the culling's table from the world (cullSetup takes the current camera's view off again)
@@ -529,7 +609,9 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     const M4 c = mul(headFromStage(head), roomView);
     toMtx(c, s.delta);
     // the far plane: the game's own (its projection: P23 / P22 = far) at the window's scale, at least
-    // kWindowFar
+    // kWindowFar. Not brought in to the draw distance: with the reversed float depth it costs nothing
+    // where it is, and nearer it would cut the sky's dome and the sea's far edge with a hard line; the
+    // game's fog already hazes the horizon
     projParams(view->mProjMtx, s.projFrom);
     const float gameFar = std::fabs(s.projFrom[4]) > 1e-9f ? std::fabs(s.projFrom[5] / s.projFrom[4]) : 0.0f;
     const float far = std::max(kWindowFar, gameFar * s.k);
@@ -549,8 +631,10 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
         float tfh[12];
         for (int i = 0; i < 3; i++)
             for (int j = 0; j < 4; j++) tfh[i * 4 + j] = tableHead.m[i][j];
-        float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH,
-                         std::max(table.windowFade, 0.1f * table.windowPopout), 2.0f};
+        // what comes out is opaque up to a thin edge (window_fade) at the pop-out's front; with the
+        // pop-out off (window_popout_on 0) nothing in front of the window's plane is shown
+        float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH, std::max(table.windowFade, 0.005f),
+                         2.0f};
         aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
         aurora_xr_set_diorama_window(popout, table.windowDepth);
     }
@@ -558,6 +642,20 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head)
     aurora_xr_set_diorama_free(nullptr, 0);
     aurora_xr_set_frame_info(head.tag, true);
     AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
+    seeThrough(mul(c, fromMtx(view->mViewMtx)), player, table.seeThroughRadius, s.k);
+    {
+        // what the game camera sees in front of the pop-out's front (the window's plane with the pop-out
+        // off) is not drawn at all (Aurora patch 0031's clip plane), so what is behind it shows, rather
+        // than the mask fading it into a see-through hole: the window's +z (toward the player) in the
+        // head's space, through the point popout in front of its middle
+        const M4 headWindow = mul(headFromStage(head), roomFromWindow(table));
+        const float n[3] = {headWindow.m[0][2], headWindow.m[1][2], headWindow.m[2][2]};
+        const float o[3] = {0.0f, 0.0f, popout};
+        float at[3];
+        xform(headWindow, o, at);
+        const f32 plane[4] = {n[0], n[1], n[2], -(n[0] * at[0] + n[1] * at[1] + n[2] * at[2])};
+        AuroraSetClipPlane(plane);
+    }
     // the sky's things built around the camera's eye: drawn as they are, beyond the window
     memcpy(s.skyDelta, s.delta, sizeof(s.skyDelta));
     s.on = true;
@@ -616,21 +714,31 @@ bool pc_vr_view_begin(view_class* view) {
     static bool sDemoWas = false;
     if (cutscene && !sDemoWas) logDemoStart();
     sDemoWas = cutscene;
-    // The special scenes (special_scenes): cutscenes shown through the window in any mode, the window's
-    // pose and size with a deep camera and a large pop-out at the world's own size, so what comes at the
-    // camera comes out at the player: the Helmaroc King taking Aryll on Outset (a demo with the bird, the
-    // d_a_dk or d_a_demo_dk actor). Over cine_screen and auto_screen while it plays; the mode as it was
-    // after it.
+    // The special scenes (special_scenes): the Helmaroc King taking Aryll on Outset (a demo with the
+    // bird, the d_a_dk or d_a_demo_dk actor). In the bubble (mode = maqueta), it closes in on the bird:
+    // the pivot on it and the span times special_zoom, in and out over a second (updateFocus). With
+    // special_window, through the window in any mode instead: the window's pose and size with a deep
+    // camera and a large pop-out at the world's own size, so what comes at the camera comes out at the
+    // player. Over cine_screen and auto_screen while it plays; the mode as it was after it.
     // (on Outset alone: the sea stage's room 44; the bird's other demos, in the Forsaken Fortress, stay
     // as they are)
     const char* stageName = dComIfGp_getStartStageName();
-    const bool special = cutscene && table.specialScenes && stageName != nullptr && strcmp(stageName, "sea") == 0 &&
-                         dComIfGp_roomControl_getStayNo() == 44 &&
-                         (fopAcM_SearchByName(fpcNm_DK_e) != nullptr || fopAcM_SearchByName(fpcNm_DEMO_DK_e) != nullptr);
-    static bool sSpecialWas = false;
-    if (special != sSpecialWas) {
-        pc::writef(STDERR_FILENO, "[vr] special scene %s\n", special ? "on: the window, 3D for real" : "off");
-        sSpecialWas = special;
+    fopAc_ac_c* bird = nullptr;
+    if (cutscene && table.specialScenes && stageName != nullptr && strcmp(stageName, "sea") == 0 &&
+        dComIfGp_roomControl_getStayNo() == 44) {
+        bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e);
+        if (bird == nullptr) bird = fopAcM_SearchByName(fpcNm_DK_e);
+    }
+    const bool specialScene = bird != nullptr && (table.specialWindow || table.diorama);
+    const bool special = specialScene && table.specialWindow;       // through the window
+    const bool specialBubble = specialScene && !table.specialWindow;  // the bubble on the bird
+    static int sSpecialWas = 0;
+    const int specialNow = special ? 1 : specialBubble ? 2 : 0;
+    if (specialNow != sSpecialWas) {
+        pc::writef(STDERR_FILENO, "[vr] special%s\n",
+                   special ? " scene on: the window, 3D for real"
+                   : specialBubble ? ": bubble on the Helmaroc King" : " scene off");
+        sSpecialWas = specialNow;
     }
     wq_xr_set_special(special);
     const bool firstPerson =
@@ -638,7 +746,7 @@ bool pc_vr_view_begin(view_class* view) {
         (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
                                             daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
          dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
-    const bool ownView = !special && (firstPerson || (table.cineScreen && cutscene));
+    const bool ownView = !specialScene && (firstPerson || (table.cineScreen && cutscene));
     const bool modeOn = table.diorama || table.window || special;
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
@@ -658,6 +766,9 @@ bool pc_vr_view_begin(view_class* view) {
         s.window = false;
         s.tableValid = false;
         sBirds.n = 0;
+        s.focusAmt = 0.0f;
+        s.focusValid = false;
+        wq_xr_set_talk(false);
         return false;
     }
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
@@ -674,14 +785,17 @@ bool pc_vr_view_begin(view_class* view) {
     if (table.window || special) {
         // the window: the stick as on the screen (the camera looks through the window)
         wq_xr_set_camera_heading(0.0f, false, mesg != 0);
+        s.focusAmt = 0.0f;
+        s.focusValid = false;
+        wq_xr_set_talk(false);
         if (special) {
             WqXrTable w = table;
             w.windowScale = 1.0f;
             w.windowDepth = table.windowDepthSpecial;
             w.windowPopout = table.windowPopoutSpecial;
-            return windowBegin(view, w, head);
+            return windowBegin(view, w, head, player);
         }
-        return windowBegin(view, table, head);
+        return windowBegin(view, table, head, player);
     }
     if (s.window) {
         s.window = false;
@@ -689,6 +803,47 @@ bool pc_vr_view_begin(view_class* view) {
     }
     updateRig(player->current.pos, view->mViewMtx, table.followYaw);
     wq_xr_set_camera_heading(cameraYaw(view->mViewMtx) - s.yaw - table.yaw, freeControl, mesg != 0);
+
+    // The talk zoom (talk_zoom_on): during a cutscene or while a message is open, the bubble closes in
+    // on who talks, the span times talk_zoom: the middle between Link and the one he talks to, or, with
+    // nobody, what the camera looks at (a cutscene's camera is the game's: its target), in and out over
+    // a second (updateFocus); the game's 2D (the dialogue box) on a panel beside the bubble meanwhile
+    // (talk_screen, wq_xr.cpp). The Helmaroc King's scene closes in on the bird instead (special_zoom),
+    // the bubble's middle on it (the pivot 0.35 radii below the middle, tableFromStage).
+    const bool talk = !specialBubble && table.talkZoom > 0.0f && (cutscene || mesg != 0);
+    static bool sTalkWas = false;
+    if (talk != sTalkWas) {
+        pc::writef(STDERR_FILENO, "[vr] talk zoom %s\n", talk ? "on" : "off");
+        sTalkWas = talk;
+    }
+    wq_xr_set_talk(talk);
+    if (specialBubble) {
+        const float zoomK = table.width / (table.span * table.specialZoom * kUnitsPerMetre);
+        const float lift = table.sphere ? 0.35f * 0.5f * table.width / zoomK : 0.0f;
+        const float target[3] = {bird->current.pos.x, bird->current.pos.y - lift, bird->current.pos.z};
+        updateFocus(target, table.specialZoom);
+    } else if (talk) {
+        dEvt_control_c* evt = g_dComIfG_gameInfo.play.getEvent();
+        fopAc_ac_c* partner = evt != nullptr ? evt->getPtT() : nullptr;
+        float target[3];
+        if (partner != nullptr && partner != player) {
+            target[0] = 0.5f * (player->current.pos.x + partner->current.pos.x);
+            target[1] = 0.5f * (player->current.pos.y + partner->current.pos.y);
+            target[2] = 0.5f * (player->current.pos.z + partner->current.pos.z);
+        } else {
+            target[0] = view->mLookat.mCenter.x;
+            target[1] = view->mLookat.mCenter.y;
+            target[2] = view->mLookat.mCenter.z;
+        }
+        updateFocus(target, table.talkZoom);
+    } else {
+        updateFocus(nullptr, 1.0f);
+    }
+    {
+        const float a = focusEase();
+        for (int i = 0; i < 3; i++) s.view[i] = s.pivot[i] + (s.focus[i] - s.pivot[i]) * a;
+        table.span *= 1.0f + (s.focusZoom - 1.0f) * a;
+    }
 
     // the table: its half sizes, the cut below its top (a quarter of its smaller side), the scale
     s.sphere = table.sphere;
@@ -732,6 +887,7 @@ bool pc_vr_view_begin(view_class* view) {
     aurora_xr_set_diorama_free(&sBirds.t[0][0], sBirds.n);
     aurora_xr_set_frame_info(head.tag, true);
     AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
+    seeThrough(mul(headFromStage(head), stage), player, table.seeThroughRadius, s.k);
     // the sky's things built around the camera's eye: squeezed to nothing (C = 0)
     memset(s.skyDelta, 0, sizeof(s.skyDelta));
     s.on = true;

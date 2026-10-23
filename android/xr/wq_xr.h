@@ -55,6 +55,13 @@ typedef struct WqXrTable {
     // window in any mode, at the world's own size, the camera this deep and this much coming out
     bool specialScenes;
     float windowDepthSpecial, windowPopoutSpecial;
+    // in the bubble the special scene closes in on its subject (specialZoom of the span) unless
+    // specialWindow (the window, as above)
+    bool specialWindow;
+    float specialZoom;
+    float talkZoom;            // cutscenes and dialogues: the bubble's span times this (0 = off)
+    float seeThroughRadius;    // Link seen through what is in front of him: the game's metres (0 = off)
+    float windowDrawDistance;  // the window: the game's metres drawn at scale 1 (the horizon)
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).
@@ -79,6 +86,9 @@ void wq_xr_set_cinematic(bool cinematic);
 // The game, every frame (pc_vr_diorama.cpp): a special scene plays, drawn through the window whatever the
 // mode (its frames are window frames: the HUD over the window, the room around it).
 void wq_xr_set_special(bool special);
+// The game, every frame (pc_vr_diorama.cpp): the bubble closes in on who talks (a cutscene or a
+// dialogue, talk_zoom): the game's 2D on a larger panel beside it meanwhile (talk_screen).
+void wq_xr_set_talk(bool talk);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);

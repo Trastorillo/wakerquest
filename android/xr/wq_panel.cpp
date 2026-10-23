@@ -133,13 +133,23 @@ const Item kControls[] = {
     {kXr, "view_relative", "Stick según tu vista", "Adelante = lejos de ti, como la miras", kSwitch},
     {kGame, "COS_CAMERA_INVERT_X", "Invertir cámara horizontal", "El stick derecho", kSwitch},
     {kGame, "COS_CAMERA_INVERT_Y", "Invertir cámara vertical", "El stick derecho", kSwitch},
-    {kXr, "special_scenes", "Escenas especiales en 3D real", "El Rey Helmaroc en Isla Initia, por la ventana", kSwitch},
+    {kXr, "special_scenes", "Escenas especiales en 3D real", "El Rey Helmaroc en Isla Initia, de cerca", kSwitch},
     {kAction, "reset_position", "Recolocar burbuja y ventana", "A su sitio delante de ti (o grip + clic)", kButton},
+    {kXr, "seethrough_on", "Ver a Link a través de obstáculos", "Un hueco en lo que tape a Link", kSwitch},
+    {kXr, "seethrough_radius", "Tamaño del hueco", "Metros del juego alrededor de Link", kStepper, nullptr, 0, 0.4f,
+     4.0f, 0.2f, "%.1f m"},
+    {kXr, "window_draw_distance", "Distancia del mar / horizonte", "Ventana: más = más lejos y más GPU", kStepper,
+     nullptr, 0, 200.0f, 3000.0f, 100.0f, "%.0f m"},
 };
 const Item kGameItems[] = {
     {kGame, "COS_GAME_LANGUAGE", "Idioma del juego", "Al reiniciar el juego", kStepper, OPTS(kLanguage)},
     {kGame, "COS_QOL_SKIP_INTRO", "Saltar la introducción", "Al empezar una partida nueva", kSwitch},
     {kAction, "full_menu", "Más opciones", "El menú completo del juego (con el mando)", kButton},
+    // the bubble in cutscenes and dialogues (pc_vr_diorama.cpp)
+    {kXr, "talk_zoom_on", "Acercar en diálogos y escenas", "La burbuja se centra en quien habla", kSwitch},
+    {kXr, "talk_zoom", "Cuánto acerca", "Menos = más cerca", kStepper, nullptr, 0, 0.2f, 1.0f, 0.1f, "%.1f"},
+    {kXr, "talk_screen", "Pantalla junto a la burbuja", "Los diálogos en 2D, a su izquierda", kSwitch},
+    {kXr, "special_window", "Helmaroc por la ventana", "Si no, la burbuja se acerca al pájaro", kSwitch},
 };
 #undef OPTS
 

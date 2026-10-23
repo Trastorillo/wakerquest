@@ -98,7 +98,16 @@ struct Settings {
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
     bool windowHudOn = true;                     // the window: the HUD and dialogues over it (else on panels)
-    bool cineScreen = true;                      // and cutscenes
+    bool cineScreen = false;                     // and cutscenes (else the talk zoom, in the bubble)
+    // the talk zoom (pc_vr_diorama.cpp): during cutscenes and dialogues the bubble closes in on who
+    // talks (talk_zoom of its span) and the game's 2D (the dialogue box) shows on a panel beside it
+    bool talkZoomOn = true;
+    float talkZoom = 0.5f;
+    bool talkScreen = true;
+    // see Link through what stands in front of him (Aurora patch 0031): a hole this many of the game's
+    // metres around him
+    bool seeThroughOn = true;
+    float seeThroughRadius = 1.2f;
     bool birdsFree = true;                       // the flying birds around the room, outside the bubble
     float birdRange = 3.0f;                      // how far, in the bubble's radii
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
@@ -121,12 +130,17 @@ struct Settings {
     float windowYaw = 0.0f;       // degrees, turned to the left (a grip turns it)
     float windowScale = 1.0f;     // the game's metres per metre of the room (more: the world smaller)
     float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
-    bool windowPopoutOn = true;   // near things come out of the window
+    bool windowPopoutOn = false;  // near things come out of the window (off: cut at its plane)
     float windowPopout = 0.45f;    // m, how far
-    // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset)
-    // through the window in any mode, at the world's own size, the camera deep in front of it and much
+    float windowDrawDistance = 800.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
+                                        // horizon; farther actors and models are not drawn
+    // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset).
+    // In the bubble, it closes in on the bird (special_zoom of its span); with special_window, through
+    // the window in any mode instead, at the world's own size, the camera deep in front of it and much
     // coming out (never past the camera: the pop-out stops 2 cm short of window_depth_special)
     bool specialScenes = true;
+    bool specialWindow = false;
+    float specialZoom = 0.5f;
     float windowDepthSpecial = 2.0f;   // m
     float windowPopoutSpecial = 1.8f;  // m
     float windowFade = 0.03f;     // m, the edges' fade
@@ -167,17 +181,31 @@ const char kDefaultSettings[] =
     "# window_distance, window_height (above the eyes), window_x in m; window_yaw in degrees;\n"
     "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera in front\n"
     "# of the window (m); window_popout_on 1 = near things come out of it, up to window_popout m (and\n"
-    "# never past the camera).\n"
+    "# never past the camera); window_draw_distance = the game's metres drawn (at scale 1), the horizon.\n"
     "window_width = 1.6\n"
     "window_distance = 2.0\n"
     "window_height = 0.0\n"
     "window_scale = 1.0\n"
     "window_depth = 0.5\n"
-    "window_popout_on = 1\n"
+    "window_popout_on = 0\n"
     "window_popout = 0.45\n"
-    "# special_scenes 1 = some cutscenes (the Helmaroc King on Outset) through the window in any mode,\n"
-    "# at real size, the camera window_depth_special m in front of it, window_popout_special m coming out.\n"
+    "window_draw_distance = 800\n"
+    "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
+    "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
+    "# cutscenes on the giant screen instead.\n"
+    "talk_zoom_on = 1\n"
+    "talk_zoom = 0.5\n"
+    "talk_screen = 1\n"
+    "cine_screen = 0\n"
+    "# seethrough_on 1 = Link seen through what stands in front of him, a hole seethrough_radius m around him.\n"
+    "seethrough_on = 1\n"
+    "seethrough_radius = 1.2\n"
+    "# special_scenes 1 = some cutscenes (the Helmaroc King on Outset): the bubble closes in on the bird\n"
+    "# (special_zoom of its span); special_window 1 = through the window in any mode instead, at real size,\n"
+    "# the camera window_depth_special m in front of it, window_popout_special m coming out.\n"
     "special_scenes = 1\n"
+    "special_zoom = 0.5\n"
+    "special_window = 0\n"
     "window_depth_special = 2.0\n"
     "window_popout_special = 1.8\n";
 
@@ -215,6 +243,14 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
     else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
+    else if (!strcmp(key, "talk_zoom_on")) s.talkZoomOn = on;
+    else if (!strcmp(key, "talk_zoom")) s.talkZoom = clampf(f, 0.1f, 1.0f);
+    else if (!strcmp(key, "talk_screen")) s.talkScreen = on;
+    else if (!strcmp(key, "seethrough_on")) s.seeThroughOn = on;
+    else if (!strcmp(key, "seethrough_radius")) s.seeThroughRadius = clampf(f, 0.3f, 5.0f);
+    else if (!strcmp(key, "window_draw_distance")) s.windowDrawDistance = clampf(f, 100.0f, 10000.0f);
+    else if (!strcmp(key, "special_window")) s.specialWindow = on;
+    else if (!strcmp(key, "special_zoom")) s.specialZoom = clampf(f, 0.1f, 1.0f);
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
     else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
@@ -265,6 +301,14 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
+    if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
+    if (!strcmp(key, "talk_zoom")) return num(s.talkZoom);
+    if (!strcmp(key, "talk_screen")) return flag(s.talkScreen);
+    if (!strcmp(key, "seethrough_on")) return flag(s.seeThroughOn);
+    if (!strcmp(key, "seethrough_radius")) return num(s.seeThroughRadius);
+    if (!strcmp(key, "window_draw_distance")) return num(s.windowDrawDistance);
+    if (!strcmp(key, "special_window")) return flag(s.specialWindow);
+    if (!strcmp(key, "special_zoom")) return num(s.specialZoom);
     if (!strcmp(key, "birds_free")) return flag(s.birdsFree);
     if (!strcmp(key, "bird_range")) return num(s.birdRange);
     if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
@@ -470,6 +514,7 @@ bool hasExtension(const std::vector<XrExtensionProperties>& exts, const char* na
 std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it now
 std::atomic_bool s_cinematic{false};       // wq_xr_set_cinematic: the game runs an event (a cutscene)
 std::atomic_bool s_special{false};         // wq_xr_set_special: a special scene, through the window
+std::atomic_bool s_talk{false};            // wq_xr_set_talk: the bubble closes in on who talks
 float s_stereoApplied[3] = {-1.0f, 0.0f, 0.0f};  // the screen's 3D as last given to Aurora: on, strength, focus
 float s_cineRamp = 0.0f;                   // 0..1, the cutscenes' 3D faded in and out
 bool s_refreshDirty = false;               // the refresh rate changed while running
@@ -2095,10 +2140,20 @@ void runFrame() {
                 hud.pose.orientation = windowPose(st).orientation;
                 if (st.windowHudOn) {
                     // window_hud_on: the HUD, dialogues and all, over the window itself, as on a TV: its
-                    // rectangle a centimetre in front, moving and scaling with it
+                    // rectangle a centimetre in front, moving and scaling with it. With the pop-out on,
+                    // a centimetre in front of what comes out instead (up to 0.6 m), the same size to
+                    // the eye: the compositor draws the quad over the eyes' pictures whatever their
+                    // depth, so a HUD behind something that came out would be seen through it (as if
+                    // it were transparent)
+                    const bool special = drawnFor.windowFrame && (s_special.load() || !st.window);
+                    const float popout =
+                        special ? std::min(st.windowPopoutSpecial, st.windowDepthSpecial - 0.02f)
+                                : st.windowPopoutOn ? std::min(st.windowPopout, st.windowDepth - 0.02f) : 0.0f;
+                    const float z = 0.01f + clampf(popout, 0.0f, 0.6f);
+                    const float shrink = clampf((st.windowDistance - z) / std::max(st.windowDistance, 0.1f), 0.3f, 1.0f);
                     hud.subImage.imageRect = full;
-                    hud.pose.position = onWindow(st, 0.0f, 0.0f, 0.01f);
-                    hud.size = {st.windowWidth, 2.0f * hh};
+                    hud.pose.position = onWindow(st, 0.0f, 0.0f, z);
+                    hud.size = {st.windowWidth * shrink, 2.0f * hh * shrink};
                 } else if (s_dialogue.load()) {
                     const int32_t x0 = int32_t(eyeW * 0.08f), y0 = int32_t(s.screenH * 0.60f);
                     const int32_t cw = int32_t(eyeW * 0.84f), ch = int32_t(s.screenH * 0.38f);
@@ -2112,6 +2167,19 @@ void runFrame() {
                     hud.pose.position = onWindow(st, 0.0f, -hh - 0.02f - 0.5f * h, 0.0f);
                     hud.size = {w, h};
                 }
+                if (!panelOpen) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
+            } else if (s_talk.load() && st.talkScreen) {
+                // the talk zoom (a cutscene or a dialogue, talk_screen): the game's whole 2D (the
+                // dialogue box, the cutscene's bars and captions) on a large panel left of the bubble,
+                // its middle at the bubble's, facing the player. (The eyes' pictures are the head's
+                // views of the model: there is no picture of the game camera's own to show; drawing
+                // the world a third time for one would cost as much as an eye.)
+                const float w = std::max(1.2f, st.hudWidth), h = w * float(s.screenH) / float(eyeW);
+                hud.subImage.imageRect = full;
+                hud.pose.position = {st.tableX - r - 0.08f - 0.5f * w, std::min(midY, latestHeadPos().y - 0.1f),
+                                     -st.tableDistance};
+                hud.pose.orientation = facingPlayer(hud.pose.position);
+                hud.size = {w, h};
                 if (!panelOpen) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
             } else if (s_dialogue.load()) {
                 // a dialogue: the message box (the bottom of the 2D) on its own panel above the model,
@@ -2273,6 +2341,10 @@ extern "C" void wq_xr_set_special(bool special) {
     s_special.store(special);  // logged by the game ("[vr] special scene")
 }
 
+extern "C" void wq_xr_set_talk(bool talk) {
+    s_talk.store(talk);  // logged by the game ("[vr] talk zoom")
+}
+
 extern "C" void wq_xr_menu_state(bool open, float width, float height, bool hovered) {
     s_menuOpen.store(open);
     s_menuW.store(width);
@@ -2327,6 +2399,11 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->windowDepth = st.windowDepth;
     out->windowPopout = st.windowPopoutOn ? st.windowPopout : 0.0f;
     out->specialScenes = st.specialScenes;
+    out->specialWindow = st.specialWindow;
+    out->specialZoom = st.specialZoom;
+    out->talkZoom = st.talkZoomOn ? st.talkZoom : 0.0f;
+    out->seeThroughRadius = st.seeThroughOn ? st.seeThroughRadius : 0.0f;
+    out->windowDrawDistance = st.windowDrawDistance;
     out->windowDepthSpecial = st.windowDepthSpecial;
     out->windowPopoutSpecial = st.windowPopoutSpecial;
     out->windowFade = st.windowFade;
