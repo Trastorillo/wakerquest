@@ -375,6 +375,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
 // edges (2% of the width) from `current` (0: none), so a width held near an edge does not flip.
 int windowLines(int base, float width, int current) {
     if (base <= 0) return base;
+    // up to the reference width all of base: no step's edge to hold off there (the hysteresis below
+    // would keep it one step short, as step(base / 1.02) is, after a shrink or a higher base)
+    if (width <= kWindowRefWidth) return base;
     const int lowest = std::min(base, kWindowMinLines);
     auto step = [&](float target) {  // the highest step at or below target
         if (target >= float(base)) return base;

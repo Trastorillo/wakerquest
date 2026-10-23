@@ -251,11 +251,13 @@ public class DiscSetupActivity extends Activity {
                     error = e.getMessage();
                 }
             }
-            if (error == null && dest.exists() && !dest.delete()) {
-                error = DiscCheck.t("No puedo reemplazar ", "Cannot replace ") + dest.getName();
-            }
+            // rename(2) replaces the old disc at once; only if it cannot is the old one deleted first
             if (error == null && !part.renameTo(dest)) {
-                error = DiscCheck.t("No puedo renombrar ", "Cannot rename ") + part.getName();
+                if (dest.exists() && !dest.delete()) {
+                    error = DiscCheck.t("No puedo reemplazar ", "Cannot replace ") + dest.getName();
+                } else if (!part.renameTo(dest)) {
+                    error = DiscCheck.t("No puedo renombrar ", "Cannot rename ") + part.getName();
+                }
             }
             if (error != null) {
                 part.delete();
