@@ -22,6 +22,8 @@
 
 #include <aurora/xr.h>
 
+extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/pc/pc_harness.h
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
@@ -73,6 +75,9 @@ struct Settings {
     bool stereo = true;
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
     float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen
+    // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
+    // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
+    int resolution = 1080;
 };
 
 const char kDefaultSettings[] =
@@ -88,7 +93,9 @@ const char kDefaultSettings[] =
     "# stereo_focus = the distance in the game that stays on the screen (100-3000).\n"
     "stereo = 1\n"
     "stereo_strength = 0.012\n"
-    "stereo_focus = 600\n";
+    "stereo_focus = 600\n"
+    "# the game's internal height in pixels (720, 900, 1080, 1440...); read when the game starts.\n"
+    "resolution = 1080\n";
 
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
@@ -101,6 +108,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo")) s.stereo = on;
     else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.1f);
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 16000.0f);
+    else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
 }
 
 // ---- State ---------------------------------------------------------------------------------------
@@ -150,6 +158,8 @@ struct Xr {
     std::vector<Cached> cache;
     EGLSyncKHR pendingRead = EGL_NO_SYNC_KHR;  // the copy from the last taken buffer
     uint32_t frames = 0;
+    uint32_t framesWithoutFence = 0;  // Aurora published them without a sync file: read unsynchronized
+    uint32_t lastSerial = 0, skipped = 0;  // Aurora frames never taken (replaced by a newer one first)
 
     // passthrough
     bool passthroughRunning = false;
@@ -663,21 +673,18 @@ void pollEvents() {
                 break;
             }
             case XR_SESSION_STATE_STOPPING:
-                aurora_xr_present_enable(false);
-                xrEndSession(s.session);
-                s.running = false;
-                break;
             case XR_SESSION_STATE_EXITING:
-            case XR_SESSION_STATE_LOSS_PENDING: {
-                // the player quit from the headset's menu
+            case XR_SESSION_STATE_LOSS_PENDING:
+                // The player closed the app or left it from the headset's menu (the Meta button's
+                // menu alone only makes the session VISIBLE). The game would go on in the background,
+                // music and all, and there is no window to come back to: it ends here, as on a quit.
+                // Saves are written when the game saves, so nothing is lost; the next start is fresh.
                 aurora_xr_present_enable(false);
+                if (sc.state == XR_SESSION_STATE_STOPPING) xrEndSession(s.session);
                 s.running = false;
                 s.exiting = true;
-                SDL_Event quit{};
-                quit.type = SDL_EVENT_QUIT;
-                SDL_PushEvent(&quit);
-                break;
-            }
+                xrlog("session %s: the game ends", sc.state == XR_SESSION_STATE_STOPPING ? "stopping" : "exiting");
+                pc_exit(0);
             default:
                 break;
             }
@@ -686,6 +693,8 @@ void pollEvents() {
             aurora_xr_present_enable(false);
             s.running = false;
             s.exiting = true;
+            xrlog("instance loss pending: the game ends");
+            pc_exit(0);
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
     }
@@ -819,6 +828,9 @@ bool copyNewestFrame() {
     }
     AuroraXrFrame f{};
     if (!aurora_xr_present_take(&f)) return s.haveScreen;
+    if (s.lastSerial != 0 && f.serial > s.lastSerial + 1) s.skipped += f.serial - s.lastSerial - 1;
+    s.lastSerial = f.serial;
+    if (f.syncFd < 0) s.framesWithoutFence++;
     if (f.syncFd >= 0) {
         // the GPU waits for Aurora's rendering of the frame; EGL owns the file from here
         const EGLint attr[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, f.syncFd, EGL_NONE};
@@ -869,8 +881,9 @@ bool copyNewestFrame() {
         s.sideBySide = f.sideBySide;
         s.stereoFrame = f.stereo;
         s.haveScreen = true;
-        if (++s.frames == 1 || s.frames % 1800 == 0)
-            xrlog("frame %u from Aurora (serial %u, %ux%u)", s.frames, f.serial, f.width, f.height);
+        if (++s.frames == 1 || s.frames % 600 == 0)
+            xrlog("frame %u from Aurora (serial %u, %ux%u): %u skipped, %u without a fence", s.frames, f.serial,
+                  f.width, f.height, s.skipped, s.framesWithoutFence);
     }
     return s.haveScreen;
 }
@@ -965,6 +978,15 @@ extern "C" bool wq_xr_start(void) {
         return false;
     }
     readSettings(true);
+    // The internal resolution in the headset (pc_main.cpp applyFrameBufferScale reads COS_FB_SCALE
+    // after aurora_initialize), unless the player chose one (the options menu's settings.ini, or the
+    // environment): the headset's window is large, and stereo draws every frame twice.
+    if (s.settings.resolution > 0 && getenv("COS_FB_SCALE") == nullptr) {
+        char scale[32];
+        snprintf(scale, sizeof scale, "%.4f", s.settings.resolution / 480.0);
+        setenv("COS_FB_SCALE", scale, 1);
+        xrlog("internal resolution: %d lines (COS_FB_SCALE=%s)", s.settings.resolution, scale);
+    }
     // The Touch controllers also appear to Android as a gamepad (vendor 0x2833, product 0x0160) that
     // sends nothing useful in VR; the virtual gamepad stands in for them.
     SDL_SetHint(SDL_HINT_JOYSTICK_BLACKLIST_DEVICES, "0x2833/0x0160");

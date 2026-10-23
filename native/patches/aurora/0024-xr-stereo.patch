@@ -307,7 +307,7 @@ index 18b1edb..aff3810 100644
      g_resources.stats.mergedDrawCallCount = stats.mergedDrawCallCount;
 diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 new file mode 100644
-index 0000000..96a94bb
+index 0000000..a61dbfe
 --- /dev/null
 +++ b/lib/gfx/stereo.cpp
 @@ -0,0 +1,100 @@
@@ -367,7 +367,7 @@ index 0000000..96a94bb
 +  const float scale = std::min(1.f, std::max(0.01f, content_scale()));
 +  g_passWidth = static_cast<float>(color.size.width) * scale;
 +  g_passHeight = static_cast<float>(color.size.height) * scale;
-+  g_word = 0;
++  g_word = 0;  // every pass sets its viewport first (recording.cpp)
 +}
 +
 +void set_viewport(float width, float height) noexcept {
@@ -546,7 +546,7 @@ index 07a0ec1..cfe4faa 100644
    auto frozen = std::make_shared<DrawData::Impl>();
    frozen->drawData = *data;
 diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
-index 170b316..dda881a 100644
+index 170b316..a9b56f5 100644
 --- a/lib/webgpu/xr_present.cpp
 +++ b/lib/webgpu/xr_present.cpp
 @@ -18,6 +18,10 @@ bool g_supported = false;
@@ -577,7 +577,25 @@ index 170b316..dda881a 100644
  #ifdef __ANDROID__
    std::lock_guard lock{g_mutex};
    if (g_writing < 0) {
-@@ -187,11 +192,20 @@ void end() noexcept {
+@@ -182,16 +187,38 @@ void end() noexcept {
+   } else {
+     Log.error("SharedTextureMemory::EndAccess failed");
+   }
++  if (fd < 0) {
++    // Patch 0024: no sync file, so the XR layer could read the buffer before the GPU has written it
++    // (it would show the slot's previous frame, three frames old). Wait for this frame's work instead.
++    static uint32_t s_unfenced = 0;
++    if (s_unfenced++ % 600 == 0) {
++      Log.warn("XR present: EndAccess gave no sync file ({} frames); waiting for the GPU", s_unfenced);
++    }
++    bool done = false;
++    const auto future = g_queue.OnSubmittedWorkDone(
++        wgpu::CallbackMode::WaitAnyOnly, [&done](wgpu::QueueWorkDoneStatus, wgpu::StringView) { done = true; });
++    g_instance.WaitAny(future, UINT64_MAX);
++    (void)done;
++  }
+   if (g_latestFd >= 0) {
+     close(g_latestFd);
    }
    g_latest = g_writing;
    g_latestFd = fd;
@@ -598,7 +616,7 @@ index 170b316..dda881a 100644
  void shutdown() noexcept {
  #ifdef __ANDROID__
    std::lock_guard lock{g_mutex};
-@@ -209,6 +223,12 @@ void aurora_xr_present_enable(bool enable) { g_enabled.store(enable); }
+@@ -209,6 +236,12 @@ void aurora_xr_present_enable(bool enable) { g_enabled.store(enable); }
  
  bool aurora_xr_present_supported(void) { return g_supported; }
  
@@ -611,7 +629,7 @@ index 170b316..dda881a 100644
  bool aurora_xr_present_take(AuroraXrFrame* out) {
  #ifdef __ANDROID__
    std::lock_guard lock{g_mutex};
-@@ -220,6 +240,8 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+@@ -220,6 +253,8 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
    out->width = g_width;
    out->height = g_height;
    out->serial = g_serial;
