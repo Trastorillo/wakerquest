@@ -296,7 +296,6 @@ int collectBird(void* actor, void*) {
     float size;  // game units around its middle
     switch (fopAcM_GetName(ac)) {
     case fpcNm_KAMOME_e:
-    case fpcNm_KAMOME2_e:
     case fpcNm_DEMO_KMM_e:
     case fpcNm_KT_e:
     case fpcNm_WBIRD_e:
