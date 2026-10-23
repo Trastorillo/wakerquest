@@ -81,7 +81,7 @@ const Item kGeneral[] = {
     {kXr, "mode", "Modo", "Pantalla gigante, el mundo en una burbuja, o una ventana", kStepper, OPTS(kMode)},
     {kGame, "COS_VR_RESOLUTION", "Resolución", "1,00 = 1080 líneas; más = más nítido y más GPU", kStepper,
      OPTS(kResolution)},
-    {kXr, "refresh", "Frecuencia", "90 Hz: el juego va fluido y sobra GPU", kStepper, OPTS(kRefresh)},
+    {kXr, "refresh", "Frecuencia", "72 Hz: menos calor; 90 Hz: más fluido", kStepper, OPTS(kRefresh)},
     {kXr, "gpu_boost", "Más potencia de GPU", "Sube el reloj de la GPU; gasta más batería", kSwitch},
     {kXr, "passthrough", "Tu habitación", "Alrededor de la pantalla gigante", kSwitch},
     // the giant screen: also moved with the left grip and scaled with both (wq_xr.cpp)

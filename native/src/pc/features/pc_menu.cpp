@@ -576,12 +576,12 @@ const PcSettingDesc kBuiltins[] = {
      "Depth of the 3D in screen mode."},
     {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas). Más alta = "
      "más nítida y más trabajo para la GPU. Se aplica al momento.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1512", applyVrResolution, nullptr, 10, "Resolution",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1080", applyVrResolution, nullptr, 10, "Resolution",
      "Scale of the game's picture in the headset (1.00 = 1080 lines). Higher = sharper and more GPU work. "
      "Applies at once."},
-    {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 90 Hz muestra los 30 fps del juego sin saltos y deja GPU libre.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "90", applyVr, (void*)"refresh", 10, "Refresh rate",
-     "The headset's refresh rate. 90 Hz shows the game's 30 fps evenly and leaves GPU time free."},
+    {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 72 Hz calienta menos y gasta menos batería; 90 Hz muestra los 30 fps más regulares.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "72", applyVr, (void*)"refresh", 10, "Refresh rate",
+     "The headset's refresh rate. 72 Hz runs cooler and saves battery; 90 Hz shows the game's 30 fps more evenly."},
     {"COS_VR_HUD", "Tamaño del HUD", "El ancho del panel con los corazones y los menús en el modo maqueta.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "1.3", applyVr, (void*)"hud_width", 11, "HUD size",
      "The width of the panel with the hearts and menus in diorama mode."},

@@ -79,17 +79,17 @@ struct Settings {
     float screenYaw = 0.0f;  // degrees, turned to the left (the left grip turns it)
     bool screenFrame = true; // the wooden frame around it (drawn here, procedurally)
     bool passthrough = true; // the room around the screen instead of black
-    int refresh = 90;        // Hz, the headset's nearest at or below; 90 shows the game's 30 fps evenly
-    bool gpuBoost = true;    // XR_EXT_performance_settings: the GPU at its sustained high level
+    int refresh = 72;        // Hz, the headset's nearest at or below; 72 runs cooler (90 shows 30 fps evenly)
+    bool gpuBoost = false;   // XR_EXT_performance_settings: the GPU at its sustained high level (heat)
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
-    bool stereo = true;
+    bool stereo = false;  // off by default: twice the drawing, and the flat screen's only stutters
     float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
     float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
     bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
     float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = resolution / 480), read at
     // start; 0 = the headset window's own (4128x2208, which drawn twice per frame is too much)
-    int resolution = 1512;  // 1.40 of 1080 lines (the menu's scale): the game holds 30 fps with it
+    int resolution = 1080;  // 1.00 of 1080 lines (the menu's scale): 30 fps with less heat than 1512
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
     bool diorama = false;
@@ -137,7 +137,7 @@ struct Settings {
     float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = false;  // near things come out of the window (off: cut at its plane)
     float windowPopout = 0.45f;    // m, how far
-    float windowDrawDistance = 800.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
+    float windowDrawDistance = 400.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
     // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset).
     // In the bubble, it closes in on the bird (special_zoom of its span); with special_window, through
@@ -165,14 +165,15 @@ const char kDefaultSettings[] =
     "screen_yaw = 0.0\n"
     "screen_frame = 1\n"
     "passthrough = 1\n"
-    "refresh = 90\n"
+    "refresh = 72\n"
+    "gpu_boost = 0\n"
     "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
     "# stereo_focus = the distance in the game that stays on the screen (100-3000).\n"
-    "stereo = 1\n"
+    "stereo = 0\n"
     "stereo_strength = 0.012\n"
     "stereo_focus = 600\n"
     "# the game's internal height in pixels (720, 900, 1080, 1200, 1440); read when the game starts.\n"
-    "resolution = 1512\n"
+    "resolution = 1080\n"
     "# mode = pantalla (a giant screen), maqueta (the world as a model in the room) or ventana (a window).\n"
     "mode = pantalla\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
@@ -199,7 +200,7 @@ const char kDefaultSettings[] =
     "window_depth = 0.5\n"
     "window_popout_on = 0\n"
     "window_popout = 0.45\n"
-    "window_draw_distance = 800\n"
+    "window_draw_distance = 400\n"
     "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
     "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
     "# cutscenes on the giant screen instead.\n"
