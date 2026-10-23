@@ -1,0 +1,102 @@
+XR diorama: spheres kept outside the table (the birds flying around the room)
+
+aurora_xr_set_diorama_free: up to 16 spheres in the table's space whose points the eyes' mask keeps
+opaque outside the table (patch 0026's mask), so what flies inside them (the seagulls, the birds) is
+seen around the model in the room.
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -50,6 +50,11 @@
+  * shape is the sphere of radius 1 around the table space's origin, fading over fade[0]. */
+ void aurora_xr_set_diorama_mask(const float tableFromHead[12], const float proj[6], float eyeShift,
+                                 const float fade[4]);
++/* Patch 0029, from the game thread with the mask: spheres in the table's space (x, y, z, radius each,
++ * up to AURORA_XR_FREE_SPHERES) whose points stay in the picture outside the table (the birds flying
++ * around the room). count 0: none. */
++#define AURORA_XR_FREE_SPHERES 16
++void aurora_xr_set_diorama_free(const float* spheres, int count);
+ 
+ /* Patch 0025, from the game thread while it records a frame: the head pose it is drawn for (a tag
+  * the XR layer gave out) and whether it is the diorama. Taken by the frame's present. */
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -41,6 +41,8 @@
+   float proj[6];           // GXSetProjection's perspective parameters
+   float eyeShift;          // b (the right eye's; the left's is -b)
+   float fade[4];           // x, z, y in table units; [3] 1 = the bubble (patch 0027)
++  float free[16][4];       // patch 0029: spheres kept outside the table (x, y, z, radius)
++  int freeCount;
+ };
+ bool diorama_mask(DioramaMask& out) noexcept;
+ 
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -5,6 +5,7 @@
+ #include "gpu.hpp"
+ #include "../internal.hpp"
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <mutex>
+ 
+@@ -282,6 +283,13 @@
+   g_maskValid = true;
+ }
+ 
++void aurora_xr_set_diorama_free(const float* spheres, int count) {
++  std::lock_guard lock{g_maskMutex};
++  count = std::clamp(count, 0, AURORA_XR_FREE_SPHERES);
++  if (spheres != nullptr) std::copy(spheres, spheres + count * 4, &g_mask.free[0][0]);
++  g_mask.freeCount = spheres != nullptr ? count : 0;
++}
++
+ void aurora_xr_set_frame_info(uint32_t tag, bool diorama) {
+   g_frameTag.store(tag);
+   g_frameDiorama.store(diorama);
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -171,12 +171,16 @@
+ struct MaskUniform {
+   float tableFromClip[16];  // column-major for WGSL
+   float fade[4];
++  float freeCount[4];       // patch 0029: [0] the spheres in use
++  float free[16][4];        // x, y, z, radius in the table's space
+ };
+ 
+ constexpr const char* kMaskShader = R"(
+ struct U {
+     table_from_clip: mat4x4f,
+     fade: vec4f,
++    free_count: vec4f,
++    free: array<vec4f, 16>,
+ };
+ @group(0) @binding(0) var<uniform> u: U;
+ @group(0) @binding(1) var color_tex: texture_2d<f32>;
+@@ -217,6 +221,14 @@
+         let ay = (t.y + 1.0) / u.fade.z;
+         a = clamp(min(min(ax, az), ay), 0.0, 1.0);
+     }
++    // patch 0029: the free spheres (the birds flying around the room) stay, outside the table too
++    let n = i32(u.free_count.x);
++    for (var i = 0; i < n; i++) {
++        let f = u.free[i];
++        if (length(t - f.xyz) < f.w) {
++            a = 1.0;
++        }
++    }
+     return vec4f(c.rgb, select(a, 0.0, h.w <= 0.0));
+ }
+ )";
+@@ -340,6 +352,8 @@
+   u.fade[1] = std::max(mk.fade[1], 1e-3f);
+   u.fade[2] = std::max(mk.fade[2], 1e-3f);
+   u.fade[3] = mk.fade[3];  // patch 0027: 1 = the bubble (a sphere)
++  u.freeCount[0] = static_cast<float>(mk.freeCount);
++  std::copy(&mk.free[0][0], &mk.free[0][0] + 16 * 4, &u.free[0][0]);
+   webgpu::g_queue.WriteBuffer(g_maskUniform[eye], 0, &u, sizeof(u));
+   const std::array bindEntries{
+       wgpu::BindGroupEntry{.binding = 0, .buffer = g_maskUniform[eye], .size = sizeof(MaskUniform)},

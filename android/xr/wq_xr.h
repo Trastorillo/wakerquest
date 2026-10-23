@@ -38,6 +38,8 @@ typedef struct WqXrTable {
     float yaw;       // radians the world is turned by the right grip
     bool autoScreen; // the game's first-person views (telescope, aiming...) on the giant screen
     bool cineScreen; // and its cutscenes
+    bool birdsFree;  // the flying birds drawn around the room, outside the bubble
+    float birdRange; // how far: radii of the bubble from its middle
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).

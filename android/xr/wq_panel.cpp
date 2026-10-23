@@ -96,6 +96,10 @@ const Item kStereo[] = {
      2500.0f, 100.0f, "%.0f"},
     {kXr, "cine_3d", "3D intenso en cinemáticas", "Más profundidad y más salida en las escenas", kSwitch},
     {kXr, "cine_screen", "Cinemáticas en pantalla gigante", "En la maqueta; vuelve a la burbuja al acabar", kSwitch},
+    {kXr, "auto_screen", "Pantalla automática en 1ª persona", "Telescopio, apuntar, cámara: en 2D", kSwitch},
+    {kXr, "birds_free", "Aves fuera de la burbuja", "Las gaviotas vuelan por tu habitación", kSwitch},
+    {kXr, "bird_range", "Alcance de las aves", "Hasta cuántas veces el radio de la burbuja", kStepper, nullptr, 0, 1.0f,
+     8.0f, 0.5f, "%.1f"},
 };
 const Item kDiorama[] = {
     {kXr, "shape", "Forma", "Una burbuja, o una mesa", kStepper, OPTS(kShape)},
@@ -111,7 +115,6 @@ const Item kDiorama[] = {
      0.1f, "%.1f m"},
     {kXr, "dialogue_back", "Distancia de los diálogos", "Detrás del centro de la burbuja", kStepper, nullptr, 0, 0.0f,
      1.5f, 0.1f, "%.1f m"},
-    {kXr, "auto_screen", "Pantalla automática en 1ª persona", "Telescopio, apuntar, cámara: en 2D", kSwitch},
     {kAction, "reset_panels", "Restablecer paneles", "El HUD y los diálogos, a su sitio", kButton},
 };
 const Item kControls[] = {
@@ -134,7 +137,7 @@ struct Tab {
     int count;
 };
 #define TAB(name, items) {name, items, (int)(sizeof(items) / sizeof(items[0]))}
-const Tab kTabs[] = {TAB("General", kGeneral), TAB("3D", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
+const Tab kTabs[] = {TAB("General", kGeneral), TAB("Efectos", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
                      TAB("Juego", kGameItems)};
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));

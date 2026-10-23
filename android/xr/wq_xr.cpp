@@ -98,6 +98,8 @@ struct Settings {
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
     bool cineScreen = true;                      // and cutscenes
+    bool birdsFree = true;                       // the flying birds around the room, outside the bubble
+    float birdRange = 3.0f;                      // how far, in the bubble's radii
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
@@ -169,6 +171,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
+    else if (!strcmp(key, "birds_free")) s.birdsFree = on;
+    else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
     else if (!strcmp(key, "hud_pose")) {
         float x = 0, y = 0, z = 0, yaw = 0;
@@ -202,6 +206,8 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
+    if (!strcmp(key, "birds_free")) return flag(s.birdsFree);
+    if (!strcmp(key, "bird_range")) return num(s.birdRange);
     if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
     if (!strcmp(key, "stereo_focus")) return num(s.stereoFocus);
     if (!strcmp(key, "cine_3d")) return flag(s.cine3d);
@@ -2095,6 +2101,8 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->yaw = st.tableYaw * 0.0174532925f;
     out->autoScreen = st.autoScreen;
     out->cineScreen = st.cineScreen;
+    out->birdsFree = st.birdsFree;
+    out->birdRange = st.birdRange;
 }
 
 extern "C" bool wq_xr_start(void) {

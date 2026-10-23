@@ -29,6 +29,8 @@
 #include "d/d_com_inf_game.h"
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_view.h"
+#include "f_op/f_op_actor_iter.h"
+#include "f_op/f_op_actor_mng.h"
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
@@ -279,12 +281,54 @@ bool cullSetup() {
     return true;
 }
 
+// The birds flying around the room (birds_free): the seagulls, the small birds, the Kargarocs, the
+// Peahats, the Keese... within bird_range table radii, each a sphere in the table's space (radius from
+// its size) that the eyes' mask keeps outside the table (Aurora patch 0029) and the culling draws.
+struct Birds {
+    float t[AURORA_XR_FREE_SPHERES][4];
+    int n = 0;
+    float range = 3.0f;
+};
+Birds sBirds;
+
+int collectBird(void* actor, void*) {
+    fopAc_ac_c* ac = (fopAc_ac_c*)actor;
+    float size;  // game units around its middle
+    switch (fopAcM_GetName(ac)) {
+    case fpcNm_KAMOME_e:
+    case fpcNm_KAMOME2_e:
+    case fpcNm_DEMO_KMM_e:
+    case fpcNm_KT_e:
+    case fpcNm_WBIRD_e:
+    case fpcNm_KI_e: size = 150.0f; break;
+    case fpcNm_PH_e: size = 250.0f; break;
+    case fpcNm_BB_e:
+    case fpcNm_DK_e: size = 450.0f; break;
+    default: return 1;
+    }
+    if (sBirds.n >= AURORA_XR_FREE_SPHERES) return 1;
+    const float p[3] = {ac->current.pos.x, ac->current.pos.y, ac->current.pos.z};
+    float t[3];
+    xform(s.tableFromWorld, p, t);
+    if (std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) > sBirds.range) return 1;
+    float* b = sBirds.t[sBirds.n++];
+    b[0] = t[0], b[1] = t[1], b[2] = t[2];
+    b[3] = size * s.k / s.halfX;
+    return 1;
+}
+
 // A sphere (view space, game units) against the table's box: 1 culled, 0 drawn. The margin keeps
-// what the rig is about to bring onto the table; nothing above the table is cut.
+// what the rig is about to bring onto the table; nothing above the table is cut, nor a bird about the
+// room.
 int cullSphereView(const float p[3], float radius) {
     float t[3];
     xform(s.tableFromView, p, t);
     const float r = radius * s.k;
+    for (int i = 0; i < sBirds.n; i++) {
+        const float* b = sBirds.t[i];
+        const float dx = t[0] - b[0], dy = t[1] - b[1], dz = t[2] - b[2];
+        if (std::sqrt(dx * dx + dy * dy + dz * dz) < b[3] + r / s.halfX) return 0;
+    }
     const float margin = 0.15f;
     s.cullTests++;
     const bool out = s.sphere ? std::sqrt(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]) - r / s.halfX > 1.0f + margin
@@ -337,6 +381,7 @@ bool pc_vr_view_begin(view_class* view) {
             s.rigValid = false;
         }
         s.tableValid = false;
+        sBirds.n = 0;
         return false;
     }
     updateRig(player->current.pos, view->mViewMtx, table.followYaw);
@@ -388,6 +433,10 @@ bool pc_vr_view_begin(view_class* view) {
         if (table.sphere) fade[0] = fade[1] = fade[2] = table.fade / r, fade[3] = 1.0f;
         aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
     }
+    sBirds.n = 0;
+    sBirds.range = table.birdRange;
+    if (table.birdsFree) fopAcIt_Executor(collectBird, nullptr);
+    aurora_xr_set_diorama_free(&sBirds.t[0][0], sBirds.n);
     aurora_xr_set_frame_info(head.tag, true);
     AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
     // the sky's things built around the camera's eye: squeezed to nothing (C = 0)
