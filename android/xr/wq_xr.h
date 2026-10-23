@@ -34,6 +34,8 @@ typedef struct WqXrTable {
     float height;    // its top below the eyes (metres)
     float fade;      // the edges' fade (metres)
     bool followYaw;  // the world turns with the game camera (else it keeps its first heading)
+    float x;         // metres to the right of straight ahead (moved with the right grip)
+    float yaw;       // radians the world is turned by the right grip
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).

@@ -47,7 +47,8 @@ typedef enum PcSettingTab {
     PC_SETTING_TAB_QOL = 2,         /* "Calidad de vida" (pc_qol.h) */
     PC_SETTING_TAB_DEBUG = 3,       /* "Depuración" */
     PC_SETTING_TAB_CONTROLS = 4,    /* "Controles" (pc_button_remap.h, issue #15) */
-    PC_SETTING_TABS = 5
+    PC_SETTING_TAB_VR = 5,          /* "Realidad virtual" (pc_vr.h: WakerQuest in the Meta Quest) */
+    PC_SETTING_TABS = 6
 } PcSettingTab;
 
 typedef enum PcOperationMode {

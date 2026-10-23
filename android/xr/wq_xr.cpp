@@ -92,6 +92,8 @@ struct Settings {
     float tableHeight = 0.3f;                    // m, Link (the table's top) below the eyes
     float tableFade = 0.2f;                      // m, the edges' fade
     bool tableFollowYaw = true;                  // the world turns with the game camera
+    float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
+    float tableYaw = 0.0f;                       // degrees, the world turned by the grip
 };
 
 const char kDefaultSettings[] =
@@ -144,6 +146,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "bubble_distance") || !strcmp(key, "table_distance")) s.tableDistance = clampf(f, 0.2f, 5.0f);
     else if (!strcmp(key, "bubble_height") || !strcmp(key, "table_height")) s.tableHeight = clampf(f, -1.0f, 2.0f);
     else if (!strcmp(key, "bubble_fade") || !strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
+    else if (!strcmp(key, "bubble_x")) s.tableX = clampf(f, -5.0f, 5.0f);
+    else if (!strcmp(key, "bubble_yaw")) s.tableYaw = f;
     else if (!strcmp(key, "table_width")) s.tableWidth = clampf(f, 20.0f, 400.0f) / 100.0f;
     else if (!strcmp(key, "table_depth")) s.tableDepth = clampf(f, 20.0f, 400.0f) / 100.0f;
     else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
@@ -212,6 +216,13 @@ struct Xr {
     XrAction z = XR_NULL_HANDLE, start = XR_NULL_HANDLE;
     XrAction trigL = XR_NULL_HANDLE, trigR = XR_NULL_HANDLE;
     XrAction rumble = XR_NULL_HANDLE;
+    XrAction handPose = XR_NULL_HANDLE, stickClick = XR_NULL_HANDLE;  // the diorama's grip drag
+    XrSpace handSpace = XR_NULL_HANDLE;
+    bool dragging = false;
+    XrVector3f dragHand{};
+    float dragHandYaw = 0.0f;
+    float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
+    bool clickWas = false;
     XrPath hands[2] = {XR_NULL_PATH, XR_NULL_PATH};
     SDL_JoystickID padId = 0;
     SDL_Joystick* pad = nullptr;
@@ -629,6 +640,8 @@ bool initActions() {
     s.trigL = makeAction("trigger_l", XR_ACTION_TYPE_FLOAT_INPUT, false);
     s.trigR = makeAction("trigger_r", XR_ACTION_TYPE_FLOAT_INPUT, false);
     s.rumble = makeAction("rumble", XR_ACTION_TYPE_VIBRATION_OUTPUT, true);
+    s.handPose = makeAction("hand_pose", XR_ACTION_TYPE_POSE_INPUT, false);
+    s.stickClick = makeAction("stick_click", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
 
     const struct {
         XrAction act;
@@ -646,6 +659,8 @@ bool initActions() {
         {s.trigR, "/user/hand/right/input/trigger/value"},
         {s.rumble, "/user/hand/left/output/haptic"},
         {s.rumble, "/user/hand/right/output/haptic"},
+        {s.handPose, "/user/hand/right/input/grip/pose"},
+        {s.stickClick, "/user/hand/right/input/thumbstick/click"},
     };
     std::vector<XrActionSuggestedBinding> suggested;
     for (const auto& bnd : binds) suggested.push_back({bnd.act, toPath(bnd.path)});
@@ -659,6 +674,10 @@ bool initActions() {
     ai.countActionSets = 1;
     ai.actionSets = &s.actionSet;
     if (!ok(xrAttachSessionActionSets(s.session, &ai), "xrAttachSessionActionSets")) return false;
+    XrActionSpaceCreateInfo asi{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    asi.action = s.handPose;
+    asi.poseInActionSpace.orientation.w = 1.0f;
+    ok(xrCreateActionSpace(s.session, &asi, &s.handSpace), "xrCreateActionSpace");
     xrlog("Touch controller bindings ready");
     return true;
 }
@@ -840,6 +859,69 @@ XrVector2f getVec2(XrAction act) {
 Sint16 stickAxis(float v) { return Sint16(clampf(v, -1.0f, 1.0f) * 32767.0f); }
 Sint16 triggerAxis(float v) { return Sint16(-32768 + int(clampf(v, 0.0f, 1.0f) * 65535.0f)); }
 
+void publishSettings() {
+    std::lock_guard lock{s_shared};
+    s_sharedSettings = s.settings;
+}
+
+// The diorama's grip (the right grip held): the model follows the hand, moved and turned about the
+// vertical; saved to xr.ini on release; the right stick's click while holding puts it back.
+void updateDrag(bool grip, bool click) {
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    if (!s.handSpace || XR_FAILED(xrLocateSpace(s.handSpace, s.space, s.frame.predictedDisplayTime, &loc)) ||
+        !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) ||
+        !(loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+        return;
+    }
+    const XrQuaternionf& q = loc.pose.orientation;
+    // the hand's forward (-z) on the ground: its heading
+    const float fx = -2.0f * (q.x * q.z + q.w * q.y), fz = -(1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+    const float handYaw = std::atan2(fx, -fz);
+    Settings& st = s.settings;
+    if (grip && !s.dragging) {
+        s.dragging = true;
+        s.dragHand = loc.pose.position;
+        s.dragHandYaw = handYaw;
+        s.dragX = st.tableX;
+        s.dragHeight = st.tableHeight;
+        s.dragDistance = st.tableDistance;
+        s.dragYaw = st.tableYaw;
+        xrlog("grip: moving the model");
+    }
+    if (grip) {
+        if (click && !s.clickWas) {
+            st.tableX = 0.0f;
+            st.tableHeight = 0.3f;
+            st.tableDistance = 1.0f;
+            st.tableYaw = 0.0f;
+            s.dragging = false;  // starts again from here
+            xrlog("grip: the model back in its place");
+        } else {
+            const XrVector3f& p = loc.pose.position;
+            st.tableX = s.dragX + (p.x - s.dragHand.x);
+            st.tableHeight = s.dragHeight - (p.y - s.dragHand.y);
+            st.tableDistance = std::max(0.2f, s.dragDistance - (p.z - s.dragHand.z));
+            float dy = handYaw - s.dragHandYaw;
+            while (dy > 3.14159265f) dy -= 6.28318531f;
+            while (dy < -3.14159265f) dy += 6.28318531f;
+            st.tableYaw = s.dragYaw - dy * 57.2957795f;
+        }
+        publishSettings();
+    } else if (s.dragging) {
+        s.dragging = false;
+        char v[32];
+        snprintf(v, sizeof v, "%.3f", st.tableX);
+        wq_xr_set("bubble_x", v);
+        snprintf(v, sizeof v, "%.3f", st.tableHeight);
+        wq_xr_set("bubble_height", v);
+        snprintf(v, sizeof v, "%.3f", st.tableDistance);
+        wq_xr_set("bubble_distance", v);
+        snprintf(v, sizeof v, "%.1f", st.tableYaw);
+        wq_xr_set("bubble_yaw", v);
+    }
+    s.clickWas = click;
+}
+
 void updatePad() {
     attachPad();
     if (!s.pad) return;
@@ -862,6 +944,12 @@ void updatePad() {
             x = getBool(s.x);
             y = getBool(s.y);
             start = getBool(s.start);
+            // the diorama: the right grip moves the model (not the game's Z), except with both
+            // triggers held (both triggers + grip open the options menu)
+            if (s.settings.diorama && !(l > 0.5f && r > 0.5f)) {
+                updateDrag(z > 0.6f, getBool(s.stickClick));
+                z = 0.0f;
+            }
         }
     }
     // SDL's Y axes point down, OpenXR's up
@@ -1097,10 +1185,10 @@ void runFrame() {
             if (st.sphere) {
                 // over the bubble's far side (its middle is 0.35 radii above Link, pc_vr_diorama.cpp)
                 const float r = 0.5f * st.tableWidth;
-                hud.pose.position = {0.0f, -st.tableHeight + 0.35f * r + 0.7f * r + 0.5f * h,
+                hud.pose.position = {st.tableX, -st.tableHeight + 0.35f * r + 0.7f * r + 0.5f * h,
                                      -(st.tableDistance + 0.6f * r)};
             } else {
-                hud.pose.position = {0.0f, -st.tableHeight + 0.1f + 0.5f * h,
+                hud.pose.position = {st.tableX, -st.tableHeight + 0.1f + 0.5f * h,
                                      -(st.tableDistance + 0.5f * st.tableDepth)};
             }
             hud.size = {w, h};
@@ -1209,6 +1297,8 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->height = st.tableHeight;
     out->fade = st.tableFade;
     out->followYaw = st.tableFollowYaw;
+    out->x = st.tableX;
+    out->yaw = st.tableYaw * 0.0174532925f;
 }
 
 extern "C" bool wq_xr_start(void) {

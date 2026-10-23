@@ -191,7 +191,7 @@ void updateRig(const cXyz& link, const Mtx view, bool followYaw) {
 // Stage from world: the world's axes scaled to metres, the pivot at the table's middle.
 M4 stageFromWorld(const WqXrTable& t) {
     float r[3], u[3], b[3];
-    axes(s.yaw, r, u, b);
+    axes(s.yaw + t.yaw, r, u, b);  // the grip's turn on top of the camera's heading
     const float k = t.width / (t.span * kUnitsPerMetre);  // metres per game unit
     M4 m = identity();
     for (int c = 0; c < 3; c++) {
@@ -199,7 +199,7 @@ M4 stageFromWorld(const WqXrTable& t) {
         m.m[1][c] = u[c] * k;
         m.m[2][c] = b[c] * k;
     }
-    const float anchor[3] = {0.0f, -t.height, -t.distance};
+    const float anchor[3] = {t.x, -t.height, -t.distance};
     for (int row = 0; row < 3; row++)
         m.m[row][3] = anchor[row] - (m.m[row][0] * s.pivot[0] + m.m[row][1] * s.pivot[1] + m.m[row][2] * s.pivot[2]);
     return m;
@@ -231,11 +231,13 @@ M4 tableFromStage(const WqXrTable& t) {
         // the bubble: radius 1 around its middle, 0.35 radii above Link
         const float r = 0.5f * t.width;
         m.m[0][0] = m.m[1][1] = m.m[2][2] = 1.0f / r;
+        m.m[0][3] = -t.x / r;
         m.m[1][3] = (t.height - 0.35f * r) / r;
         m.m[2][3] = t.distance / r;
         return m;
     }
     m.m[0][0] = 1.0f / s.halfX;
+    m.m[0][3] = -t.x / s.halfX;
     m.m[1][1] = 1.0f / s.below;
     m.m[1][3] = t.height / s.below;
     m.m[2][2] = 1.0f / s.halfZ;
@@ -398,6 +400,8 @@ void pc_vr_sky_end(void) {
     s.skyOn = false;
 }
 
+void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
+
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius) {
     if (!cullSetup()) return -1;
     Vec p;
@@ -449,6 +453,7 @@ bool pc_vr_view_begin(view_class*) { return false; }
 void pc_vr_view_end(void) {}
 void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
+void pc_vr_setting(const char*, const char*) {}
 int pc_vr_clip_sphere(const f32[3][4], const Vec*, f32) { return -1; }
 int pc_vr_clip_box(const f32[3][4], const Vec*, const Vec*) { return -1; }
 int pc_vr_clip_model(J3DModel*) { return -1; }

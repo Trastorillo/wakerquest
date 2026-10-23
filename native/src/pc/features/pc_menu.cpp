@@ -28,6 +28,7 @@
 // the game stayed paused while it was open, the settings in effect, the lines of the settings file,
 // the EFB size, the stage after a warp; exit 0 at the "#expect end" frame when all held.
 #include "pc/pc_settings.h"
+#include "pc/pc_vr.h"
 #include "pc/pc_dynres.h"
 #include "pc/pc_gpu_opts.h"
 #include "pc/pc_hd_textures.h"
@@ -449,6 +450,21 @@ void applyHitch(const char*, const char* v, void*) { perfSetHitch((unsigned int)
 void applyHdStats(const char*, const char* v, void*) { pc_hd_textures_set_stats_every((unsigned int)atoi(v)); }
 void applyGpuGroups(const char*, const char* v, void*) { pc_gpu_groups_set(atoi(v)); }
 void applyFps60(const char*, const char* v, void*) { pc_fps60_set(strcmp(v, "1") == 0); }
+// Realidad virtual (pc_vr.h): each row sets its xr.ini key (`user`), read again at once by the headset
+// layer; the resolution also changes the internal resolution now.
+void applyVr(const char*, const char* v, void* user) { pc_vr_setting((const char*)user, v); }
+void applyVrResolution(const char*, const char* v, void*) {
+    pc_vr_setting("resolution", v);
+    setFrameBufferScale((float)atof(v) / 480.0f);
+}
+void applyVrReset(const char*, const char* v, void*) {
+    if (strcmp(v, "1") == 0) {
+        pc_vr_setting("bubble_x", "0");
+        pc_vr_setting("bubble_height", "0.3");
+        pc_vr_setting("bubble_distance", "1.0");
+        pc_vr_setting("bubble_yaw", "0");
+    }
+}
 
 #define CHOICES(name) name, (int)(sizeof(name) / sizeof(name[0]))
 
@@ -495,7 +511,68 @@ const PcSettingChoice kHdStats[] = {{"0", "Desactivadas", "Off"}, {"150", "Cada 
                                     {"300", "Cada 300 cuadros", "Every 300 frames"},
                                     {"600", "Cada 600 cuadros", "Every 600 frames"}};
 
+const PcSettingChoice kVrMode[] = {{"pantalla", "Pantalla gigante", "Giant screen"}, {"maqueta", "Burbuja (maqueta)", "Bubble (diorama)"}};
+const PcSettingChoice kVrShape[] = {{"esfera", "Esfera", "Sphere"}, {"caja", "Caja (mesa)", "Box (table)"}};
+const PcSettingChoice kVrSpan[] = {{"10", "10 m de juego"}, {"20", "20 m de juego"}, {"30", "30 m de juego"},
+                                   {"45", "45 m de juego"}, {"60", "60 m de juego"}, {"90", "90 m de juego"}};
+const PcSettingChoice kVrSize[] = {{"0.6", "60 cm"}, {"0.8", "80 cm"}, {"1.0", "1 m"},
+                                   {"1.2", "1,2 m"}, {"1.5", "1,5 m"}, {"2.0", "2 m"}};
+const PcSettingChoice kVrDistance[] = {{"0.6", "60 cm"}, {"0.8", "80 cm"}, {"1.0", "1 m"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}};
+const PcSettingChoice kVrHeight[] = {{"0.0", "A la altura de los ojos"}, {"0.15", "15 cm por debajo"},
+                                     {"0.3", "30 cm por debajo"}, {"0.45", "45 cm por debajo"}, {"0.6", "60 cm por debajo"}};
+const PcSettingChoice kVrFade[] = {{"0.05", "5 cm"}, {"0.1", "10 cm"}, {"0.2", "20 cm"}, {"0.3", "30 cm"}};
+const PcSettingChoice kVrStereo[] = {{"0", "Desactivado", "Off"}, {"0.006", "Suave", "Soft"},
+                                     {"0.012", "Normal"}, {"0.02", "Intenso", "Strong"}};
+const PcSettingChoice kVrResolution[] = {{"720", "720 líneas"}, {"900", "900 líneas"}, {"1080", "1080 líneas"},
+                                         {"1200", "1200 líneas"}, {"1440", "1440 líneas"}};
+const PcSettingChoice kVrHud[] = {{"0.6", "60 cm"}, {"0.9", "90 cm"}, {"1.2", "1,2 m"}, {"1.5", "1,5 m"}};
+const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
+
+void applyVrStereo(const char*, const char* v, void*) {
+    pc_vr_setting("stereo", strcmp(v, "0") == 0 ? "0" : "1");
+    if (strcmp(v, "0") != 0) {
+        pc_vr_setting("stereo_strength", v);
+    }
+}
+
 const PcSettingDesc kBuiltins[] = {
+    // Realidad virtual (WakerQuest, pc_vr.h): xr.ini through pc_vr_setting
+    {"COS_VR_MODE", "Modo", "Pantalla gigante delante de ti, o el mundo como una maqueta en tu habitación.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrMode), "pantalla", applyVr, (void*)"mode", 1, "Mode",
+     "A giant screen in front of you, or the world as a diorama in your room."},
+    {"COS_VR_SHAPE", "Forma de la maqueta", "Una burbuja esférica, o una mesa rectangular.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrShape), "esfera", applyVr, (void*)"shape", 2, "Diorama shape",
+     "A spherical bubble, or a rectangular table."},
+    {"COS_VR_SPAN", "Escala del mundo", "Cuántos metros del juego caben a lo ancho de la maqueta.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrSpan), "30", applyVr, (void*)"bubble_span", 3, "World scale",
+     "How many metres of the game fit across the diorama."},
+    {"COS_VR_SIZE", "Tamaño de la burbuja", "El diámetro de la maqueta en tu habitación.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrSize), "1.0", applyVr, (void*)"bubble_size", 4, "Bubble size",
+     "The diorama's diameter in your room."},
+    {"COS_VR_DISTANCE", "Distancia", "A qué distancia de ti está la maqueta (también con el grip derecho).",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrDistance), "1.0", applyVr, (void*)"bubble_distance", 5, "Distance",
+     "How far the diorama is from you (also with the right grip)."},
+    {"COS_VR_HEIGHT", "Altura", "Cuánto por debajo de tus ojos está Link en la maqueta.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrHeight), "0.3", applyVr, (void*)"bubble_height", 6, "Height",
+     "How far below your eyes Link is in the diorama."},
+    {"COS_VR_FADE", "Fundido del borde", "Lo suave que se desvanece el borde de la maqueta.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrFade), "0.2", applyVr, (void*)"bubble_fade", 7, "Edge fade",
+     "How softly the diorama's edge fades out."},
+    {"COS_VR_FOLLOW", "Seguir la cámara", "La maqueta gira con la cámara del juego (el stick sigue siendo intuitivo).",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"table_follow_yaw", 8, "Follow the camera",
+     "The diorama turns with the game's camera (the stick stays intuitive)."},
+    {"COS_VR_STEREO", "3D en la pantalla gigante", "Profundidad del 3D en el modo pantalla.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrStereo), "0.012", applyVrStereo, nullptr, 9, "3D on the giant screen",
+     "Depth of the 3D in screen mode."},
+    {"COS_VR_RESOLUTION", "Resolución", "Líneas a las que se dibuja el juego en las gafas. Se aplica al momento.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1200", applyVrResolution, nullptr, 10, "Resolution",
+     "Lines the game is drawn at in the headset. Applies at once."},
+    {"COS_VR_HUD", "Tamaño del HUD", "El ancho del panel con los corazones y los menús en el modo maqueta.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "0.9", applyVr, (void*)"hud_width", 11, "HUD size",
+     "The width of the panel with the hearts and menus in diorama mode."},
+    {"COS_VR_RESET", "Restablecer posición", "Devuelve la maqueta a su sitio (también: grip + clic del stick derecho).",
+     PC_SETTING_TAB_VR, PC_SETTING_NO_SAVE, CHOICES(kVrReset), "0", applyVrReset, nullptr, 12, "Reset position",
+     "Puts the diorama back in its place (also: grip + right stick click)."},
     // Gráficos
     {"COS_FB_SCALE", "Resolución interna",
      "Resolución a la que se dibuja el juego antes de escalar a la pantalla. Más baja = más rápido.",
@@ -744,11 +821,11 @@ struct Row {
 
 // Indexed by PcSettingTab; kTabOrder is the order on screen (and of L/R).
 const char* const kTabNames[PC_SETTING_TABS] = {"Gráficos", "Rendimiento", "Calidad de vida", "Depuración",
-                                                "Controles"};
+                                                "Controles", "Realidad virtual"};
 const char* const kTabNamesEn[PC_SETTING_TABS] = {"Graphics", "Performance", "Quality of life", "Debug",
-                                                  "Controls"};
-const int kTabOrder[PC_SETTING_TABS] = {PC_SETTING_TAB_GRAPHICS, PC_SETTING_TAB_CONTROLS, PC_SETTING_TAB_PERFORMANCE,
-                                        PC_SETTING_TAB_QOL, PC_SETTING_TAB_DEBUG};
+                                                  "Controls", "Virtual reality"};
+const int kTabOrder[PC_SETTING_TABS] = {PC_SETTING_TAB_VR, PC_SETTING_TAB_GRAPHICS, PC_SETTING_TAB_CONTROLS,
+                                        PC_SETTING_TAB_PERFORMANCE, PC_SETTING_TAB_QOL, PC_SETTING_TAB_DEBUG};
 
 // The position on screen of a tab.
 int tabPosition(int tab) {
