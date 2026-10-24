@@ -25,6 +25,9 @@ void pc_vr_sky_end(void);
 /* The options menu's "Realidad virtual" page (pc_menu.cpp): one xr.ini key set (android/xr/wq_xr.h
    wq_xr_set); nothing elsewhere. */
 void pc_vr_setting(const char* key, const char* value);
+/* One xr.ini key's value in effect, as the file would hold it (into out, size bytes); false elsewhere or for a key
+   the layer does not show. */
+bool pc_vr_value(const char* key, char* out, int size);
 /* xr.ini's Rendimiento preset (perf_preset: "ahorro", "equilibrado", "maximo", "personal"); "" elsewhere. */
 const char* pc_vr_perf_preset(void);
 /* The internal resolution (lines) xr.ini gives the mode in effect (the window, less as it grows; the giant

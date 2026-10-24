@@ -491,7 +491,7 @@ struct Ambient {
     u32 recFrame = 0;
     const fopAc_ac_c* best = nullptr;  // the nearest seagull to Link (the log's)
     const void* actors[16];             // this frame's ambient actors (drawn again, never culled)
-    int kinds[16];                      // ambientKind's, -1 for Link (the test)
+    int kinds[16];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King
     float pos[16][3];                   // where they are (the world)
     // anchored in the room: the world to the room (stage space) and the head's, for the painter's
     // placing of each kind
@@ -593,6 +593,26 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.pos[0][0] = player->current.pos.x, sAmbient.pos[0][1] = player->current.pos.y;
         sAmbient.pos[0][2] = player->current.pos.z;
         sAmbient.nActors = 1;
+    }
+    // the Helmaroc King taking Aryll on Outset (a demo in the sea stage's room 44, the d_a_demo_dk or
+    // d_a_dk actor): the bird too, over the player's head in the room (ambientPlace), the scene itself
+    // as it is
+    if (!sAmbient.testLink && sAmbient.nActors < 16 && dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0) {
+        const char* stage = dComIfGp_getStartStageName();
+        if (stage != nullptr && strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44) {
+            fopAc_ac_c* bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e);
+            if (bird == nullptr) bird = fopAcM_SearchByName(fpcNm_DK_e);
+            if (bird != nullptr) {
+                const int i = sAmbient.nActors++;
+                sAmbient.actors[i] = bird;
+                sAmbient.kinds[i] = 5;
+                sAmbient.pos[i][0] = bird->current.pos.x, sAmbient.pos[i][1] = bird->current.pos.y;
+                sAmbient.pos[i][2] = bird->current.pos.z;
+                static bool sLogged = false;
+                if (!sLogged) pc::writef(STDERR_FILENO, "[vr] ambient: the Helmaroc King in the room\n");
+                sLogged = true;
+            }
+        }
     }
     pc_vr_ambient_actor = sAmbient.nActors > 0 ? sAmbient.actors[0] : nullptr;
 
@@ -1359,6 +1379,7 @@ void pc_vr_sky_end(void) {
 }
 
 void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
+bool pc_vr_value(const char* key, char* out, int size) { return wq_xr_value(key, out, size); }
 const char* pc_vr_perf_preset(void) { return wq_xr_perf_preset(); }
 int pc_vr_resolution(int* base) { return wq_xr_resolution(base); }
 const char* pc_vr_resolution_key(void) { return wq_xr_resolution_key(); }
@@ -1467,18 +1488,19 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // Anchored in the room, each kind its own place: the seagulls over the player's head (at least 0.3 m
 // above it), the crabs and small birds on the room's floor, Link as he is.
 // The view delta of one actor (index i), or of the anchored world lifted by dy metres.
-// The ambience's own size: everything 0.7 of the world's scale about where it is (Tamaño del ambiente
-// on top)
-const float kAmbientSize = 0.7f;
+// The ambience's own size: everything 0.35 of the world's scale about where it is (half of 1.0.3's;
+// Tamaño del ambiente on top); the Helmaroc King, a giant, far smaller (some 2 m across)
+const float kAmbientSize = 0.35f;
+const float kHelmarocSize = 0.12f;
 
-void ambientDelta(const float p[3], const float d[3], Mtx out) {
-    // moved by d, sized kAmbientSize about where it lands
+void ambientDelta(const float p[3], const float d[3], Mtx out, float size = kAmbientSize) {
+    // moved by d, sized `size` about where it lands
     float r[3];
     xform(sAmbient.stageWorld, p, r);
     M4 lift = identity();
     for (int i = 0; i < 3; i++) {
-        lift.m[i][i] = kAmbientSize;
-        lift.m[i][3] = (r[i] + d[i]) - kAmbientSize * r[i];
+        lift.m[i][i] = size;
+        lift.m[i][3] = (r[i] + d[i]) - size * r[i];
     }
     toMtx(mul(mul(mul(sAmbient.headStage, lift), sAmbient.stageWorld), sAmbient.worldView), out);
 }
@@ -1486,18 +1508,21 @@ void ambientDelta(const float p[3], const float d[3], Mtx out) {
 // Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
 // in the game is brought near, keeping its direction, so it stays within the ambience's range. The
 // seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
-// 1 m of the screen's middle, on the room's floor.
+// 1 m of the screen's middle, on the room's floor; the Helmaroc King in a wider ring, 1.5-2.5 m around
+// the head and 0.6-1.2 m over it.
 void ambientPlace(int kind, const float p[3], float d[3]) {
     float r[3];
     xform(sAmbient.stageWorld, p, r);
     d[0] = d[1] = d[2] = 0.0f;
-    if (kind == 0 || kind == 1) {
+    if (kind == 0 || kind == 1 || kind == 5) {
+        const bool king = kind == 5;
         const float* h = sAmbient.headPos;
         float vx = r[0] - h[0], vz = r[2] - h[2];
         const float l = std::sqrt(vx * vx + vz * vz);
         if (l < 1e-3f) vx = 0.0f, vz = -1.0f;
-        const float ring = std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f) / std::max(l, 1e-3f);
-        const float y = h[1] + 0.3f + std::clamp(0.05f * (r[1] - h[1]), 0.0f, 0.5f);
+        const float ring = (king ? std::clamp(1.5f + 0.05f * l, 1.5f, 2.5f) : std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f)) /
+                           std::max(l, 1e-3f);
+        const float y = h[1] + (king ? 0.6f : 0.3f) + std::clamp(0.05f * (r[1] - h[1]), 0.0f, king ? 0.6f : 0.5f);
         d[0] = h[0] + vx * ring - r[0];
         d[1] = y - r[1];
         d[2] = h[2] + vz * ring - r[2];
@@ -1578,7 +1603,7 @@ void pc_vr_ambient_draw(void) {
             Mtx d;
             float mv[3];
             ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
-            ambientDelta(sAmbient.pos[a], mv, d);
+            ambientDelta(sAmbient.pos[a], mv, d, sAmbient.kinds[a] == 5 ? kHelmarocSize : kAmbientSize);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
             deltaActor = who;
         }
@@ -1650,6 +1675,7 @@ void pc_vr_view_end(void) {}
 void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
+bool pc_vr_value(const char*, char*, int) { return false; }
 const char* pc_vr_perf_preset(void) { return ""; }
 int pc_vr_resolution(int*) { return -1; }
 const char* pc_vr_resolution_key(void) { return "resolution"; }

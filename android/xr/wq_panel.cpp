@@ -17,6 +17,7 @@
 #include <GLES3/gl3.h>
 #include <SDL3/SDL_timer.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -80,6 +81,7 @@ const Option kResolution[] = {{"540", "0,50"},   {"648", "0,60"},   {"756", "0,7
 // window's horizon, the characters' distance, set at once when one is chosen; personal = the values chosen by hand
 const Option kPerfPreset[] = {{"ahorro", "Ahorro"}, {"equilibrado", "Equilibrado"}, {"maximo", "Máximo"},
                               {"personal", "Personal"}};
+const Option kAnchor[] = {{"world", "Habitación"}, {"camera", "Cámara"}};
 const Option kLanguage[] = {{"auto", "Auto"},       {"es", "Español"}, {"en", "English"},
                             {"fr", "Français"},     {"de", "Deutsch"}, {"it", "Italiano"}};
 
@@ -166,6 +168,18 @@ const Item kGameItems[] = {
     {kXr, "height", "Altura de la pantalla", "Sobre tus ojos; o con un grip", kStepper, nullptr, 0, -3.0f, 3.0f,
      0.1f, "%.1f m"},
 };
+// the room's ambience (mode = pantalla, pc_vr_diorama.cpp): the game's seagulls, crabs and small birds
+// out of the screen
+const Item kAmbient[] = {
+    {kXr, "ambient", "Ambiente", "Gaviotas, cangrejos y pajarillos en tu habitación", kSwitch},
+    {kXr, "ambient_scale", "Tamaño del ambiente", "Lo que sale de la pantalla", kStepper, nullptr, 0, 0.25f, 3.0f,
+     0.25f, "%.2f"},
+    {kXr, "ambient_range", "Alcance", "Hasta dónde se ve desde el borde de la pantalla", kStepper, nullptr, 0, 1.0f,
+     10.0f, 0.5f, "%.1f m"},
+    {kXr, "ambient_anchor", "Ambiente anclado", "Quieto en la habitación, o con la cámara", kStepper, OPTS(kAnchor)},
+    {kXr, "ambient_move", "Mover el ambiente con los grips", "En vez de la pantalla; clic del stick: a su sitio",
+     kSwitch},
+};
 #undef OPTS
 
 struct Tab {
@@ -175,7 +189,7 @@ struct Tab {
 };
 #define TAB(name, items) {name, items, (int)(sizeof(items) / sizeof(items[0]))}
 constexpr Tab kTabs[] = {TAB("General", kGeneral), TAB("Efectos", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
-                     TAB("Juego", kGameItems)};
+                     TAB("Juego", kGameItems), TAB("Ambiente", kAmbient)};
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));
 constexpr int kMaxItems = 10;
@@ -213,16 +227,29 @@ void queueGameChange(const char* key, const std::string& v) {
 
 // ---- The panel ---------------------------------------------------------------------------------------
 
-const int kTexW = 640;
+// 1.0.5: wider (the six tabs' names) and larger in the room; the controls on the right as before
+const int kTexW = 900;
+const float kRight = kTexW - 640.0f;  // the controls' shift from the 640-wide panel's places
 const float kRowsTop = 172.0f, kRowH = 104.0f;
 const int kTexH = (int)(kRowsTop + kMaxItems * kRowH + 24.0f);
-const float kWidthM = 0.5f;
-const float kCloseX0 = 448.0f, kCloseX1 = 608.0f, kCloseY0 = 24.0f, kCloseY1 = 70.0f;
-const float kTabsY0 = 92.0f, kTabsY1 = 148.0f, kTabsX0 = 16.0f, kTabW = (kTexW - 32.0f) / kTabCount;
+const float kWidthM = 0.8f;
+const float kCloseX0 = 448.0f + kRight, kCloseX1 = 608.0f + kRight, kCloseY0 = 24.0f, kCloseY1 = 70.0f;
+const float kTabsY0 = 92.0f, kTabsY1 = 148.0f, kTabsX0 = 16.0f, kTabsX1 = kTexW - 16.0f;
 const float kControlY = 36.0f;
 const float kButtonR = 28.0f;
-const float kStepMinusX = 380.0f, kStepPlusX = 580.0f;
-const float kSwitchX0 = 520.0f, kSwitchX1 = 608.0f, kSwitchR = 22.0f;
+const float kStepMinusX = 380.0f + kRight, kStepPlusX = 580.0f + kRight;
+const float kSwitchX0 = 520.0f + kRight, kSwitchX1 = 608.0f + kRight, kSwitchR = 22.0f;
+
+// A tab's button, as wide as its name plus an even share of the rest of the row
+void tabSpan(int t, float* x0, float* x1) {
+    float names = 0.0f;
+    for (int i = 0; i < kTabCount; i++) names += ui::textWidth(kFontSmall, kTabs[i].name);
+    const float spare = std::max(0.0f, (kTabsX1 - kTabsX0 - names) / kTabCount);
+    float x = kTabsX0;
+    for (int i = 0; i < t; i++) x += ui::textWidth(kFontSmall, kTabs[i].name) + spare;
+    *x0 = x;
+    *x1 = x + ui::textWidth(kFontSmall, kTabs[t].name) + spare;
+}
 
 enum Part { kNone, kClose, kTabButton, kToggle, kMinus, kPlus, kPress };
 struct Hit {
@@ -392,7 +419,9 @@ void drawPanel() {
     c.roundRect(kCloseX0, kCloseY0, kCloseX1, kCloseY1, 23.0f, fill({kClose, 0}));
     c.text((kCloseX0 + kCloseX1) * 0.5f, 56, kFontSmall, "Cerrar", rgb(230, 234, 242), 1);
     for (int t = 0; t < kTabCount; t++) {
-        const float x0 = kTabsX0 + kTabW * t + 3.0f, x1 = kTabsX0 + kTabW * (t + 1) - 3.0f;
+        float x0, x1;
+        tabSpan(t, &x0, &x1);
+        x0 += 3.0f, x1 -= 3.0f;
         const Hit h{kTabButton, t};
         const Color back = t == p.tab ? accent : p.pressed == h || p.hover == h ? rgb(84, 93, 116) : rgb(44, 49, 62);
         c.roundRect(x0, kTabsY0, x1, kTabsY1, 20.0f, back);
@@ -434,8 +463,13 @@ void drawPanel() {
 Hit hitAt(float x, float y) {
     auto near = [](float x, float y, float cx, float cy, float r) { return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r; };
     if (x >= kCloseX0 - 8 && x <= kCloseX1 + 8 && y >= kCloseY0 - 8 && y <= kCloseY1 + 8) return {kClose, 0};
-    if (y >= kTabsY0 - 6 && y <= kTabsY1 + 6 && x >= kTabsX0 && x < kTabsX0 + kTabW * kTabCount)
-        return {kTabButton, (int)((x - kTabsX0) / kTabW)};
+    if (y >= kTabsY0 - 6 && y <= kTabsY1 + 6) {
+        for (int t = 0; t < kTabCount; t++) {
+            float x0, x1;
+            tabSpan(t, &x0, &x1);
+            if (x >= x0 && x < x1) return {kTabButton, t};
+        }
+    }
     const Tab& tab = kTabs[p.tab];
     for (int i = 0; i < tab.count; i++) {
         const Item& it = tab.items[i];
@@ -529,6 +563,8 @@ void init(const Host& host, XrSession session, bool srgb) {
 }
 
 bool isOpen() { return p.open; }
+XrPosef pose() { return p.pose; }
+void setPose(const XrPosef& pose) { p.pose = pose; }
 
 void open(const XrPosef& pose) {
     if (!p.ready) return;

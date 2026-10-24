@@ -22,6 +22,9 @@ bool isOpen();
 // Opens at `pose` (its middle, facing the player), or closes; the settings changed are already saved.
 void open(const XrPosef& pose);
 void close();
+// Where it is now (LOCAL space), and moved there (the grips, wq_xr.cpp).
+XrPosef pose();
+void setPose(const XrPosef& pose);
 
 // The pointer this frame (LOCAL space): the distance to where the ray meets the panel, 0 off it.
 // `clickDown`: the active hand's trigger. *tick: something new under the pointer, or a press.

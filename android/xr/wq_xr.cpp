@@ -103,13 +103,14 @@ struct Settings {
     bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
     float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = lines / 480), one per mode
-    // (activeResolution): resolution for the flat giant screen and the bubble, stereo_resolution for the
-    // giant screen in 3D, window_resolution for the window. Applied at start and again when the mode or
+    // (activeResolution): resolution for the flat giant screen, diorama_resolution for the bubble,
+    // stereo_resolution for the giant screen in 3D, window_resolution for the window. Applied at start and again when the mode or
     // the 3D changes (pc_menu.cpp syncVrResolution); 0 = the headset window's own (4128x2208, too much).
     // -1 (a file without the key, older ones): resolution's.
     int resolution = 1080;        // 1.00 of 1080 lines (the menu's scale)
     int stereoResolution = -1;    // the 3D draws every frame twice: 918 (0.85) by default
     int windowResolution = -1;    // the window draws a wider view per eye: 864 (0.80) by default
+    int dioramaResolution = -1;   // the bubble's own (resolution's while the file has none)
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
     bool diorama = false;
@@ -137,7 +138,7 @@ struct Settings {
     float birdRange = 3.0f;                      // how far, in the bubble's radii
     // the room's ambience (mode = pantalla, pc_vr_ambient.cpp): the game's own seagulls, crabs, small
     // birds, wind lines and rain drawn again outside the giant screen, fading with the distance from it
-    bool ambient = false;       // off until tried live
+    bool ambient = true;        // on since 1.0.5 (tried live)
     float ambientRange = 4.0f;  // m from the screen's edge where it has faded out
     bool ambientTestLink = false;  // the test's actor: Link instead of the nearest seagull
     bool ambientMask = true;       // hidden where the screen is (0: drawn over it too, for the tests)
@@ -154,6 +155,9 @@ struct Settings {
     float hudPose[4] = {-0.03f, -0.22f, -1.39f, 0.0f};
     // m, the dialogues' panel moved by hand (a grip on it) from its place above the model; it moves with it
     float dialogueOffset[3] = {0, 0, 0};
+    // m, the settings panel from the eyes when it opens (right, up, and ahead negative, in the head's
+    // heading); a grip moves it (wq_panel.cpp)
+    float panelOffset[3] = {0.0f, -0.12f, -0.9f};
     // the window (mode = ventana, pc_vr_diorama.cpp): the world at its own scale through a rectangle in
     // the room (16:9), the game camera's eye window_depth in front of it looking through it (what it sees
     // nearer than that comes out, up to window_popout); each eye looks through it from
@@ -170,7 +174,7 @@ struct Settings {
     float windowPopout = 0.45f;    // m, how far
     float windowDrawDistance = 300.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
-    float npcDrawDistance = 50.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
+    float npcDrawDistance = 10.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
                                     // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
     // the dynamic resolution (pc_vr_dynres.cpp, off by default): the mode's lines go down one step (a
     // tenth of them) when the game stays under dynres_low_fps for 3 s, and up one when it holds
@@ -220,8 +224,9 @@ const char kDefaultSettings[] =
     "stereo_strength = 0.012\n"
     "stereo_focus = 600\n"
     "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
-    "# the 3D changes: resolution = the giant screen and the bubble, stereo_resolution = the giant screen\n"
-    "# in 3D, window_resolution = the window. The options menu's Resolucion sets the current mode's.\n"
+    "# the 3D changes: resolution = the giant screen, diorama_resolution = the bubble (resolution's while\n"
+    "# it is not here), stereo_resolution = the giant screen in 3D, window_resolution = the window. The\n"
+    "# options menu's Resolucion sets the current mode's.\n"
     "# The window up to 2.2 m wide; past 1.6 m it draws with fewer lines (as 1.6 / width, down to 648).\n"
     "resolution = 1080\n"
     "stereo_resolution = 918\n"
@@ -255,7 +260,7 @@ const char kDefaultSettings[] =
     "window_draw_distance = 300\n"
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
-    "npc_draw_distance = 50\n"
+    "npc_draw_distance = 10\n"
     "# dynres 1 = the resolution follows the frame rate (off by default): one step down (a tenth of the\n"
     "# mode's lines) when the game stays under dynres_low_fps for 3 s, one up when it holds\n"
     "# dynres_high_fps for 10 s; never under dynres_min of the mode's resolution (0.5-1). The values are\n"
@@ -283,8 +288,8 @@ const char kDefaultSettings[] =
     "window_depth_special = 2.0\n"
     "window_popout_special = 1.8\n"
     "# mode = pantalla: ambient 1 = the game's own seagulls, crabs, birds, wind lines and rain also\n"
-    "# outside the screen, in the room, fading out ambient_range m from its edge (in progress).\n"
-    "ambient = 0\n"
+    "# outside the screen, in the room, fading out ambient_range m from its edge.\n"
+    "ambient = 1\n"
     "ambient_range = 4\n"
     "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
     "ambient_test = seagull\n"
@@ -313,12 +318,13 @@ const PresetKey kPresetKeys[] = {
     {"cpu_low", {"1", "0", "0"}},  // only Ahorro sets the CPU's level (updatePerformance)
     {"resolution", {"864", "1080", "1512"}},
     {"stereo_resolution", {"756", "918", "1404"}},
+    {"diorama_resolution", {"864", "1080", "1512"}},
     {"window_resolution", {"756", "864", "1404"}},
     {"stereo", {"0", "0", "1"}},
     {"cine_3d", {"0", "1", "1"}},
     {"bubble_span", {"25", "30", "40"}},
     {"window_draw_distance", {"250", "300", "800"}},
-    {"npc_draw_distance", {"35", "50", "90"}},
+    {"npc_draw_distance", {"10", "10", "90"}},
 };
 
 // 1..3 for a preset's name, 0 (personal) for anything else
@@ -355,6 +361,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
     else if (!strcmp(key, "cine_3d")) s.cine3d = on;
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
+    else if (!strcmp(key, "diorama_resolution")) s.dioramaResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "stereo_resolution")) s.stereoResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "window_resolution")) s.windowResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "cpu_low")) s.cpuLow = on;
@@ -428,6 +435,13 @@ void applySetting(Settings& s, const char* key, const char* v) {
             s.hudPose[2] = clampf(z, -10.0f, 10.0f);
             s.hudPose[3] = yaw;
         }
+    } else if (!strcmp(key, "panel_offset")) {
+        float x = 0, y = 0, z = 0;
+        if (sscanf(v, "%f,%f,%f", &x, &y, &z) == 3) {
+            s.panelOffset[0] = clampf(x, -3.0f, 3.0f);
+            s.panelOffset[1] = clampf(y, -2.0f, 2.0f);
+            s.panelOffset[2] = clampf(z, -3.0f, -0.3f);
+        }
     } else if (!strcmp(key, "dialogue_offset")) {
         float x = 0, y = 0, z = 0;
         if (sscanf(v, "%f,%f,%f", &x, &y, &z) == 3) {
@@ -461,11 +475,12 @@ int windowLines(int base, float width, int current) {
 
 // The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
 const char* activeResolutionKey(const Settings& s) {
-    return s.window ? "window_resolution" : !s.diorama && s.stereo ? "stereo_resolution" : "resolution";
+    return s.window ? "window_resolution" : s.diorama ? "diorama_resolution" : s.stereo ? "stereo_resolution" : "resolution";
 }
 int resolutionOf(const Settings& s, const char* key) {
     const int v = !strcmp(key, "window_resolution") ? s.windowResolution
                   : !strcmp(key, "stereo_resolution") ? s.stereoResolution
+                  : !strcmp(key, "diorama_resolution") ? s.dioramaResolution
                                                       : s.resolution;
     return v < 0 ? s.resolution : v;
 }
@@ -487,7 +502,8 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "refresh")) return num(float(s.refresh));
     if (!strcmp(key, "gpu_boost")) return flag(s.gpuBoost);
     if (!strcmp(key, "cpu_low")) return flag(s.cpuLow);
-    if (!strcmp(key, "resolution") || !strcmp(key, "stereo_resolution") || !strcmp(key, "window_resolution"))
+    if (!strcmp(key, "resolution") || !strcmp(key, "stereo_resolution") || !strcmp(key, "window_resolution") ||
+        !strcmp(key, "diorama_resolution"))
         return num(float(resolutionOf(s, key)));
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
@@ -639,6 +655,10 @@ struct Xr {
     int grabbed[2] = {0, 0};  // the panel a hand holds: 1 the HUD, 2 the dialogues
     XrVector3f grabHand[2]{};
     float grabOffset[2][3]{};
+    // the settings panel taken by a grip (wq_panel.cpp): the hand (-1 none), where it and the panel were
+    bool panelGrip[2] = {false, false};
+    int panelGrabHand = -1;
+    XrVector3f panelGrabAt{}, panelGrabFrom{};
     int dragHands = 0;        // the hands on the model when its drag (re)started: 1 left, 2 right, 3 both
     bool dragging = false;
     XrVector3f dragHand{};
@@ -794,8 +814,9 @@ void readSettings(bool force) {
           next.width, next.distance, next.height, next.screenX, next.screenYaw, next.screenFrame ? "on" : "off",
           next.passthrough ? "on" : "off", next.refresh,
           next.stereo ? "on" : "off", next.stereoStrength, next.stereoFocus);
-    xrlog("settings: resolution %d lines (3D %d, window %d), now %s; GPU boost %s, CPU low %s",
-          next.resolution, resolutionOf(next, "stereo_resolution"), resolutionOf(next, "window_resolution"),
+    xrlog("settings: resolution %d lines (3D %d, bubble %d, window %d), now %s; GPU boost %s, CPU low %s",
+          next.resolution, resolutionOf(next, "stereo_resolution"), resolutionOf(next, "diorama_resolution"),
+          resolutionOf(next, "window_resolution"),
           activeResolutionKey(next), next.gpuBoost ? "on" : "off", next.cpuLow ? "on" : "off");
     xrlog("settings: window %.2f m wide, %.2f m away, %.2f m up, %.2f m right, %.0f deg; scale %.2f, camera %.2f m "
           "behind, coming out %s (%.2f m)",
@@ -1417,6 +1438,7 @@ void publishSettings() {
 
 void updateGrips(float gripL, float gripR, bool click);
 void togglePanel();
+void updatePanelGrab(float gripL, float gripR);
 void pointerHaptic(int hand, float amplitude);
 
 void updatePad() {
@@ -1461,6 +1483,11 @@ void updatePad() {
                 bool tick = false;
                 wqp::nav(m.x, m.y, c.x, a, b, &tick);
                 if (tick) pointerHaptic(s.activeHand, 0.15f);
+                // a grip takes the panel (not the one still held from the combination that opened it)
+                updatePanelGrab(s.comboHeld ? 0.0f : gripL, s.comboHeld ? 0.0f : z);
+            } else {
+                s.panelGrabHand = -1;
+                s.panelGrip[0] = s.panelGrip[1] = false;
             }
             if (panel || s.comboHeld) {
                 m = c = {0.0f, 0.0f};
@@ -2354,27 +2381,82 @@ void updateGrips(float gripL, float gripR, bool click) {
     s.clickWas = click;
 }
 
-// The settings panel opens 0.9 m in front of the player, a little below the eyes, facing them.
-void togglePanel() {
-    if (!s.panelReady) return;
-    if (wqp::isOpen()) {
-        wqp::close();
-        return;
-    }
+// The head now: its position and its heading on the ground (a unit vector)
+void headHeading(XrVector3f* pos, XrVector3f* f) {
     WqXrHead head{};
     {
         std::lock_guard lock{s_shared};
         head = s_heads[(s_nextTag - 1) % kHeadHistory].head;
     }
     const XrQuaternionf q{head.rot[0], head.rot[1], head.rot[2], head.rot[3]};
-    XrVector3f f = qrot(q, {0, 0, -1});
+    XrVector3f v = qrot(q, {0, 0, -1});
+    v.y = 0.0f;
+    *f = vnorm(v);
+    *pos = {head.pos[0], head.pos[1], head.pos[2]};
+}
+
+// The settings panel at `at`, turned to face the head
+XrPosef panelFacing(XrVector3f at, XrVector3f head) {
+    XrVector3f f = vsub(at, head);
     f.y = 0.0f;
+    if (f.x * f.x + f.z * f.z < 1e-6f) f = {0.0f, 0.0f, -1.0f};
     f = vnorm(f);
     const float yaw = std::atan2(-f.x, -f.z);
     XrPosef pose;
     pose.orientation = {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
-    pose.position = {head.pos[0] + 0.9f * f.x, head.pos[1] - 0.12f, head.pos[2] + 0.9f * f.z};
-    wqp::open(pose);
+    pose.position = at;
+    return pose;
+}
+
+// The settings panel opens where panel_offset puts it from the eyes (0.9 m ahead, a little below them,
+// unless a grip moved it), facing them.
+void togglePanel() {
+    if (!s.panelReady) return;
+    if (wqp::isOpen()) {
+        wqp::close();
+        return;
+    }
+    XrVector3f head, f;
+    headHeading(&head, &f);
+    const XrVector3f right{-f.z, 0.0f, f.x};
+    const float* o = s.settings.panelOffset;
+    const XrVector3f at{head.x + right.x * o[0] - f.x * o[2], head.y + o[1], head.z + right.z * o[0] - f.z * o[2]};
+    wqp::open(panelFacing(at, head));
+}
+
+// The settings panel's grips (1.0.5): either hand's grip takes it, wherever the hand is, and it follows
+// the hand, turned to face the head; let go, its place from the eyes is saved (panel_offset)
+void updatePanelGrab(float gripL, float gripR) {
+    const XrSpace spaces[2] = {s.handSpaceL, s.handSpace};
+    const float g[2] = {gripL, gripR};
+    for (int h = 0; h < 2; h++) {
+        XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+        const bool valid = spaces[h] && XR_SUCCEEDED(xrLocateSpace(spaces[h], s.space, s.frame.predictedDisplayTime, &loc)) &&
+                           (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT);
+        const bool down = valid && g[h] > (s.panelGrip[h] ? 0.4f : 0.6f);
+        if (down && !s.panelGrip[h] && s.panelGrabHand < 0) {
+            s.panelGrabHand = h;
+            s.panelGrabAt = loc.pose.position;
+            s.panelGrabFrom = wqp::pose().position;
+            pointerHaptic(h, 0.3f);
+            xrlog("grip: moving the settings panel");
+        }
+        if (s.panelGrabHand == h && !down) {
+            XrVector3f head, f;
+            headHeading(&head, &f);
+            const XrVector3f d = vsub(wqp::pose().position, head);
+            const XrVector3f right{-f.z, 0.0f, f.x};
+            char v[64];
+            snprintf(v, sizeof v, "%.3f,%.3f,%.3f", d.x * right.x + d.z * right.z, d.y, -(d.x * f.x + d.z * f.z));
+            wq_xr_set("panel_offset", v);
+            s.panelGrabHand = -1;
+        }
+        s.panelGrip[h] = down;
+        if (s.panelGrabHand == h && valid) {
+            const XrVector3f at = vadd(s.panelGrabFrom, vsub(loc.pose.position, s.panelGrabAt));
+            wqp::setPose(panelFacing(at, latestHeadPos()));
+        }
+    }
 }
 
 // The panel's host (wq_panel.h): xr.ini's settings.
@@ -2997,6 +3079,18 @@ extern "C" const char* wq_xr_perf_preset(void) {
     if (s.settingsPath[0] == '\0') return "";
     std::lock_guard lock{s_shared};
     return kPresetNames[s_sharedSettings.perfPreset];
+}
+
+extern "C" bool wq_xr_value(const char* key, char* out, int size) {
+    if (s.settingsPath[0] == '\0' || key == nullptr || out == nullptr || size <= 0) return false;
+    std::string v;
+    {
+        std::lock_guard lock{s_shared};
+        v = settingValue(s_sharedSettings, key);
+    }
+    if (v.empty()) return false;
+    snprintf(out, size, "%s", v.c_str());
+    return true;
 }
 
 extern "C" int wq_xr_resolution(int* base) {

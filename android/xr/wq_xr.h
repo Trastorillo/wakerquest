@@ -98,6 +98,9 @@ void wq_xr_set(const char* key, const char* value);
 // The Rendimiento preset in effect (xr.ini's perf_preset: "ahorro", "equilibrado", "maximo" or
 // "personal"), or "" without the headset layer. Any thread.
 const char* wq_xr_perf_preset(void);
+// One xr.ini key's value in effect, as the file would hold it (the options menu's rows mirror it); false
+// without the headset layer or for a key it does not show. Any thread.
+bool wq_xr_value(const char* key, char* out, int size);
 // The internal resolution (lines) of the mode in effect: window_resolution in the window (fewer lines
 // as the window grows past 1.6 m, down to 648), stereo_resolution on the giant screen in 3D, resolution
 // otherwise; -1 without the headset layer. base: the xr.ini key's own value. And that key (the options

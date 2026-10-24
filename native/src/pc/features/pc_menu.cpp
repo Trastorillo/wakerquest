@@ -452,7 +452,13 @@ void applyGpuGroups(const char*, const char* v, void*) { pc_gpu_groups_set(atoi(
 void applyFps60(const char*, const char* v, void*) { pc_fps60_set(strcmp(v, "1") == 0); }
 // Realidad virtual (pc_vr.h): each row sets its xr.ini key (`user`), read again at once by the headset
 // layer; the resolution also changes the internal resolution now.
-void applyVr(const char*, const char* v, void* user) { pc_vr_setting((const char*)user, v); }
+bool sVrRowSync = false;  // syncVrRows mirroring xr.ini into a row: not written back
+void applyVr(const char*, const char* v, void* user) {
+    if (!sVrRowSync) {
+        pc_vr_setting((const char*)user, v);
+    }
+}
+void syncVrRows();
 // The VR internal resolution (lines) applied now.
 void setVrScale(const char* v) {
     const float scale = (float)atof(v) / 480.0f;
@@ -677,10 +683,10 @@ const PcSettingDesc kBuiltins[] = {
      "Depth of the 3D in screen mode."},
     {"COS_VR_AMBIENT", "Ambiente",
      "En los modos pantalla y ventana: las gaviotas, cangrejos y pajarillos del juego salen también fuera del "
-     "marco, a tu habitación, desvaneciéndose al alejarse (en pruebas). Se aplica al momento.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"ambient", 9, "Ambience",
+     "marco, a tu habitación, desvaneciéndose al alejarse. Se aplica al momento.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"ambient", 9, "Ambience",
      "Screen and window modes: the game's seagulls, crabs and small birds also come out of the frame into your "
-     "room, fading away from it (in testing). Applies at once."},
+     "room, fading away from it. Applies at once."},
     {"COS_VR_AMBIENT_SCALE", "Tamaño del ambiente",
      "Modo pantalla: el tamaño de lo que sale de la pantalla, alrededor de su centro (también con los dos grips "
      "si Mover el ambiente está activado).",
@@ -949,6 +955,40 @@ const PcSettingDesc kBuiltins[] = {
 // ---- menu state ----------------------------------------------------------------------------------
 
 // Remap: a button remap action (PC_SETTING_REMAP, pc_button_remap.h), whose confirm opens the capture;
+// The Realidad virtual rows that set an xr.ini key (applyVr): xr.ini's value mirrored into the row, so it
+// shows what is in effect (the headset's panel, a preset or the file edited by hand may have changed
+// it); a value that is none of the row's choices is left as it is. Every 30 frames.
+void syncVrRows() {
+    static unsigned sFrames = 0;
+    if (sFrames++ % 30 != 0) {
+        return;
+    }
+    for (const PcSettingDesc& d : kBuiltins) {
+        if (d.tab != PC_SETTING_TAB_VR || d.apply != applyVr || d.user == nullptr) {
+            continue;
+        }
+        char v[48];
+        if (!pc_vr_value((const char*)d.user, v, sizeof v)) {
+            continue;
+        }
+        const char* match = nullptr;
+        char* end = nullptr;
+        const double num = strtod(v, &end);
+        const bool numeric = end != v && *end == '\0';
+        for (int i = 0; i < d.choiceCount && match == nullptr; i++) {
+            const char* c = d.choices[i].value;
+            if (strcmp(c, v) == 0 || (numeric && std::abs(atof(c) - num) < 1e-4)) {
+                match = c;
+            }
+        }
+        if (match != nullptr && strcmp(pc_settings_get(d.key), match) != 0) {
+            sVrRowSync = true;
+            pc_settings_set(d.key, match);
+            sVrRowSync = false;
+        }
+    }
+}
+
 // RemapRestore: "Restaurar controles por defecto", the Controles tab's last row.
 enum class RowKind {
     EditMode,
@@ -2148,6 +2188,7 @@ void menuFrame() {
     // "Más opciones" opens this menu
     const int vrPanel = pc_vr_panel_frame();
     syncVrPreset();  // the Rendimiento row: xr.ini's preset
+    syncVrRows();    // and the other rows' xr.ini values
     // the mode's resolution (xr.ini), applied when the mode or the 3D changes, and its dynamic steps
     syncVrResolution(m.open || (vrPanel & 1) != 0);
     if ((vrPanel & 2) != 0 && !m.open) {
