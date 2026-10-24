@@ -43,6 +43,8 @@ typedef struct WqXrTable {
     bool ambient;        // mode = pantalla, ambient 1: the game's ambience also outside the screen
     float ambientRange;  // metres from the screen's edge where it has faded out
     float ambientFocus;  // the game's units that lie on the screen's plane (stereo_focus)
+    bool ambientTestLink;  // the test's actor: Link (else the nearest seagull)
+    bool ambientMask;      // hidden where the screen is (false: over it too)
     // the giant screen in the room (LOCAL space): its middle, its turn about the vertical (radians,
     // positive to the left) and its width (metres)
     float screenX, screenY, screenDistance, screenYaw, screenWidth;

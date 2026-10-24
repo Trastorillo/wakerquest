@@ -139,6 +139,8 @@ struct Settings {
     // birds, wind lines and rain drawn again outside the giant screen, fading with the distance from it
     bool ambient = false;       // off until tried live
     float ambientRange = 2.5f;  // m from the screen's edge where it has faded out
+    bool ambientTestLink = false;  // the test's actor: Link instead of the nearest seagull
+    bool ambientMask = true;       // hidden where the screen is (0: drawn over it too, for the tests)
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
@@ -263,7 +265,10 @@ const char kDefaultSettings[] =
     "# mode = pantalla: ambient 1 = the game's own seagulls, crabs, birds, wind lines and rain also\n"
     "# outside the screen, in the room, fading out ambient_range m from its edge (in progress).\n"
     "ambient = 0\n"
-    "ambient_range = 2.5\n";
+    "ambient_range = 2.5\n"
+    "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
+    "ambient_test = seagull\n"
+    "ambient_mask = 1\n";
 
 // The Rendimiento presets (perf_preset): the keys each sets when chosen, in xr.ini's form.
 const char* const kPresetNames[] = {"personal", "ahorro", "equilibrado", "maximo"};
@@ -356,6 +361,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "ambient")) s.ambient = on;
     else if (!strcmp(key, "ambient_range")) s.ambientRange = clampf(f, 0.3f, 10.0f);
+    else if (!strcmp(key, "ambient_test")) s.ambientTestLink = !strcmp(v, "link");
+    else if (!strcmp(key, "ambient_mask")) s.ambientMask = on;
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
     else if (!strcmp(key, "window_width")) s.windowWidth = clampf(f, 0.3f, kWindowMaxWidth);
     else if (!strcmp(key, "window_distance")) s.windowDistance = clampf(f, 0.3f, 10.0f);
@@ -456,6 +463,8 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "bird_range")) return num(s.birdRange);
     if (!strcmp(key, "ambient")) return flag(s.ambient);
     if (!strcmp(key, "ambient_range")) return num(s.ambientRange);
+    if (!strcmp(key, "ambient_test")) return s.ambientTestLink ? "link" : "seagull";
+    if (!strcmp(key, "ambient_mask")) return flag(s.ambientMask);
     if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
     if (!strcmp(key, "stereo_focus")) return num(s.stereoFocus);
     if (!strcmp(key, "cine_3d")) return flag(s.cine3d);
@@ -2958,6 +2967,8 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->ambient = st.ambient && !st.diorama && !st.window && s_sharedRunning;
     out->ambientRange = st.ambientRange;
     out->ambientFocus = st.stereoFocus;
+    out->ambientTestLink = st.ambientTestLink;
+    out->ambientMask = st.ambientMask;
     out->screenX = st.screenX;
     out->screenY = st.height;
     out->screenDistance = st.distance;

@@ -26,7 +26,7 @@ diff --git a/include/aurora/xr.h b/include/aurora/xr.h
  } AuroraXrFrame;
  
  /* Patch 0026, from the game thread with the frame info: the diorama's table for the eyes' mask.
-@@ -65,6 +70,17 @@ void aurora_xr_set_diorama_free(const float* spheres, int count);
+@@ -65,6 +70,18 @@ void aurora_xr_set_diorama_free(const float* spheres, int count);
   * space comes from tableFromHead and its half of the distance between the eyes. */
  void aurora_xr_set_diorama_window(float popout, float depth);
  
@@ -37,7 +37,8 @@ diff --git a/include/aurora/xr.h b/include/aurora/xr.h
 + * metres toward the player, its plane at z 0; proj the frustum (GXSetProjection's perspective
 + * parameters) and eyeShift the right eye's clip shift b; halfSize the rectangle's half width and height
 + * (metres); range the distance from the rectangle (metres) where the ambience has faded out, over
-+ * fade metres; edge the soft border at the rectangle's edges (table units). */
++ * fade metres; edge the soft border at the rectangle's edges (table units), negative: not hidden where
++ * the screen is (drawn over it too, for tests). */
 +void aurora_xr_set_ambient(bool enable, uint32_t tag, const float screenFromHead[12], const float proj[6],
 +                           float eyeShift, const float halfSize[2], float range, float fade, float edge);
 +
@@ -448,7 +449,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 +            let k = e.z / max(e.z - t.z, 1e-6);
 +            let q = e.xy + (t.xy - e.xy) * k;
 +            let out_by = max(abs(q.x) - 1.0, abs(q.y) - 1.0);
-+            inside = clamp(1.0 - out_by / u.fade.x, 0.0, 1.0);
++            inside = clamp(1.0 - out_by / u.fade.x, 0.0, 1.0) * u.fade.y;
 +        }
 +        let dx = max(abs(t.x) - 1.0, 0.0) * u.free_count.x;
 +        let dy = max(abs(t.y) - 1.0, 0.0) * u.free_count.y;
@@ -521,8 +522,8 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 +  MaskUniform u{};
 +  for (int i = 0; i < 4; i++)
 +    for (int j = 0; j < 4; j++) u.tableFromClip[j * 4 + i] = m.m[i][j];
-+  u.fade[0] = am.edge;
-+  u.fade[1] = am.edge;
++  u.fade[0] = std::fabs(am.edge);
++  u.fade[1] = am.edge < 0.f ? 0.f : 1.f;  // the screen's hole on or off
 +  u.fade[2] = gx::UseReversedZ ? 0.f : 1.f;  // the depth as cleared: nothing drawn
 +  u.fade[3] = 3.f;
 +  u.freeCount[0] = am.halfSize[0];
@@ -747,7 +748,7 @@ diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
 +    g_ambient.halfSize[1] = std::max(halfSize[1], 1e-3f);
 +    g_ambient.range = std::max(range, 1e-3f);
 +    g_ambient.fade = std::max(fade, 1e-3f);
-+    g_ambient.edge = std::max(edge, 1e-3f);
++    g_ambient.edge = edge < 0.f ? std::min(edge, -1e-3f) : std::max(edge, 1e-3f);
 +  }
 +  g_ambientOn.store(enable);
 +}

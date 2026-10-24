@@ -480,7 +480,7 @@ struct Ambient {
         J3DMatPacket* mat;
         J3DShapePacket* shape;
     };
-    Rec rec[64];
+    Rec rec[256];  // Link's models hold many
     int recN = 0;
     u32 recFrame = 0;
     const fopAc_ac_c* best = nullptr;  // the test's seagull, nearest to Link
@@ -541,7 +541,7 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     sAmbient.best = nullptr;
     memset(sAmbient.n, 0, sizeof(sAmbient.n));
     fopAcIt_Executor(collectAmbient, nullptr);
-    pc_vr_ambient_actor = sAmbient.best;
+    pc_vr_ambient_actor = table.ambientTestLink ? (const void*)player : (const void*)sAmbient.best;
 
     // the screen as a window (roomFromWindow's fields), its picture's aspect the game projection's
     const float p00 = view->mProjMtx[0][0], p11 = view->mProjMtx[1][1];
@@ -573,8 +573,9 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         for (int j = 0; j < 4; j++) sfh[i * 4 + j] = screenHead.m[i][j];
     const float half[2] = {0.5f * scr.windowWidth, 0.5f * scr.windowHeight};
     wq_xr_set_frame_view(head.tag, false, nullptr);
+    // the edge's softness; negative: not hidden where the screen is (ambient_mask 0)
     aurora_xr_set_ambient(true, head.tag, sfh, sAmbient.projTo, eyeShift, half, table.ambientRange,
-                          0.4f * table.ambientRange, 0.03f);
+                          0.4f * table.ambientRange, table.ambientMask ? 0.03f : -0.03f);
     sAmbient.on = true;
 
     const uint64_t now = nowNs();
@@ -582,10 +583,11 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.lastLogNs = now;
         pc::writef(STDERR_FILENO,
                    "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d; test "
-                   "seagull %s (%.0f m from Link), %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
+                   "%s, %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
                    "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u)\n",
                    sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], g_env_light.mRainCount,
-                   sAmbient.best != nullptr ? "yes" : "none", sAmbient.bestDist / kUnitsPerMetre, sAmbient.recN,
+                   table.ambientTestLink ? "Link" : sAmbient.best != nullptr ? "the nearest seagull" : "no seagull",
+                   sAmbient.recN,
                    scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange, sAmbient.paints,
                    sAmbient.drawn, sAmbient.stale, sAmbient.noView);
         sAmbient.paints = sAmbient.drawn = sAmbient.stale = sAmbient.noView = 0;
