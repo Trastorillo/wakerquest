@@ -672,11 +672,11 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kVrStereo), "0.012", applyVrStereo, nullptr, 9, "3D on the giant screen",
      "Depth of the 3D in screen mode."},
     {"COS_VR_AMBIENT", "Ambiente",
-     "Solo en modo pantalla: las gaviotas, cangrejos, viento y lluvia del juego salen también fuera de la "
-     "pantalla, a tu habitación (en pruebas: una gaviota). Se aplica al momento.",
+     "En los modos pantalla y ventana: las gaviotas, cangrejos y pajarillos del juego salen también fuera del "
+     "marco, a tu habitación, desvaneciéndose al alejarse (en pruebas). Se aplica al momento.",
      PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"ambient", 9, "Ambience",
-     "Screen mode only: the game's seagulls, crabs, wind and rain also come out of the screen into your room "
-     "(in testing: one seagull). Applies at once."},
+     "Screen and window modes: the game's seagulls, crabs and small birds also come out of the frame into your "
+     "room, fading away from it (in testing). Applies at once."},
     {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas) en el modo actual: "
      "cada modo (pantalla, pantalla en 3D, burbuja, ventana) guarda la suya. Más alta = más nítida y más trabajo "
      "para la GPU. Se aplica al momento.",

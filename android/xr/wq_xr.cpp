@@ -2987,7 +2987,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->cineScreen = st.cineScreen;
     out->birdsFree = st.birdsFree;
     out->birdRange = st.birdRange;
-    out->ambient = st.ambient && !st.diorama && !st.window && s_sharedRunning;
+    out->ambient = st.ambient && !st.diorama && s_sharedRunning;  // the screen and the window
     out->ambientRange = st.ambientRange;
     out->ambientFocus = st.stereoFocus;
     out->ambientTestLink = st.ambientTestLink;

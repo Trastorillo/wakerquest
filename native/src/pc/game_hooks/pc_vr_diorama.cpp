@@ -595,6 +595,50 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     sAmbient.wasOn = true;
 }
 
+// The window's ambience (ambient, mode = ventana): the game's ambient actors within ambient_range metres
+// of the window's frame (sideways: behind its plane as far as the world goes) as the diorama's free
+// spheres (Aurora patch 0029), which the eyes' mask keeps outside the window, faded out over the range
+// from the frame (patch 0034's ambience fade, aurora_xr_set_ambient), and the window's culling draws.
+int collectWindowAmbient(void* actor, void*) {
+    const fopAc_ac_c* ac = (const fopAc_ac_c*)actor;
+    const int kind = ambientKind(fopAcM_GetName((fopAc_ac_c*)ac));
+    if (kind < 0 || sBirds.n >= AURORA_XR_FREE_SPHERES) return 1;
+    sAmbient.n[kind]++;
+    const float p[3] = {ac->current.pos.x, ac->current.pos.y, ac->current.pos.z};
+    float t[3];
+    xform(s.tableFromWorld, p, t);
+    const float dx = std::max(std::fabs(t[0]) - 1.0f, 0.0f) * s.winHalfW;
+    const float dy = std::max(std::fabs(t[1]) - 1.0f, 0.0f) * s.winHalfH;
+    if (std::sqrt(dx * dx + dy * dy) > sBirds.range) return 1;
+    const float size = kind == 2 ? 80.0f : 150.0f;  // game units around its middle (a crab, a bird)
+    float* b = sBirds.t[sBirds.n++];
+    b[0] = t[0], b[1] = t[1], b[2] = t[2];
+    b[3] = size * s.k / std::min(s.winHalfW, s.winHalfH);
+    return 1;
+}
+
+void windowAmbient(const WqXrTable& table, const WqXrHead& head, const float tfh[12], float eyeShift) {
+    memset(sAmbient.n, 0, sizeof(sAmbient.n));
+    sBirds.range = table.ambientRange;
+    fopAcIt_Executor(collectWindowAmbient, nullptr);
+    // the fade's numbers (the rest is the screen's, unused by the window's frames)
+    const float half[2] = {s.winHalfW, s.winHalfH};
+    aurora_xr_set_ambient(true, head.tag, tfh, s.projTo, eyeShift, half, table.ambientRange,
+                          0.4f * table.ambientRange, 0.03f);
+    sAmbient.on = false;  // the painter draws nothing again: the window's eyes draw the world
+    pc_vr_ambient_actor = nullptr;
+    const uint64_t now = nowNs();
+    if (!sAmbient.wasOn || now - sAmbient.lastLogNs > 5000000000ull) {
+        sAmbient.lastLogNs = now;
+        pc::writef(STDERR_FILENO,
+                   "[vr] ambient (window): seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; %d kept "
+                   "outside the window, within %.1f m of its frame\n",
+                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], sBirds.n,
+                   table.ambientRange);
+    }
+    sAmbient.wasOn = true;
+}
+
 // The ambient actor's clips: never culled, so what flies out of the camera's frame is still drawn
 bool ambientClipActor() {
     return sAmbient.on && pc_vr_ambient_actor != nullptr && pc_vr_clip_actor == pc_vr_ambient_actor;
@@ -680,6 +724,12 @@ int cullSphereView(const float p[3], float radius) {
         s.cullTests++;
         const float depth = -p[2] - radius;  // game units in front of the game camera
         const float kKeepRadius = 5000.0f;   // 50 m: the sea's and the islands' models
+        // the room's ambience: its actors (the free spheres) drawn wherever they are
+        for (int i = 0; i < sBirds.n; i++) {
+            const float* b = sBirds.t[i];
+            const float dx = t[0] - b[0], dy = t[1] - b[1], dz = t[2] - b[2];
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) < b[3] + r / std::min(s.winHalfW, s.winHalfH)) return 0;
+        }
         const bool far = depth > mDoLib_clipper::mClipper.getFar() || (depth > s.winDrawUnits && radius < kKeepRadius);
         const int out = far ? 1 : cullWindow(t, r);
         if (out) s.cullHidden++;
@@ -847,20 +897,29 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
     projParams(p, s.projTo);
     const float eyeShift = -p[0][0] * head.ipd * 0.5f;
     aurora_xr_set_eye_shift(true, 0.0f, eyeShift);
+    float tfh[12];
     {
         const M4 tableHead = mul(tableRoom, stageFromHead(head));
-        float tfh[12];
+        float tfhIn[12];
         for (int i = 0; i < 3; i++)
-            for (int j = 0; j < 4; j++) tfh[i * 4 + j] = tableHead.m[i][j];
+            for (int j = 0; j < 4; j++) tfhIn[i * 4 + j] = tableHead.m[i][j];
         // what comes out is opaque up to a thin edge (window_fade) at the pop-out's front; with the
         // pop-out off (window_popout_on 0) nothing in front of the window's plane is shown
         float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH, std::max(table.windowFade, 0.005f),
                          2.0f};
-        aurora_xr_set_diorama_mask(tfh, s.projTo, eyeShift, fade);
+        memcpy(tfh, tfhIn, sizeof(tfh));
+        aurora_xr_set_diorama_mask(tfhIn, s.projTo, eyeShift, fade);
         aurora_xr_set_diorama_window(popout, table.windowDepth);
     }
-    sBirds.n = 0;  // the birds fly in the world behind the window, at its size
-    aurora_xr_set_diorama_free(nullptr, 0);
+    // the birds fly in the world behind the window, at its size; with the room's ambience (ambient) the
+    // game's ambient actors near the window are kept outside its frame too, fading away from it
+    sBirds.n = 0;
+    if (table.ambient && !table.diorama) {
+        windowAmbient(table, head, tfh, eyeShift);
+    } else {
+        ambientOff();
+    }
+    aurora_xr_set_diorama_free(sBirds.n > 0 ? &sBirds.t[0][0] : nullptr, sBirds.n);
     aurora_xr_set_frame_info(head.tag, true);
     AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
     seeThrough(mul(c, fromMtx(view->mViewMtx)), player, table.seeThroughRadius, s.k);
@@ -997,7 +1056,7 @@ bool pc_vr_view_begin(view_class* view) {
         }
         return false;
     }
-    ambientOff();  // the diorama and the window: none
+    if (!table.window && !special) ambientOff();  // the diorama: none (the window's in windowBegin)
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
     // for the left stick relative to the player's view (wq_xr.cpp)
     const bool freeControl = !pc::menuOpen() && dMenu_flag() == 0 && !dComIfGp_event_runCheck();
