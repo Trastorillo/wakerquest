@@ -60,6 +60,10 @@ struct PcVrClipOwner {
     }
 };
 
+/* The characters' draw distance (pc_npc_distance.cpp, xr.ini npc_draw_distance): 1 when fopAc_Draw
+   leaves this actor out as culled (an NPC far from Link, outside events, with hysteresis), else 0. */
+int pc_npc_distance_hidden(void* actor);
+
 class J3DModel;
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);
 int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min);

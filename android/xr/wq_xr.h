@@ -62,6 +62,7 @@ typedef struct WqXrTable {
     float talkZoom;            // cutscenes and dialogues: the bubble's span times this (0 = off)
     float seeThroughRadius;    // Link seen through what is in front of him: the game's metres (0 = off)
     float windowDrawDistance;  // the window: the game's metres drawn at scale 1 (the horizon)
+    float npcDrawDistance;     // the characters drawn within the game's metres from Link, every mode (0 = all)
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).

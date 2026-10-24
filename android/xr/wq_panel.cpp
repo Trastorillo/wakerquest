@@ -77,7 +77,7 @@ const Option kResolution[] = {{"540", "0,50"},   {"648", "0,60"},   {"756", "0,7
                               {"1404", "1,30"},  {"1512", "1,40"},  {"1620", "1,50"},  {"1728", "1,60"},
                               {"1944", "1,80"},  {"2160", "2,00"}};
 // the Rendimiento preset (wq_xr.cpp kPresetKeys): refresh, GPU, resolution, 3D, the bubble's world, the
-// window's horizon, set at once when one is chosen; personal = the values chosen by hand
+// window's horizon, the characters' distance, set at once when one is chosen; personal = the values chosen by hand
 const Option kPerfPreset[] = {{"ahorro", "Ahorro"}, {"equilibrado", "Equilibrado"}, {"maximo", "Máximo"},
                               {"personal", "Personal"}};
 const Option kLanguage[] = {{"auto", "Auto"},       {"es", "Español"}, {"en", "English"},
@@ -148,6 +148,8 @@ const Item kControls[] = {
      4.0f, 0.2f, "%.1f m"},
     {kXr, "window_draw_distance", "Distancia del mar / horizonte", "Ventana: más = más lejos y más GPU", kStepper,
      nullptr, 0, 200.0f, 3000.0f, 100.0f, "%.0f m"},
+    {kXr, "npc_draw_distance", "Distancia de personajes", "Más lejos no se dibujan; menos = más fluido", kStepper,
+     nullptr, 0, 20.0f, 200.0f, 10.0f, "%.0f m"},
 };
 const Item kGameItems[] = {
     {kGame, "COS_GAME_LANGUAGE", "Idioma del juego", "Al reiniciar el juego", kStepper, OPTS(kLanguage)},

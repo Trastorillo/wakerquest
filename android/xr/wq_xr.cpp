@@ -159,6 +159,8 @@ struct Settings {
     float windowPopout = 0.45f;    // m, how far
     float windowDrawDistance = 300.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
+    float npcDrawDistance = 50.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
+                                    // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
     // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset).
     // In the bubble, it closes in on the bird (special_zoom of its span); with special_window, through
     // the window in any mode instead, at the world's own size, the camera deep in front of it and much
@@ -186,7 +188,8 @@ const char kDefaultSettings[] =
     "screen_frame = 1\n"
     "passthrough = 1\n"
     "# perf_preset = ahorro, equilibrado, maximo or personal: the settings panel's Rendimiento, which sets\n"
-    "# refresh, gpu_boost, cpu_low, the resolutions, stereo, cine_3d, bubble_span and window_draw_distance\n"
+    "# refresh, gpu_boost, cpu_low, the resolutions, stereo, cine_3d, bubble_span, window_draw_distance and\n"
+    "# npc_draw_distance\n"
     "# when chosen (changing one of those by hand makes it personal); the values below always win at start.\n"
     "# gpu_boost 1 = the GPU at its sustained high level; cpu_low 1 = the CPU at its sustained low one.\n"
     "perf_preset = equilibrado\n"
@@ -232,6 +235,9 @@ const char kDefaultSettings[] =
     "window_popout_on = 0\n"
     "window_popout = 0.45\n"
     "window_draw_distance = 300\n"
+    "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
+    "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
+    "npc_draw_distance = 50\n"
     "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
     "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
     "# cutscenes on the giant screen instead.\n"
@@ -268,6 +274,7 @@ const PresetKey kPresetKeys[] = {
     {"cine_3d", {"0", "1", "1"}},
     {"bubble_span", {"25", "30", "40"}},
     {"window_draw_distance", {"250", "300", "800"}},
+    {"npc_draw_distance", {"35", "50", "90"}},
 };
 
 // 1..3 for a preset's name, 0 (personal) for anything else
@@ -334,6 +341,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "seethrough_on")) s.seeThroughOn = on;
     else if (!strcmp(key, "seethrough_radius")) s.seeThroughRadius = clampf(f, 0.3f, 5.0f);
     else if (!strcmp(key, "window_draw_distance")) s.windowDrawDistance = clampf(f, 100.0f, 10000.0f);
+    else if (!strcmp(key, "npc_draw_distance")) s.npcDrawDistance = f <= 0.0f ? 0.0f : clampf(f, 10.0f, 1000.0f);
     else if (!strcmp(key, "special_window")) s.specialWindow = on;
     else if (!strcmp(key, "special_zoom")) s.specialZoom = clampf(f, 0.1f, 1.0f);
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
@@ -431,6 +439,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "seethrough_on")) return flag(s.seeThroughOn);
     if (!strcmp(key, "seethrough_radius")) return num(s.seeThroughRadius);
     if (!strcmp(key, "window_draw_distance")) return num(s.windowDrawDistance);
+    if (!strcmp(key, "npc_draw_distance")) return num(s.npcDrawDistance);
     if (!strcmp(key, "special_window")) return flag(s.specialWindow);
     if (!strcmp(key, "special_zoom")) return num(s.specialZoom);
     if (!strcmp(key, "birds_free")) return flag(s.birdsFree);
@@ -2922,6 +2931,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->talkZoom = st.talkZoomOn ? st.talkZoom : 0.0f;
     out->seeThroughRadius = st.seeThroughOn ? st.seeThroughRadius : 0.0f;
     out->windowDrawDistance = st.windowDrawDistance;
+    out->npcDrawDistance = st.npcDrawDistance;
     out->windowDepthSpecial = st.windowDepthSpecial;
     out->windowPopoutSpecial = st.windowPopoutSpecial;
     out->windowFade = st.windowFade;

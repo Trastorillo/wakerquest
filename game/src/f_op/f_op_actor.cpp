@@ -142,6 +142,10 @@ s32 fopAc_Draw(void* pProc) {
                         fopAcM_CheckStatus(actor, fopAcStts_CULL_e)
                         && fopAcM_cullingCheck(actor)
                     )
+#if TARGET_PC
+                    // the characters' draw distance (pc_npc_distance.cpp): a far NPC as culled
+                    && !pc_npc_distance_hidden(actor)
+#endif
                 )
             ) && !fopAcM_CheckStatus(actor, fopAcStts_NODRAW_e)
         ) {
