@@ -473,6 +473,8 @@ bool sVrResolutionSync = false;
 int sVrResolutionSeen = 0;     // xr.ini's for the mode in effect, last frame
 int sVrResolutionApplied = 0;  // the lines applied (0: none yet, the start's COS_FB_SCALE)
 int sVrResolutionBase = 0;     // the key's own value, mirrored into the row
+bool sVrFbFromSettings = false;  // settings.ini's Resolución interna won at the start (wq_xr.cpp): until the
+                                 // headset's is applied, the dynamic resolution waits
 void applyVrResolution(const char*, const char* v, void*) {
     if (sVrResolutionSync) {
         return;
@@ -482,14 +484,25 @@ void applyVrResolution(const char*, const char* v, void*) {
     pc_vr_setting(pc_vr_resolution_key(), v);
 }
 // Every frame: the mode's resolution applied when it changes (the mode, the 3D, a preset, the row, the
-// window's size, xr.ini edited by hand), and the key's value mirrored into the row. Not at the first
-// frame: the start set it (COS_FB_SCALE).
-void syncVrResolution() {
+// window's size, xr.ini edited by hand, the dynamic resolution's steps), and the key's value mirrored
+// into the row. Not at the first frame: the start set it (COS_FB_SCALE). idle: a menu or the headset's
+// panel is open (the dynamic resolution does not count those frames).
+void syncVrResolution(bool idle) {
     int base = 0;
-    const int lines = pc_vr_resolution(&base);
-    if (lines < 0) {
+    const int modeLines = pc_vr_resolution(&base);
+    if (modeLines < 0) {
         return;
     }
+    if (sVrResolutionSeen == 0 && modeLines > 0) {
+        const float fb = (float)atof(pc_settings_get("COS_FB_SCALE"));
+        sVrFbFromSettings = fb > 0.f && std::abs((int)lroundf(fb * 480.f) - modeLines) > 1;
+        if (sVrFbFromSettings) {
+            writef(STDERR_FILENO, "[vr] resolution: settings.ini's Resolución interna (%g) over xr.ini's %d lines; "
+                                  "the dynamic resolution waits until the headset's is applied\n", (double)fb, modeLines);
+        }
+    }
+    // xr.ini dynres (pc_vr_dynres.cpp): the mode's lines, or fewer while the frame rate is low
+    const int lines = pc_vr_dynres_lines(modeLines, base, idle || sVrFbFromSettings);
     if (lines != sVrResolutionSeen) {
         const bool first = sVrResolutionSeen == 0;
         sVrResolutionSeen = lines;
@@ -498,6 +511,7 @@ void syncVrResolution() {
             snprintf(v, sizeof v, "%d", lines);
             writef(STDERR_FILENO, "[vr] resolution: %d lines (%s %d)\n", lines, pc_vr_resolution_key(), base);
             setVrScale(v);
+            sVrFbFromSettings = false;  // setVrScale cleared it
         }
         if (first || lines > 0) {
             sVrResolutionApplied = lines;
@@ -669,6 +683,14 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1080", applyVrResolution, nullptr, 10, "Resolution",
      "Scale of the game's picture in the headset (1.00 = 1080 lines) in the current mode: each mode (screen, "
      "screen in 3D, bubble, window) keeps its own. Higher = sharper and more GPU work. Applies at once."},
+    {"COS_VR_DYNRES", "Resolución dinámica",
+     "Baja la resolución del modo un escalón (una décima) si el juego se queda por debajo de 27 fps más de 3 s, "
+     "y la vuelve a subir cuando aguanta los 30 fps; nunca por debajo del 70 % (xr.ini: dynres_low_fps, "
+     "dynres_high_fps, dynres_min). Cada cambio da un tirón de un cuadro.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"dynres", 10, "Dynamic resolution",
+     "Lowers the mode's resolution one step (a tenth) when the game stays under 27 fps for over 3 s, and raises "
+     "it again when it holds 30 fps; never under 70 % (xr.ini: dynres_low_fps, dynres_high_fps, dynres_min). "
+     "Each change makes a one-frame hitch."},
     {"COS_VR_REFRESH", "Frecuencia", "Refresco de las gafas. 72 Hz calienta menos y gasta menos batería; 90 Hz muestra los 30 fps más regulares.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "72", applyVr, (void*)"refresh", 10, "Refresh rate",
      "The headset's refresh rate. 72 Hz runs cooler and saves battery; 90 Hz shows the game's 30 fps more evenly."},
@@ -2103,7 +2125,8 @@ void menuFrame() {
     // "Más opciones" opens this menu
     const int vrPanel = pc_vr_panel_frame();
     syncVrPreset();  // the Rendimiento row: xr.ini's preset
-    syncVrResolution();  // the mode's resolution (xr.ini), applied when the mode or the 3D changes
+    // the mode's resolution (xr.ini), applied when the mode or the 3D changes, and its dynamic steps
+    syncVrResolution(m.open || (vrPanel & 1) != 0);
     if ((vrPanel & 2) != 0 && !m.open) {
         setOpen(true);
     }

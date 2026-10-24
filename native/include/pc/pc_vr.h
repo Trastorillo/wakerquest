@@ -32,6 +32,12 @@ const char* pc_vr_perf_preset(void);
    elsewhere). Every frame (pc_menu.cpp syncVrResolution). */
 int pc_vr_resolution(int* base);
 const char* pc_vr_resolution_key(void);
+/* The dynamic resolution in the headset (pc_vr_dynres.cpp, xr.ini dynres; off by default): the lines to
+   draw with for the mode's `lines` (base: its xr.ini key's value; a change starts over at the top), fewer
+   while the game's frame rate stays low. idle: frames not counted (a menu or the headset's panel open,
+   settings.ini's resolution in effect). `lines` as it is when off and elsewhere. Every frame
+   (pc_menu.cpp syncVrResolution). */
+int pc_vr_dynres_lines(int lines, int base, bool idle);
 /* The VR resolution (COS_VR_RESOLUTION, in lines) set and applied at once, also when the row already
    holds it (pc_menu.cpp; a preset's, from the headset layer through pc_vr_panel_frame). */
 void pc_vr_apply_resolution(const char* lines);
@@ -61,7 +67,8 @@ struct PcVrClipOwner {
 };
 
 /* The characters' draw distance (pc_npc_distance.cpp, xr.ini npc_draw_distance): 1 when fopAc_Draw
-   leaves this actor out as culled (an NPC far from Link, outside events, with hysteresis), else 0. */
+   leaves this actor out as culled (an NPC far from Link, outside events and first-person views, with
+   hysteresis), 2 when it is left out but nearer than 30 m (its execute goes on), else 0. */
 int pc_npc_distance_hidden(void* actor);
 
 /* The room's ambience (mode = pantalla, xr.ini ambient; pc_vr_diorama.cpp): the game's own ambient

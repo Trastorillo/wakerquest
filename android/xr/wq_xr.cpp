@@ -167,6 +167,13 @@ struct Settings {
                                         // horizon; farther actors and models are not drawn
     float npcDrawDistance = 50.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
                                     // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
+    // the dynamic resolution (pc_vr_dynres.cpp, off by default): the mode's lines go down one step (a
+    // tenth of them) when the game stays under dynres_low_fps for 3 s, and up one when it holds
+    // dynres_high_fps for 10 s (longer after a step up that did not hold); never under dynres_min of them
+    bool dynres = false;
+    float dynresLowFps = 27.0f;
+    float dynresHighFps = 29.5f;
+    float dynresMin = 0.7f;
     // the special scenes (pc_vr_diorama.cpp): some cutscenes (the Helmaroc King taking Aryll on Outset).
     // In the bubble, it closes in on the bird (special_zoom of its span); with special_window, through
     // the window in any mode instead, at the world's own size, the camera deep in front of it and much
@@ -244,6 +251,14 @@ const char kDefaultSettings[] =
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
     "npc_draw_distance = 50\n"
+    "# dynres 1 = the resolution follows the frame rate (off by default): one step down (a tenth of the\n"
+    "# mode's lines) when the game stays under dynres_low_fps for 3 s, one up when it holds\n"
+    "# dynres_high_fps for 10 s; never under dynres_min of the mode's resolution (0.5-1). The values are\n"
+    "# for 30 fps (doubled with the 60 fps mode). The resolutions above stay the top.\n"
+    "dynres = 0\n"
+    "dynres_low_fps = 27\n"
+    "dynres_high_fps = 29.5\n"
+    "dynres_min = 0.7\n"
     "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
     "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
     "# cutscenes on the giant screen instead.\n"
@@ -355,6 +370,10 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "seethrough_radius")) s.seeThroughRadius = clampf(f, 0.3f, 5.0f);
     else if (!strcmp(key, "window_draw_distance")) s.windowDrawDistance = clampf(f, 100.0f, 10000.0f);
     else if (!strcmp(key, "npc_draw_distance")) s.npcDrawDistance = f <= 0.0f ? 0.0f : clampf(f, 10.0f, 1000.0f);
+    else if (!strcmp(key, "dynres")) s.dynres = on;
+    else if (!strcmp(key, "dynres_low_fps")) s.dynresLowFps = clampf(f, 10.0f, 30.0f);
+    else if (!strcmp(key, "dynres_high_fps")) s.dynresHighFps = clampf(f, 10.0f, 30.0f);
+    else if (!strcmp(key, "dynres_min")) s.dynresMin = clampf(f, 0.5f, 1.0f);
     else if (!strcmp(key, "special_window")) s.specialWindow = on;
     else if (!strcmp(key, "special_zoom")) s.specialZoom = clampf(f, 0.1f, 1.0f);
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
@@ -457,6 +476,10 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "seethrough_radius")) return num(s.seeThroughRadius);
     if (!strcmp(key, "window_draw_distance")) return num(s.windowDrawDistance);
     if (!strcmp(key, "npc_draw_distance")) return num(s.npcDrawDistance);
+    if (!strcmp(key, "dynres")) return flag(s.dynres);
+    if (!strcmp(key, "dynres_low_fps")) return num(s.dynresLowFps);
+    if (!strcmp(key, "dynres_high_fps")) return num(s.dynresHighFps);
+    if (!strcmp(key, "dynres_min")) return num(s.dynresMin);
     if (!strcmp(key, "special_window")) return flag(s.specialWindow);
     if (!strcmp(key, "special_zoom")) return num(s.specialZoom);
     if (!strcmp(key, "birds_free")) return flag(s.birdsFree);
@@ -2991,6 +3014,11 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->seeThroughRadius = st.seeThroughOn ? st.seeThroughRadius : 0.0f;
     out->windowDrawDistance = st.windowDrawDistance;
     out->npcDrawDistance = st.npcDrawDistance;
+    out->dynres = st.dynres;
+    // the high threshold kept over the low one (a dead band of 1 fps at least)
+    out->dynresLowFps = st.dynresLowFps;
+    out->dynresHighFps = std::max(st.dynresHighFps, std::min(st.dynresLowFps + 1.0f, 30.0f));
+    out->dynresMin = st.dynresMin;
     out->windowDepthSpecial = st.windowDepthSpecial;
     out->windowPopoutSpecial = st.windowPopoutSpecial;
     out->windowFade = st.windowFade;

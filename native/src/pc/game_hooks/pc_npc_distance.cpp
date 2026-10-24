@@ -7,7 +7,11 @@
 //
 // - Only actors that accept the game's culling (fopAcStts_CULL_e) and never while an event runs (a
 //   cutscene, a dialogue: the talk partner and every event actor are drawn) or for an actor the event
-//   forces to move (dEvtMove_FORCE_e).
+//   forces to move (dEvtMove_FORCE_e), nor in the game's first-person views (the telescope, the picto
+//   box, looking around, aiming: what Link looks at from afar, the photos of the Nintendo Gallery).
+// - Within kExecKeepUnits (30 m) a hidden NPC goes on running (2: drawn not, its execute kept): with a
+//   short distance (down to 10 m) those that call Link or run off from some metres away, or walk a
+//   route, keep doing so; farther, it pauses as when the camera looks away.
 // - Hysteresis: hidden past the distance, drawn again within it less max(3 m, 8%), per actor (a table by
 //   process ID), so one walking about the edge does not flicker.
 // - No fade-in: an alpha or scale fade would go through each actor's own materials or its scale (game
@@ -31,6 +35,7 @@ namespace {
 
 constexpr int kSlots = 1024;  // a power of two
 constexpr unsigned kStaleFrames = 90;
+constexpr float kExecKeepUnits = 3000.0f;  // 30 m: a hidden NPC nearer than this keeps its execute
 
 struct Slot {
     uint32_t id;
@@ -42,6 +47,7 @@ Slot sSlots[kSlots];
 float sDistUnits = 0.0f;  // 0: off
 float sNear2 = 0.0f, sFar2 = 0.0f;
 bool sEvent = false;  // last frame (the log)
+bool sFirstPerson = false;  // last frame: a first-person view (all drawn)
 unsigned sFrame = 0;
 signed char sIsNpc[fpcNm_MAX_NUM_e];  // 0 unknown, 1 no, 2 an NPC_* process
 unsigned sAsked = 0, sHidden = 0;
@@ -74,7 +80,7 @@ Slot* slotFor(uint32_t id) {
 } // namespace
 
 int pc_npc_distance_hidden(void* actor) {
-    if (sDistUnits <= 0.0f || dComIfGp_event_runCheck()) return 0;
+    if (sDistUnits <= 0.0f || sFirstPerson || dComIfGp_event_runCheck()) return 0;
     const fopAc_ac_c* player = dComIfGp_getPlayer(0);
     if (player == nullptr) return 0;
     fopAc_ac_c* ac = (fopAc_ac_c*)actor;
@@ -96,7 +102,8 @@ int pc_npc_distance_hidden(void* actor) {
     }
     sAsked++;
     if (hidden) sHidden++;
-    return hidden ? 1 : 0;
+    if (!hidden) return 0;
+    return d2 <= kExecKeepUnits * kExecKeepUnits ? 2 : 1;
 }
 
 namespace pc {
@@ -105,7 +112,7 @@ void npcDistanceFrame(unsigned int frames) {
     // the last frame's counts, logged every 5 s with the census or at a change of the distance
     if (censusOn() && (frames - sLogFrame >= 150 || sLastLogged != sDistUnits) && (sAsked > 0 || sLastLogged != sDistUnits)) {
         writef(STDERR_FILENO, "[npc-distance] %.0f m: %u of %u NPCs not drawn%s\n", sDistUnits / 100.0f, sHidden,
-               sAsked, sEvent ? " (an event runs: all drawn)" : "");
+               sAsked, sEvent ? " (an event runs: all drawn)" : sFirstPerson ? " (first person: all drawn)" : "");
         sLogFrame = frames;
         sLastLogged = sDistUnits;
     }
@@ -121,6 +128,13 @@ void npcDistanceFrame(unsigned int frames) {
     sFar2 = sDistUnits * sDistUnits;
     sNear2 = nearUnits > 0.0f ? nearUnits * nearUnits : 0.0f;
     sEvent = dComIfGp_event_runCheck();
+    // the telescope (the item or an event's scope), looking around, the picto box, aiming (as
+    // pc_vr_diorama.cpp's auto_screen): Link looks far, so everyone is drawn
+    sFirstPerson = dComIfGp_getPlayer(0) != nullptr &&
+                   (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
+                                                       daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e |
+                                                       daPyStts0_ROPE_AIM_e) != 0 ||
+                    dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
     sFrame = frames + 1;  // never 0 (a free slot)
 }
 

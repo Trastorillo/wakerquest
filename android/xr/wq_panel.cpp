@@ -149,7 +149,7 @@ const Item kControls[] = {
     {kXr, "window_draw_distance", "Distancia del mar / horizonte", "Ventana: más = más lejos y más GPU", kStepper,
      nullptr, 0, 200.0f, 3000.0f, 100.0f, "%.0f m"},
     {kXr, "npc_draw_distance", "Distancia de personajes", "Más lejos no se dibujan; menos = más fluido", kStepper,
-     nullptr, 0, 20.0f, 200.0f, 10.0f, "%.0f m"},
+     nullptr, 0, 10.0f, 200.0f, 10.0f, "%.0f m"},
 };
 const Item kGameItems[] = {
     {kGame, "COS_GAME_LANGUAGE", "Idioma del juego", "Al reiniciar el juego", kStepper, OPTS(kLanguage)},

@@ -71,6 +71,10 @@ typedef struct WqXrTable {
     float seeThroughRadius;    // Link seen through what is in front of him: the game's metres (0 = off)
     float windowDrawDistance;  // the window: the game's metres drawn at scale 1 (the horizon)
     float npcDrawDistance;     // the characters drawn within the game's metres from Link, every mode (0 = all)
+    // the dynamic resolution (xr.ini dynres, pc_vr_dynres.cpp): on; the fps under which it goes down
+    // (3 s) and that it must hold to go up (10 s), for 30 fps; the lowest fraction of the mode's lines
+    bool dynres;
+    float dynresLowFps, dynresHighFps, dynresMin;
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).

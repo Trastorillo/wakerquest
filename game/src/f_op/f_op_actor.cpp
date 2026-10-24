@@ -132,6 +132,9 @@ s32 fopAc_Draw(void* pProc) {
 
     if (!dMenu_flag()) {
         s32 moveApproval = dComIfGp_event_moveApproval(actor);
+#if TARGET_PC
+        int npcHidden = 0;  // pc_npc_distance_hidden: 2 = not drawn, its execute kept
+#endif
 
         if (
             (
@@ -144,7 +147,7 @@ s32 fopAc_Draw(void* pProc) {
                     )
 #if TARGET_PC
                     // the characters' draw distance (pc_npc_distance.cpp): a far NPC as culled
-                    && !pc_npc_distance_hidden(actor)
+                    && !(npcHidden = pc_npc_distance_hidden(actor))
 #endif
                 )
             ) && !fopAcM_CheckStatus(actor, fopAcStts_NODRAW_e)
@@ -155,6 +158,12 @@ s32 fopAc_Draw(void* pProc) {
 #endif
             ret = fpcLf_DrawMethod((leafdraw_method_class*)actor->sub_method, actor);
         } else {
+#if TARGET_PC
+            // hidden by the characters' distance alone, near enough to keep running (fopAc_Execute)
+            if (npcHidden == 2 && !fopAcM_CheckStatus(actor, fopAcStts_NODRAW_e))
+                fopAcM_OffCondition(actor, fopAcCnd_NODRAW_e);
+            else
+#endif
             fopAcM_OnCondition(actor, fopAcCnd_NODRAW_e);
         }
 
