@@ -141,6 +141,10 @@ struct Settings {
     float ambientRange = 2.5f;  // m from the screen's edge where it has faded out
     bool ambientTestLink = false;  // the test's actor: Link instead of the nearest seagull
     bool ambientMask = true;       // hidden where the screen is (0: drawn over it too, for the tests)
+    // the giant screen's ambience moved and sized by hand (ambient_move: the grips hold it instead of
+    // the screen): metres in the room, degrees about the vertical through the screen's middle, a scale
+    bool ambientMove = false;
+    float ambientX = 0.0f, ambientY = 0.0f, ambientZ = 0.0f, ambientYaw = 0.0f, ambientScale = 1.0f;
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
@@ -283,7 +287,15 @@ const char kDefaultSettings[] =
     "ambient_range = 2.5\n"
     "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
     "ambient_test = seagull\n"
-    "ambient_mask = 1\n";
+    "ambient_mask = 1\n"
+    "# the ambience moved (metres, degrees) and sized from where the screen puts it; ambient_move 1 = the grips\n"
+    "# hold it instead of the screen (both: its size; the right stick's click: back in its place).\n"
+    "ambient_x = 0\n"
+    "ambient_y = 0\n"
+    "ambient_z = 0\n"
+    "ambient_yaw = 0\n"
+    "ambient_scale = 1\n"
+    "ambient_move = 0\n";
 
 // The Rendimiento presets (perf_preset): the keys each sets when chosen, in xr.ini's form.
 const char* const kPresetNames[] = {"personal", "ahorro", "equilibrado", "maximo"};
@@ -382,6 +394,12 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "ambient_range")) s.ambientRange = clampf(f, 0.3f, 10.0f);
     else if (!strcmp(key, "ambient_test")) s.ambientTestLink = !strcmp(v, "link");
     else if (!strcmp(key, "ambient_mask")) s.ambientMask = on;
+    else if (!strcmp(key, "ambient_move")) s.ambientMove = on;
+    else if (!strcmp(key, "ambient_x")) s.ambientX = clampf(f, -10.0f, 10.0f);
+    else if (!strcmp(key, "ambient_y")) s.ambientY = clampf(f, -10.0f, 10.0f);
+    else if (!strcmp(key, "ambient_z")) s.ambientZ = clampf(f, -10.0f, 10.0f);
+    else if (!strcmp(key, "ambient_yaw")) s.ambientYaw = std::remainder(f, 360.0f);
+    else if (!strcmp(key, "ambient_scale")) s.ambientScale = clampf(f, 0.1f, 10.0f);
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
     else if (!strcmp(key, "window_width")) s.windowWidth = clampf(f, 0.3f, kWindowMaxWidth);
     else if (!strcmp(key, "window_distance")) s.windowDistance = clampf(f, 0.3f, 10.0f);
@@ -488,6 +506,12 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "ambient_range")) return num(s.ambientRange);
     if (!strcmp(key, "ambient_test")) return s.ambientTestLink ? "link" : "seagull";
     if (!strcmp(key, "ambient_mask")) return flag(s.ambientMask);
+    if (!strcmp(key, "ambient_move")) return flag(s.ambientMove);
+    if (!strcmp(key, "ambient_x")) return num(s.ambientX);
+    if (!strcmp(key, "ambient_y")) return num(s.ambientY);
+    if (!strcmp(key, "ambient_z")) return num(s.ambientZ);
+    if (!strcmp(key, "ambient_yaw")) return num(s.ambientYaw);
+    if (!strcmp(key, "ambient_scale")) return num(s.ambientScale);
     if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
     if (!strcmp(key, "stereo_focus")) return num(s.stereoFocus);
     if (!strcmp(key, "cine_3d")) return flag(s.cine3d);
@@ -2048,6 +2072,21 @@ XrVector3f onScreen(const Settings& st, float x, float y, float z) {
     return vadd(p.position, qrot(p.orientation, {x, y, z}));
 }
 
+void saveAmbient() {
+    const Settings& st = s.settings;
+    char v[32];
+    snprintf(v, sizeof v, "%.3f", st.ambientX);
+    wq_xr_set("ambient_x", v);
+    snprintf(v, sizeof v, "%.3f", st.ambientY);
+    wq_xr_set("ambient_y", v);
+    snprintf(v, sizeof v, "%.3f", st.ambientZ);
+    wq_xr_set("ambient_z", v);
+    snprintf(v, sizeof v, "%.1f", st.ambientYaw);
+    wq_xr_set("ambient_yaw", v);
+    snprintf(v, sizeof v, "%.2f", st.ambientScale);
+    wq_xr_set("ambient_scale", v);
+}
+
 void saveScreen() {
     const Settings& st = s.settings;
     char v[32];
@@ -2120,7 +2159,8 @@ void updateGrips(float gripL, float gripR, bool click) {
     // the model: the hands that hold no panel
     const int hands = (s.gripDown[0] && !s.grabbed[0] ? 1 : 0) | (s.gripDown[1] && !s.grabbed[1] ? 2 : 0);
     if (hands != s.dragHands) {
-        if (s.dragHands && !hands) st.window ? saveWindow() : st.diorama ? saveModel() : saveScreen();
+        const bool ambientHeld = !st.window && !st.diorama && st.ambient && st.ambientMove;
+        if (s.dragHands && !hands) st.window ? saveWindow() : st.diorama ? saveModel() : ambientHeld ? saveAmbient() : saveScreen();
         if (hands)
             xrlog("grip: %s", st.window ? (hands == 3 ? "both hands on the window" : "moving the window")
                               : !st.diorama ? (hands == 3 ? "both hands on the screen" : "moving the screen")
@@ -2180,6 +2220,43 @@ void updateGrips(float gripL, float gripR, bool click) {
                     pointerHaptic(1, 0.25f);
                 }
                 s.sizeShownUntil = SDL_GetTicks() + 1500;
+            }
+        }
+        publishSettings();
+        s.clickWas = click;
+        return;
+    }
+    if (!st.diorama && st.ambient && st.ambientMove) {
+        // the giant screen's ambience (ambient_move): as the screen, one hand moves it and turns it, both
+        // also size it, the right stick's click puts it back
+        if (!s.dragging) {
+            s.dragging = true;
+            s.dragHand = at;
+            s.dragHandYaw = heading;
+            s.dragX = st.ambientX;
+            s.dragHeight = st.ambientY;
+            s.dragDistance = st.ambientZ;
+            s.dragYaw = st.ambientYaw;
+            s.dragSpan = span;
+            s.dragSize = s.tickSize = st.ambientScale;
+        }
+        if (hands != 3 && click && !s.clickWas) {
+            st.ambientX = st.ambientY = st.ambientZ = st.ambientYaw = 0.0f;
+            st.ambientScale = 1.0f;
+            s.dragging = false;
+            xrlog("grip: the ambience back in its place");
+        } else {
+            st.ambientX = clampf(s.dragX + (at.x - s.dragHand.x), -10.0f, 10.0f);
+            st.ambientY = clampf(s.dragHeight + (at.y - s.dragHand.y), -10.0f, 10.0f);
+            st.ambientZ = clampf(s.dragDistance + (at.z - s.dragHand.z), -10.0f, 10.0f);
+            st.ambientYaw = s.dragYaw - wrapPi(heading - s.dragHandYaw) * 57.2957795f;
+            if (hands == 3 && s.dragSpan > 0.05f) {
+                st.ambientScale = clampf(s.dragSize * span / s.dragSpan, 0.1f, 10.0f);
+                if (std::fabs(st.ambientScale / s.tickSize - 1.0f) >= 0.1f) {
+                    s.tickSize = st.ambientScale;
+                    pointerHaptic(0, 0.25f);
+                    pointerHaptic(1, 0.25f);
+                }
             }
         }
         publishSettings();
@@ -2992,6 +3069,11 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->ambientFocus = st.stereoFocus;
     out->ambientTestLink = st.ambientTestLink;
     out->ambientMask = st.ambientMask;
+    out->ambientMove[0] = st.ambientX;
+    out->ambientMove[1] = st.ambientY;
+    out->ambientMove[2] = st.ambientZ;
+    out->ambientMove[3] = st.ambientYaw * 0.0174532925f;
+    out->ambientScale = st.ambientScale;
     out->screenX = st.screenX;
     out->screenY = st.height;
     out->screenDistance = st.distance;

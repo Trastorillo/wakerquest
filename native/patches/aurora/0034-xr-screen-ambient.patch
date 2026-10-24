@@ -450,7 +450,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
  };
  @group(0) @binding(0) var<uniform> u: U;
  @group(0) @binding(1) var color_tex: texture_2d<f32>;
-@@ -224,6 +249,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+@@ -224,6 +249,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
      let h = u.table_from_clip * ndc;
      let t = h.xyz / h.w;
      var a: f32;
@@ -465,7 +465,8 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 +            let k = e.z / max(e.z - t.z, 1e-6);
 +            let q = e.xy + (t.xy - e.xy) * k;
 +            let out_by = max(abs(q.x) - 1.0, abs(q.y) - 1.0);
-+            inside = clamp(1.0 - out_by / u.fade.x, 0.0, 1.0) * u.fade.y;
++            // behind the screen's plane only (it stands in front of it); in front of it, it shows
++            inside = clamp(1.0 - out_by / u.fade.x, 0.0, 1.0) * u.fade.y * clamp(0.5 - t.z / 0.02, 0.0, 1.0);
 +        }
 +        let dx = max(abs(t.x) - 1.0, 0.0) * u.free_count.x;
 +        let dy = max(abs(t.y) - 1.0, 0.0) * u.free_count.y;
@@ -477,7 +478,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
      if (u.fade.w > 1.5) {
          // patch 0030: the window. Behind its plane: where the line from the eye crosses it, within
          // the rectangle; in front (coming out): within the game camera's near frustum (the rectangle
-@@ -257,7 +302,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+@@ -257,7 +303,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
      for (var i = 0; i < n; i++) {
          let f = u.free[i];
          if (length(t - f.xyz) < f.w) {
@@ -493,7 +494,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
          }
      }
      return vec4f(c.rgb, select(a, 0.0, h.w <= 0.0));
-@@ -351,7 +403,28 @@ void window_scissor_begin() noexcept {
+@@ -351,7 +404,28 @@ void window_scissor_begin() noexcept {
    const float popout = std::clamp(std::min(mk.window[0], mk.window[1]), 0.f, depth);
    const float narrow = (depth - popout) / depth;
    float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
@@ -523,7 +524,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
      const float s = i < 4 ? 1.f : narrow;
      const float p[4] = {(i & 1) ? s : -s, (i & 2) ? s : -s, i < 4 ? 0.f : popout, 1.f};
      float c[4];
-@@ -447,6 +520,14 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+@@ -447,6 +521,14 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
      for (int i = 0; i < 3; i++) u.eye[i] = mk.tableFromHead[i * 4 + 0] * ex + mk.tableFromHead[i * 4 + 3];
      u.eye[3] = mk.window[1];
      u.freeCount[1] = std::min(mk.window[0], mk.window[1]);  // never past the camera's eye
@@ -538,7 +539,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
    }
    std::copy(&mk.free[0][0], &mk.free[0][0] + 16 * 4, &u.free[0][0]);
    webgpu::g_queue.WriteBuffer(g_maskUniform[eye], 0, &u, sizeof(u));
-@@ -473,9 +554,103 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+@@ -473,9 +555,103 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
  
  const webgpu::TextureWithSampler& masked_eye(int eye) noexcept { return g_masked[eye]; }
  

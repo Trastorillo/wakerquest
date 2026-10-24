@@ -556,7 +556,23 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     // puts ambient_focus game units on its plane
     scr.windowDepth = 0.5f * scr.windowHeight * p11;
     const float k = scr.windowDepth / std::max(table.ambientFocus, 1.0f);  // metres per game unit
-    const M4 c = mul(headFromStage(head), roomFromCameraView(scr, k));
+    // moved, turned and sized by hand (ambient_move) about the screen's middle; the screen's own place
+    // stays for its hole in the mask
+    M4 moved = identity();
+    {
+        const float yaw = table.ambientMove[3], sc = table.ambientScale;
+        const float c0 = std::cos(yaw) * sc, s0 = std::sin(yaw) * sc;
+        const float mid[3] = {table.screenX, table.screenY, -table.screenDistance};
+        moved.m[0][0] = c0, moved.m[0][2] = s0;
+        moved.m[1][1] = sc;
+        moved.m[2][0] = -s0, moved.m[2][2] = c0;
+        for (int i = 0; i < 3; i++) {
+            float r = mid[i];
+            for (int j = 0; j < 3; j++) r -= moved.m[i][j] * mid[j];
+            moved.m[i][3] = r + table.ambientMove[i];
+        }
+    }
+    const M4 c = mul(mul(headFromStage(head), moved), roomFromCameraView(scr, k));
     toMtx(c, sAmbient.delta);
     projParams(view->mProjMtx, sAmbient.projFrom);
     const float gameFar =

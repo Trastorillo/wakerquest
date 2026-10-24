@@ -622,6 +622,8 @@ const PcSettingChoice kVrPreset[] = {{"ahorro", "Ahorro", "Saving"}, {"equilibra
                                      {"maximo", "Máximo", "Maximum"}, {"personal", "Personal", "Custom"}};
 const PcSettingChoice kVrRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
 const PcSettingChoice kVrHud[] = {{"0.9", "90 cm"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}, {"2.0", "2 m"}};
+const PcSettingChoice kVrAmbientScale[] = {{"0.25", "x0,25"}, {"0.5", "x0,5"}, {"0.75", "x0,75"}, {"1", "x1"},
+                                           {"1.5", "x1,5"},   {"2", "x2"},     {"3", "x3"}};
 const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
 
 void applyVrStereo(const char*, const char* v, void*) {
@@ -677,6 +679,18 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"ambient", 9, "Ambience",
      "Screen and window modes: the game's seagulls, crabs and small birds also come out of the frame into your "
      "room, fading away from it (in testing). Applies at once."},
+    {"COS_VR_AMBIENT_SCALE", "Tamaño del ambiente",
+     "Modo pantalla: el tamaño de lo que sale de la pantalla, alrededor de su centro (también con los dos grips "
+     "si Mover el ambiente está activado).",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrAmbientScale), "1", applyVr, (void*)"ambient_scale", 9, "Ambience size",
+     "Screen mode: the size of what comes out of the screen, about its middle (also with both grips while Move "
+     "the ambience is on)."},
+    {"COS_VR_AMBIENT_MOVE", "Mover el ambiente con los grips",
+     "Modo pantalla: los grips agarran lo que sale de la pantalla en vez de la pantalla: muévelo y gíralo con "
+     "uno, cambia su tamaño con los dos; el clic del stick derecho lo devuelve a su sitio. Se guarda al soltar.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"ambient_move", 9, "Move the ambience with the grips",
+     "Screen mode: the grips hold what comes out of the screen instead of the screen: move and turn it with "
+     "one, size it with both; the right stick's click puts it back. Saved when you let go."},
     {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas) en el modo actual: "
      "cada modo (pantalla, pantalla en 3D, burbuja, ventana) guarda la suya. Más alta = más nítida y más trabajo "
      "para la GPU. Se aplica al momento.",
