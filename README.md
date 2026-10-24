@@ -1,3 +1,17 @@
+# WakerQuest
+
+WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
+native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,
+stereo, the room's ambience around the player. Its work lives in `android/` (the APK and the headset
+layer, `android/xr/`), Aurora patches 0023-0034 in `native/patches/aurora/`, and a few hooks under
+`native/src/pc/`; see [android/README.md](android/README.md) to build it.
+
+It keeps SwitchWaker's history and license (MIT, `LICENSE`; third-party terms in `THIRD_PARTY.md`).
+Upstream SwitchWaker is tracked as a remote and is not merged in unless chosen. Like SwitchWaker,
+this repository holds no game data: no disc image, no extracted asset, no APK; you need your own disc.
+
+The rest of this file is SwitchWaker's README.
+
 # SwitchWaker
 
 ## What it is
