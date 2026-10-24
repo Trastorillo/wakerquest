@@ -450,7 +450,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
  };
  @group(0) @binding(0) var<uniform> u: U;
  @group(0) @binding(1) var color_tex: texture_2d<f32>;
-@@ -224,6 +249,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+@@ -224,6 +249,43 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
      let h = u.table_from_clip * ndc;
      let t = h.xyz / h.w;
      var a: f32;
@@ -458,8 +458,24 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 +        // patch 0034: the room's ambience around the giant screen. Hidden where the line from the eye
 +        // through the point crosses the screen's rectangle (the screen shows it there), soft over
 +        // fade.x at its edges; fading out from free_count.z metres away from the rectangle over
-+        // free_count.w; nothing where nothing was drawn (the depth as cleared, fade.z).
++        // free_count.w. What writes no depth (the particles: the wind lines, the weather's seagulls, the
++        // rain) shows by its colour (drawn over a transparent black EFB), hidden where its line of sight
++        // crosses the screen (taken as behind it), not faded; nothing where nothing was drawn.
 +        let e = u.eye.xyz;
++        if (d == u.fade.z) {
++            // a point somewhere along this pixel's line of sight, for where it crosses the screen's plane
++            let h2 = u.table_from_clip * vec4f(ndc.xy, 0.5, 1.0);
++            let t2 = h2.xyz / h2.w;
++            var hidden = 0.0;
++            if (h2.w > 0.0 && t2.z < e.z) {
++                let k2 = e.z / max(e.z - t2.z, 1e-6);
++                let q2 = e.xy + (t2.xy - e.xy) * k2;
++                let out2 = max(abs(q2.x) - 1.0, abs(q2.y) - 1.0);
++                hidden = clamp(1.0 - out2 / u.fade.x, 0.0, 1.0) * u.fade.y;
++            }
++            let glow = clamp(max(max(c.r, c.g), c.b) * 1.5, 0.0, 1.0);
++            return vec4f(c.rgb, glow * (1.0 - hidden));
++        }
 +        var inside = 0.0;
 +        if (t.z < e.z) {
 +            let k = e.z / max(e.z - t.z, 1e-6);
@@ -478,7 +494,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
      if (u.fade.w > 1.5) {
          // patch 0030: the window. Behind its plane: where the line from the eye crosses it, within
          // the rectangle; in front (coming out): within the game camera's near frustum (the rectangle
-@@ -257,7 +303,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+@@ -257,7 +319,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
      for (var i = 0; i < n; i++) {
          let f = u.free[i];
          if (length(t - f.xyz) < f.w) {
@@ -494,7 +510,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
          }
      }
      return vec4f(c.rgb, select(a, 0.0, h.w <= 0.0));
-@@ -351,7 +404,28 @@ void window_scissor_begin() noexcept {
+@@ -351,7 +420,28 @@ void window_scissor_begin() noexcept {
    const float popout = std::clamp(std::min(mk.window[0], mk.window[1]), 0.f, depth);
    const float narrow = (depth - popout) / depth;
    float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
@@ -524,7 +540,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
      const float s = i < 4 ? 1.f : narrow;
      const float p[4] = {(i & 1) ? s : -s, (i & 2) ? s : -s, i < 4 ? 0.f : popout, 1.f};
      float c[4];
-@@ -447,6 +521,14 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+@@ -447,6 +537,14 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
      for (int i = 0; i < 3; i++) u.eye[i] = mk.tableFromHead[i * 4 + 0] * ex + mk.tableFromHead[i * 4 + 3];
      u.eye[3] = mk.window[1];
      u.freeCount[1] = std::min(mk.window[0], mk.window[1]);  // never past the camera's eye
@@ -539,7 +555,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
    }
    std::copy(&mk.free[0][0], &mk.free[0][0] + 16 * 4, &u.free[0][0]);
    webgpu::g_queue.WriteBuffer(g_maskUniform[eye], 0, &u, sizeof(u));
-@@ -473,9 +555,103 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+@@ -473,9 +571,103 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
  
  const webgpu::TextureWithSampler& masked_eye(int eye) noexcept { return g_masked[eye]; }
  
