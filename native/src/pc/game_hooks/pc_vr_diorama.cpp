@@ -1247,7 +1247,9 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // own view delta (60 fps's, or none) again. J3DMatPacket::draw's steps, for this packet's own shape
 // (its list may hold another model's shapes merged into it).
 void pc_vr_ambient_draw(void) {
-    if (!sAmbient.on || sAmbient.recN == 0 || sAmbient.recFrame != g_Counter.mCounter0) return;
+    // the painter runs after the game frame's counter has moved on (fapGm_Execute): the packets taken
+    // in this frame's actor draws are one count behind
+    if (!sAmbient.on || sAmbient.recN == 0 || (u32)(g_Counter.mCounter0 - sAmbient.recFrame) > 1) return;
     view_class* view = dComIfGd_getView();
     if (view == nullptr) return;
     GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
