@@ -454,6 +454,70 @@ int collectBird(void* actor, void*) {
     return 1;
 }
 
+// The census's window line (COS_CENSUS, pc_census.cpp; logging only): what passes the window's
+// culling, by who asked (pc_vr_clip_actor's process name, else pc_vr_clip_kind, else "untagged"), per
+// second with the culling's own line; the tests let through by kKeepRadius (beyond the window's draw
+// distance but large) and the BG's (the rooms' terrain, d_a_bg / d_a_lod_bg) apart.
+struct WinCensus {
+    static constexpr int kKinds = 12;
+    static constexpr int kSlots = fpcNm_MAX_NUM_e + kKinds + 1;  // the actors, the kinds, untagged
+    uint32_t tests[kSlots];
+    uint32_t drawn[kSlots];
+    const char* kind[kKinds];
+    int kinds = 0;
+    uint32_t keep = 0, keepDrawn = 0;
+};
+WinCensus sWin;
+
+int winCensusSlot() {
+    if (pc_vr_clip_actor != nullptr) {
+        const int name = fopAcM_GetName((void*)pc_vr_clip_actor);
+        if (name >= 0 && name < fpcNm_MAX_NUM_e) return name;
+    } else if (pc_vr_clip_kind != nullptr) {
+        for (int i = 0; i < sWin.kinds; i++)
+            if (sWin.kind[i] == pc_vr_clip_kind || strcmp(sWin.kind[i], pc_vr_clip_kind) == 0) return fpcNm_MAX_NUM_e + i;
+        if (sWin.kinds < WinCensus::kKinds) {
+            sWin.kind[sWin.kinds] = pc_vr_clip_kind;
+            return fpcNm_MAX_NUM_e + sWin.kinds++;
+        }
+    }
+    return WinCensus::kSlots - 1;
+}
+
+const char* winCensusName(int slot) {
+    if (slot < fpcNm_MAX_NUM_e) return pc::censusProcName(slot);
+    if (slot < WinCensus::kSlots - 1) return sWin.kind[slot - fpcNm_MAX_NUM_e];
+    return "untagged";
+}
+
+void winCensusLog() {
+    char line[1024];
+    size_t len = 0;
+    auto put = [&](const char* fmt, auto... a) {
+        if (len >= sizeof(line) - 1) return;
+        const int n = snprintf(line + len, sizeof(line) - len, fmt, a...);
+        if (n > 0) len = std::min(len + (size_t)n, sizeof(line) - 1);
+    };
+    uint32_t tests = 0, drawn = 0;
+    for (int i = 0; i < WinCensus::kSlots; i++) tests += sWin.tests[i], drawn += sWin.drawn[i];
+    put("[census] window: %u tests, %u drawn; kKeepRadius kept %u (%u drawn); BG %u/%u, LOD_BG %u/%u; drawn by kind",
+        tests, drawn, sWin.keep, sWin.keepDrawn, sWin.drawn[fpcNm_BG_e], sWin.tests[fpcNm_BG_e],
+        sWin.drawn[fpcNm_LODBG_e], sWin.tests[fpcNm_LODBG_e]);
+    // the top 15 by drawn (each as drawn/tests), picked by clearing what is printed
+    for (int printed = 0; printed < 15; printed++) {
+        int best = -1;
+        for (int i = 0; i < WinCensus::kSlots; i++)
+            if (sWin.drawn[i] != 0 && (best < 0 || sWin.drawn[i] > sWin.drawn[best])) best = i;
+        if (best < 0) break;
+        put("%s %sx%u/%u", printed == 0 ? "" : ",", winCensusName(best), sWin.drawn[best], sWin.tests[best]);
+        sWin.drawn[best] = 0;
+    }
+    pc::writef(STDERR_FILENO, "%s\n", line);
+    memset(sWin.tests, 0, sizeof(sWin.tests));
+    memset(sWin.drawn, 0, sizeof(sWin.drawn));
+    sWin.keep = sWin.keepDrawn = 0;
+}
+
 // A sphere (view space, game units) against the table's box (or what the window shows): 1 culled, 0
 // drawn. The margin keeps
 // what the rig is about to bring onto the table; nothing above the table is cut, nor a bird about the
@@ -474,8 +538,19 @@ int cullSphereView(const float p[3], float radius) {
         const int out = far ? 1 : cullWindow(t, r);
         if (out) s.cullHidden++;
         if (far) s.cullFarHidden++;
+        const bool census = pc::censusOn();
+        if (census) {
+            const int slot = winCensusSlot();
+            sWin.tests[slot]++;
+            if (!out) sWin.drawn[slot]++;
+            if (!far && depth > s.winDrawUnits) {
+                sWin.keep++;
+                if (!out) sWin.keepDrawn++;
+            }
+        }
         const uint64_t now = nowNs();
         if (now - s.cullLogNs > 1000000000ull) {
+            if (census && s.cullLogNs != 0) winCensusLog();
             if (s.cullLogNs != 0)
                 pc::writef(STDERR_FILENO,
                            "[vr] culling by the window: %lu tests, %lu culled in the last second (%lu by distance, "

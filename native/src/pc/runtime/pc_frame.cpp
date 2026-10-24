@@ -1730,6 +1730,7 @@ void pc_frame_end(void) {
     saveSweepFrame(frames);
     eventSweepFrame(frames);
     eventWatchFrame(frames);
+    censusFrame(frames);
     stageHopFrame(frames);
     cameraInvertFrame(frames);
     pictoBoxFrame(frames);

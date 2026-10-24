@@ -42,6 +42,24 @@ void pc_vr_menu_state(bool open, float width, float height, bool hovered);
    when it asks for the game's full options menu. 0 elsewhere. */
 int pc_vr_panel_frame(void);
 
+/* The census (pc_census.cpp, COS_CENSUS): who the clips that follow are for, for the window's line of
+   what passes its culling: the actor drawing (fopAc_Draw) or a kind of drawer that is no actor (the
+   grass, the trees, the flowers...). Set for a scope, the previous owner put back after it. */
+extern const void* pc_vr_clip_actor;
+extern const char* pc_vr_clip_kind;
+struct PcVrClipOwner {
+    const void* prevActor;
+    const char* prevKind;
+    PcVrClipOwner(const void* actor, const char* kind) : prevActor(pc_vr_clip_actor), prevKind(pc_vr_clip_kind) {
+        pc_vr_clip_actor = actor;
+        pc_vr_clip_kind = kind;
+    }
+    ~PcVrClipOwner() {
+        pc_vr_clip_actor = prevActor;
+        pc_vr_clip_kind = prevKind;
+    }
+};
+
 class J3DModel;
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);
 int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min);

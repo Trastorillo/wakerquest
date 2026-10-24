@@ -9,6 +9,9 @@ s16 dWaterMark_c::m_player_foot_now_id;
 dBgS_ObjGndChk dWaterMark_c::m_ground_check;
 
 BOOL dWaterMark_c::draw() {
+#if TARGET_PC
+    PcVrClipOwner pcClipOwner(nullptr, "water-mark");  // the census (pc_census.cpp)
+#endif
     if (mDoLib_clipper::clip(j3dSys.getViewMtx(), mPos, mScale.x * 50.0f)) {
         return TRUE;
     }

@@ -404,6 +404,9 @@ void dGrass_packet_c::update() {
             }
 
             cXyz pos(data->mPos.x, data->mPos.y + 260.0f, data->mPos.z);
+#if TARGET_PC
+            PcVrClipOwner pcClipOwner(nullptr, "grass");  // the census (pc_census.cpp)
+#endif
             if (mDoLib_clipper::clip(j3dSys.getViewMtx(), pos, 260.0f)) {
                 cLib_onBit<u8>(data->mInitFlags, 0x02);
             } else {

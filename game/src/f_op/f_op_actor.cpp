@@ -14,6 +14,9 @@
 #include "d/d_meter.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_s_play.h"
+#if TARGET_PC
+#include "pc/pc_vr.h"
+#endif
 
 #if VERSION == VERSION_DEMO
 #include "m_Do/m_Do_printf.h"
@@ -122,6 +125,10 @@ BOOL fopAc_IsActor(void* pProc) {
 s32 fopAc_Draw(void* pProc) {
     fopAc_ac_c * actor = (fopAc_ac_c *)pProc;
     BOOL ret = TRUE;
+#if TARGET_PC
+    // the census (pc_census.cpp): the clips from here on are this actor's
+    PcVrClipOwner clipOwner(actor, nullptr);
+#endif
 
     if (!dMenu_flag()) {
         s32 moveApproval = dComIfGp_event_moveApproval(actor);

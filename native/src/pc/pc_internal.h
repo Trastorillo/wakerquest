@@ -364,6 +364,11 @@ void saveLoadNameScene(int mainProc, int memCardCheckProc, int drawProc);
 void eventSweepFrame(unsigned int frames);
 // Stuck-event watch (pc_event_watch.cpp): logs an event that runs for more than 20 s.
 void eventWatchFrame(unsigned int frames);
+// The ambient census (pc_census.cpp, COS_CENSUS, logging only): actors by room and emitters every 5 s
+// and at each stage or room change; censusProcName: a process name's f_pc_name.h name ("?" unknown).
+void censusFrame(unsigned int frames);
+bool censusOn();
+const char* censusProcName(int name);
 // The same report on demand (the running event, its staff and cuts, the sub BGM and message
 // state); COS_SMOKE=item-sweep logs it for an item whose event does not end.
 void eventWatchReport(unsigned int frames);

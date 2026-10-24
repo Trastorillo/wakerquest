@@ -569,6 +569,9 @@ void dPa_simpleEcallBack::executeAfter(JPABaseEmitter* emitter) {
         dPa_simpleData_c* simpleData = mSimpleData;
         emitter->playCreateParticle();
         while (mCount != 0) {
+#if TARGET_PC
+            PcVrClipOwner pcClipOwner(nullptr, "simple-particle");  // the census (pc_census.cpp)
+#endif
             if (!mDoLib_clipper::clip(j3dSys.getViewMtx(), simpleData->mPos, 200.0f)) {
                 emitter->setGlobalTranslation(simpleData->mPos.x, simpleData->mPos.y, simpleData->mPos.z);
                 emitter->setGlobalPrmColor(simpleData->mPrmColor.r, simpleData->mPrmColor.g, simpleData->mPrmColor.b);

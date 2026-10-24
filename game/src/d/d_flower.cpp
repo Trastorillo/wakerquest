@@ -489,6 +489,9 @@ void dFlower_packet_c::update() {
             }
 
             cXyz temp(pData->field_0x04.x, pData->field_0x04.y + 260.0f, pData->field_0x04.z);
+#if TARGET_PC
+            PcVrClipOwner pcClipOwner(nullptr, "flower");  // the census (pc_census.cpp)
+#endif
             if(mDoLib_clipper::clip(j3dSys.getViewMtx(), temp, 260.0f)) {
                 cLib_onBit<u8>(pData->field_0x00, 0x4);
             }

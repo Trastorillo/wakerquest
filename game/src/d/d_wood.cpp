@@ -845,6 +845,9 @@ void dWood::Packet_c::update() {
     s32 i = 0;
     for (Unit_c *unit = mUnit; i < (s32)ARRAY_SIZE(mUnit); i++, unit++) {
         if (cLib_checkBit(unit->mFlags, Unit_c::STATE_ACTIVE)) {
+#if TARGET_PC
+            PcVrClipOwner pcClipOwner(nullptr, "wood");  // the census (pc_census.cpp)
+#endif
             BOOL clip = mDoLib_clipper::clip(
                 j3dSys.getViewMtx(),
                 cXyz(unit->mPos.x, unit->mPos.y + L_attr.kClipCenterYOffset, unit->mPos.z),
