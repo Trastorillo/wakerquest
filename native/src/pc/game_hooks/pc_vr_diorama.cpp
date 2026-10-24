@@ -483,12 +483,21 @@ struct Ambient {
     struct Rec {
         J3DMatPacket* mat;
         J3DShapePacket* shape;
+        const void* actor;  // its actor
     };
     Rec rec[256];  // Link's models hold many
     int recN = 0;
     u32 recFrame = 0;
     const fopAc_ac_c* best = nullptr;  // the nearest seagull to Link (the log's)
     const void* actors[16];             // this frame's ambient actors (drawn again, never culled)
+    int kinds[16];                      // ambientKind's, -1 for Link (the test)
+    float pos[16][3];                   // where they are (the world)
+    // anchored in the room: the world to the room (stage space) and the head's, for the painter's
+    // placing of each kind
+    bool placed = false;
+    M4 stageWorld, headStage, worldView;  // worldView: the game camera's view space to the world
+    float headY = 0.0f, tableY = 0.0f, headPos[3] = {0, 0, 0};
+    float windYaw = 0.0f, k = 0.0f;
     int nActors = 0;
     bool testLink = false;
     // anchored in the room (ambient_anchor = world): the world's heading kept from when it started and a
@@ -522,7 +531,12 @@ int collectAmbient(void* actor, void*) {
     if (kind < 0) return 1;
     sAmbient.n[kind]++;
     const float dLink = (ac->current.pos - sAmbient.link).abs();
-    if (kind != 4 && dLink < 6000.0f && sAmbient.nActors < 16) sAmbient.actors[sAmbient.nActors++] = ac;
+    if (kind != 4 && dLink < 6000.0f && sAmbient.nActors < 16) {
+        const int i = sAmbient.nActors++;
+        sAmbient.actors[i] = ac;
+        sAmbient.kinds[i] = kind;
+        sAmbient.pos[i][0] = ac->current.pos.x, sAmbient.pos[i][1] = ac->current.pos.y, sAmbient.pos[i][2] = ac->current.pos.z;
+    }
     if (kind == 0) {
         const float d = (ac->current.pos - sAmbient.link).abs();
         if (sAmbient.best == nullptr || d < sAmbient.bestDist) {
@@ -562,6 +576,9 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     sAmbient.testLink = table.ambientTestLink;
     if (sAmbient.testLink) {
         sAmbient.actors[0] = player;
+        sAmbient.kinds[0] = -1;
+        sAmbient.pos[0][0] = player->current.pos.x, sAmbient.pos[0][1] = player->current.pos.y;
+        sAmbient.pos[0][2] = player->current.pos.z;
         sAmbient.nActors = 1;
     }
     pc_vr_ambient_actor = sAmbient.nActors > 0 ? sAmbient.actors[0] : nullptr;
@@ -626,8 +643,18 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
             rw.m[row][3] = mid[row] - (rw.m[row][0] * sAmbient.pivot[0] + rw.m[row][1] * sAmbient.pivot[1] +
                                        rw.m[row][2] * sAmbient.pivot[2]);
         c = mul(mul(mul(headFromStage(head), moved), rw), rigidInverse(view->mViewMtx));
+        sAmbient.placed = true;
+        sAmbient.stageWorld = mul(moved, rw);
+        sAmbient.headStage = headFromStage(head);
+        sAmbient.worldView = rigidInverse(view->mViewMtx);
+        sAmbient.headY = head.pos[1];
+        memcpy(sAmbient.headPos, head.pos, sizeof(sAmbient.headPos));
+        sAmbient.tableY = table.screenY - 0.5f * scr.windowHeight;  // the screen's bottom edge
+        sAmbient.windYaw = sAmbient.worldYaw + table.screenYaw;
+        sAmbient.k = k;
     } else {
         sAmbient.worldValid = false;
+        sAmbient.placed = false;
         c = mul(mul(headFromStage(head), moved), roomFromCameraView(scr, k));
     }
     toMtx(c, sAmbient.delta);
@@ -1407,7 +1434,7 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
         sAmbient.recN = 0;
     }
     if (sAmbient.recN < (int)(sizeof(sAmbient.rec) / sizeof(sAmbient.rec[0]))) {
-        sAmbient.rec[sAmbient.recN++] = {(J3DMatPacket*)matPacket, (J3DShapePacket*)shapePacket};
+        sAmbient.rec[sAmbient.recN++] = {(J3DMatPacket*)matPacket, (J3DShapePacket*)shapePacket, pc_vr_clip_actor};
     }
 }
 
@@ -1415,6 +1442,41 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // ambience replays (patch 0034) and taken to the room by the ambience's view delta; then the paint's
 // own view delta (60 fps's, or none) again. J3DMatPacket::draw's steps, for this packet's own shape
 // (its list may hold another model's shapes merged into it).
+// Anchored in the room, each kind its own place: the seagulls over the player's head (at least 0.3 m
+// above it), the crabs and small birds at the screen's bottom edge (a table's height), Link as he is.
+// The view delta of one actor (index i), or of the anchored world lifted by dy metres.
+void ambientDelta(float dy, Mtx out) {
+    M4 lift = identity();
+    lift.m[1][3] = dy;
+    toMtx(mul(mul(mul(sAmbient.headStage, lift), sAmbient.stageWorld), sAmbient.worldView), out);
+}
+
+float ambientLift(int kind, const float p[3]) {
+    float r[3];
+    xform(sAmbient.stageWorld, p, r);
+    if (kind == 0 || kind == 1) return std::max(0.0f, sAmbient.headY + 0.3f - r[1]);  // seagulls: overhead
+    if (kind == 2 || kind == 3) return sAmbient.tableY - r[1];                         // on the table
+    return 0.0f;
+}
+
+// The wind lines (made around the game camera's eye) around the player: the camera's eye at the head,
+// the world's axes as anchored (so they blow with the game's wind), 1000 game units 2.5 m.
+void ambientWindDelta(Mtx out) {
+    float r[3], u[3], b[3];
+    axes(sAmbient.windYaw, r, u, b);
+    const float kw = 0.0025f;
+    M4 m = identity();
+    for (int col = 0; col < 3; col++) {
+        m.m[0][col] = r[col] * kw;
+        m.m[1][col] = u[col] * kw;
+        m.m[2][col] = b[col] * kw;
+    }
+    const float eye[3] = {sAmbient.worldView.m[0][3], sAmbient.worldView.m[1][3], sAmbient.worldView.m[2][3]};
+    for (int row = 0; row < 3; row++)
+        m.m[row][3] = sAmbient.headPos[row] - (m.m[row][0] * eye[0] + m.m[row][1] * eye[1] + m.m[row][2] * eye[2]);
+    toMtx(mul(mul(sAmbient.headStage, m), sAmbient.worldView), out);
+}
+
 void pc_vr_ambient_draw(void) {
     // the painter runs after the game frame's counter has moved on (fapGm_Execute): the packets taken
     // in this frame's actor draws are one count behind
@@ -1433,7 +1495,19 @@ void pc_vr_ambient_draw(void) {
     AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
     AuroraSetAmbient(true);
     j3dSys.reinitGX();
+    const void* deltaActor = nullptr;
     for (int i = 0; packets && i < sAmbient.recN; i++) {
+        // anchored in the room: each actor's own lift
+        const void* who = sAmbient.rec[i].actor;
+        int a = -1;
+        for (int j = 0; j < sAmbient.nActors && who != deltaActor; j++)
+            if (sAmbient.actors[j] == who) a = j;
+        if (sAmbient.placed && a >= 0) {
+            Mtx d;
+            ambientDelta(ambientLift(sAmbient.kinds[a], sAmbient.pos[a]), d);
+            AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
+            deltaActor = who;
+        }
         J3DMatPacket* mat = sAmbient.rec[i].mat;
         J3DShapePacket* shape = sAmbient.rec[i].shape;
         if (mat == nullptr || shape == nullptr || mat->getMaterial() == nullptr || shape->getShape() == nullptr) continue;
@@ -1450,7 +1524,38 @@ void pc_vr_ambient_draw(void) {
         JPADrawInfo info(view->mViewMtx, 45.0f, 1.218f);
         info.setFovy(view->mFovy);
         info.setAspect(view->mAspect);
-        pc_vr_ambient_jpa = 1;
+        // the seagulls: lifted over the head by their emitters' middle
+        if (sAmbient.placed) {
+            float mid[3] = {0, 0, 0};
+            int n = 0;
+            if (JPAEmitterManager* mng = dPa_control_c::getEmitterManager()) {
+                for (JSULink<JPABaseEmitter>* l = mng->mEmtrGroup[0].getFirst(); l != nullptr; l = l->getNext()) {
+                    JPABaseEmitter* e = l->getObject();
+                    if (e->getPcUserID() != dPa_name::ID_AK_JN_KAMOME00) continue;
+                    JGeometry::TVec3<f32> g;
+                    e->getGlobalTranslation(g);
+                    mid[0] += g.x, mid[1] += g.y, mid[2] += g.z;
+                    n++;
+                }
+            }
+            if (n > 0) {
+                for (float& v : mid) v /= (float)n;
+                Mtx d;
+                ambientDelta(ambientLift(0, mid) + 0.2f, d);
+                AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
+            }
+        } else {
+            AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
+        }
+        pc_vr_ambient_jpa = dPa_name::ID_AK_JN_KAMOME00;
+        dComIfGp_particle_draw(&info);
+        // the wind lines: around the player
+        if (sAmbient.placed) {
+            Mtx d;
+            ambientWindDelta(d);
+            AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
+        }
+        pc_vr_ambient_jpa = dPa_name::ID_AK_JN_WINDLINE00;
         dComIfGp_particle_draw(&info);
         pc_vr_ambient_jpa = 0;
         GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);

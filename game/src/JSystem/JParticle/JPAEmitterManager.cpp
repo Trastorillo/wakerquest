@@ -122,7 +122,7 @@ void JPAEmitterManager::draw(JPADrawInfo* drawInfo, u8 groupID) {
             continue;
         }
         // the room's ambience (pc_vr.h): its emitters alone, drawn again for the room
-        if (pc_vr_ambient_jpa && !pc_vr_ambient_jpa_kept(emtr->getPcUserID())) {
+        if (pc_vr_ambient_jpa != 0 && emtr->getPcUserID() != pc_vr_ambient_jpa) {
             continue;
         }
 #endif

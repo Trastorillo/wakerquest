@@ -78,8 +78,8 @@ int pc_npc_distance_hidden(void* actor);
 extern const void* pc_vr_ambient_actor;  /* the first of them; nullptr: none (the test's cheap check) */
 int pc_vr_ambient_is(const void* actor);  /* 1 for an ambient actor this frame */
 void pc_vr_ambient_record(void* matPacket, void* shapePacket);
-/* While the painter draws the ambience again, JPAEmitterManager::draw draws only its emitters (the
-   weather's seagulls and wind lines, by user id). */
+/* While the painter draws the ambience again, JPAEmitterManager::draw draws only the emitters of this
+   user id (the weather's seagulls, then its wind lines), each placed in the room its own way. */
 extern int pc_vr_ambient_jpa;
 int pc_vr_ambient_jpa_kept(unsigned short userId);
 void pc_vr_ambient_draw(void);
