@@ -12,6 +12,9 @@
 #include "JSystem/J3DGraphBase/J3DDrawBuffer.h"
 #include "JSystem/J3DGraphAnimator/J3DMaterialAnm.h"
 #include "dolphin/types.h"
+#if TARGET_PC
+#include "pc/pc_vr.h"
+#endif
 
 /* 802F4DC0-802F4EB0       .text calc__13J3DMtxCalcAnmFUs */
 void J3DMtxCalcAnm::calc(u16 jnt_no) {
@@ -253,6 +256,12 @@ void J3DJoint::entryIn() {
             matPacket->setMaterialAnmID((u32)mesh->getMaterialAnm());
 #endif
             matPacket->setShapePacket(shapePacket);
+#if TARGET_PC
+            // the room's ambience (pc_vr.h): this actor's packets drawn again for the room
+            if (pc_vr_ambient_actor != nullptr && pc_vr_clip_actor == pc_vr_ambient_actor) {
+                pc_vr_ambient_record(matPacket, shapePacket);
+            }
+#endif
             J3DDrawBuffer* drawBuffer = j3dSys.getDrawBuffer(mesh->isDrawModeOpaTexEdge());
             if ((u8)matPacket->entry(drawBuffer)) {
                 j3dSys.setMatPacket(matPacket);

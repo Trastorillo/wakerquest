@@ -533,6 +533,7 @@ struct Xr {
     uint32_t screenW = 0, screenH = 0;
     bool srgb = false, haveScreen = false;
     bool sideBySide = false, stereoFrame = false;  // the swapchain's picture: two eyes wide, both eyes in it
+    bool ambientFrame = false;  // Aurora patch 0034: two more eyes, the room's ambience (for frameTag)
     GLuint copyProg = 0;
     GLint copyULinear = -1;
     std::vector<Cached> cache;
@@ -878,6 +879,7 @@ precision highp float;
 uniform sampler2D u_tex;
 uniform int u_linear;
 uniform int u_alpha;  // the diorama: keep the alpha (straight in the buffer), premultiplied for OpenXR
+                      // 2, 3: the room's ambience after one or two screen eyes (those stay opaque)
 in vec2 v_uv;
 out vec4 o_color;
 void main() {
@@ -888,7 +890,8 @@ void main() {
     float a = t.a;
     // the HUD's third: over its transparent background, the game's 2D often leaves the alpha unwritten
     // (the dialogue box, its text): what has colour shows
-    if (u_alpha != 0 && v_uv.x > 0.6667) {
+    if (u_alpha >= 2 && v_uv.x < (u_alpha == 2 ? 0.3333 : 0.5)) a = 1.0;
+    if (u_alpha == 1 && v_uv.x > 0.6667) {
         // ... and the game paints a full-screen opaque black behind its 2D: pure black is the background
         float m = max(max(t.r, t.g), t.b);
         a = m < 0.02 ? 0.0 : max(a, smoothstep(0.02, 0.12, m));
@@ -2396,7 +2399,7 @@ bool copyNewestFrame() {
             glDisable(GL_SCISSOR_TEST);
             glUseProgram(s.copyProg);
             glUniform1i(s.copyULinear, s.srgb ? 1 : 0);
-            glUniform1i(s.copyUAlpha, f.hud ? 1 : 0);
+            glUniform1i(s.copyUAlpha, f.hud ? 1 : f.ambient ? (f.sideBySide ? 3 : 2) : 0);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, tex);
             glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -2421,6 +2424,8 @@ bool copyNewestFrame() {
         s.dioramaFrame = f.diorama;
         s.frameTag = f.tag;
         s.hudFrame = f.hud;
+        if (f.ambient != s.ambientFrame) xrlog("picture: %s", f.ambient ? "with the room's ambience" : "no ambience");
+        s.ambientFrame = f.ambient;
         s.haveScreen = true;
         if (++s.frames == 1 || s.frames % 600 == 0)
             xrlog("frame %u from Aurora (serial %u, %ux%u): %u skipped, %u without a fence", s.frames, f.serial,
@@ -2518,6 +2523,10 @@ void runFrame() {
                                                      {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     HeadSnap drawnFor;
     XrCompositionLayerQuad hud{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    // the room's ambience over the giant screen (Aurora patch 0034)
+    XrCompositionLayerProjection ambProj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    XrCompositionLayerProjectionView ambViews[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
+                                                    {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     if (screen && s.dioramaFrame && s.sideBySide && headForTag(s.frameTag, drawnFor)) {
         // left | right | HUD (Aurora patch 0026), or left | right
         const int32_t eyeW = int32_t(s.screenW / (s.hudFrame ? 3 : 2));
@@ -2656,7 +2665,8 @@ void runFrame() {
         }
     } else if (screen) {
         const Settings& st = s.settings;
-        const int32_t eyeW = int32_t(s.sideBySide ? s.screenW / 2 : s.screenW);
+        const int screenEyes = s.sideBySide ? 2 : 1;
+        const int32_t eyeW = int32_t(s.screenW / (screenEyes + (s.ambientFrame ? 2 : 0)));
         const int eyes = s.stereoFrame ? 2 : 1;
         // where the grips put it (screen_x, height, distance, screen_yaw), as wide as `width`, as tall
         // as the picture (Aurora's buffer has its aspect, patch 0032: no bars in widescreen)
@@ -2679,6 +2689,24 @@ void runFrame() {
             quad.pose = screenAt;
             quad.size = screenSize;
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
+        }
+        // the room's ambience (Aurora patch 0034): its eyes drawn for the head pose of the frame's tag
+        // with the head's frustum, over the screen (their alpha 0 where it is)
+        HeadSnap ambFor;
+        if (s.ambientFrame && headForTag(s.frameTag, ambFor)) {
+            const XrFovf fov{std::atan(ambFor.head.tanLeft), std::atan(ambFor.head.tanRight),
+                             std::atan(ambFor.head.tanUp), std::atan(ambFor.head.tanDown)};
+            for (int eye = 0; eye < 2; eye++) {
+                ambViews[eye].pose = ambFor.eyes[eye];
+                ambViews[eye].fov = fov;
+                ambViews[eye].subImage.swapchain = s.swapchain;
+                ambViews[eye].subImage.imageRect = {{(screenEyes + eye) * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            }
+            ambProj.space = s.space;
+            ambProj.viewCount = 2;
+            ambProj.views = ambViews;
+            ambProj.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&ambProj;
         }
         // the options menu on the screen: the laser pointer at it
         if (menuOpen && !wqp::isOpen()) {
@@ -2929,6 +2957,12 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->birdRange = st.birdRange;
     out->ambient = st.ambient && !st.diorama && !st.window && s_sharedRunning;
     out->ambientRange = st.ambientRange;
+    out->ambientFocus = st.stereoFocus;
+    out->screenX = st.screenX;
+    out->screenY = st.height;
+    out->screenDistance = st.distance;
+    out->screenYaw = st.screenYaw * 0.0174532925f;
+    out->screenWidth = st.width;
     out->window = st.window && s_sharedRunning;
     out->windowWidth = st.windowWidth;
     out->windowHeight = st.windowWidth * 9.0f / 16.0f;

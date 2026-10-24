@@ -1,0 +1,762 @@
+XR screen: the room's ambience around the giant screen (WakerQuest's mode pantalla, ambient)
+
+The game draws its ambient actors a second time for the room (the view delta taking the game camera's
+view space to the head's), marked with GX_AURORA_SET_AMBIENT (AuroraSetAmbient): DrawData.ambient,
+and its render pass hasAmbient. Those draws are left out of the frame's picture (and of the stereo
+right eye's). After the frame, when aurora_xr_set_ambient is on and nothing is drawn over the screen
+(ImGui): the screen's picture kept aside (the EFB, or the right eye's in stereo; the left eye's is
+stereo's copy), then for each eye the passes with ambient draws over a cleared EFB, those alone (no
+clears, palette conversions, copies, snapshots nor resolves), with the diorama's eye shift, each
+masked (the mask's fourth shape, fade[3] 3): alpha 0 where the line from the eye crosses the screen's
+rectangle, fading out away from it, 0 where nothing was drawn. The buffer is then the screen's eye(s)
+and the ambience's left and right eyes (AuroraXrFrame.ambient, tag: the head pose they were drawn
+for), for a projection layer over the screen. Off (never called), nothing changes.
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -40,6 +40,11 @@ typedef struct AuroraXrFrame {
+    * is not the world: the 2D, the menus, ImGui) over a transparent background, for a panel. The eyes
+    * carry the table's mask in their alpha (straight, not premultiplied). */
+   bool hud;
++  /* Patch 0034: the giant screen with the room's ambience: after the screen's picture (one eye, or two
++   * in stereo) the buffer holds two more eyes, left and right, the ambience drawn for the head pose
++   * `tag` with the head's frustum, its alpha (straight) 0 where the screen is and fading away from it,
++   * for a projection layer over the screen. Each of these is as wide as the screen's eye. */
++  bool ambient;
+ } AuroraXrFrame;
+ 
+ /* Patch 0026, from the game thread with the frame info: the diorama's table for the eyes' mask.
+@@ -65,6 +70,17 @@ void aurora_xr_set_diorama_free(const float* spheres, int count);
+  * space comes from tableFromHead and its half of the distance between the eyes. */
+ void aurora_xr_set_diorama_window(float popout, float depth);
+ 
++/* Patch 0034, from the game thread while it records a frame: the room's ambience around the giant
++ * screen (its draws marked with AuroraSetAmbient, the view delta taking them to the head's space).
++ * enable false: none (the frame as before). tag: the head pose they are drawn for; screenFromHead
++ * (row-major 3x4) maps the head's space to the screen's: x and y within +-1 over its rectangle, z in
++ * metres toward the player, its plane at z 0; proj the frustum (GXSetProjection's perspective
++ * parameters) and eyeShift the right eye's clip shift b; halfSize the rectangle's half width and height
++ * (metres); range the distance from the rectangle (metres) where the ambience has faded out, over
++ * fade metres; edge the soft border at the rectangle's edges (table units). */
++void aurora_xr_set_ambient(bool enable, uint32_t tag, const float screenFromHead[12], const float proj[6],
++                           float eyeShift, const float halfSize[2], float range, float fade, float edge);
++
+ /* Patch 0025, from the game thread while it records a frame: the head pose it is drawn for (a tag
+  * the XR layer gave out) and whether it is the diorama. Taken by the frame's present. */
+ void aurora_xr_set_frame_info(uint32_t tag, bool diorama);
+diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -135,6 +135,14 @@ extern "C" {
+  */
+ #define GX_AURORA_SET_CLIP_PLANE 0x0053
+ 
++/**
++ * The room's ambience (native/patches/aurora/0034): followed by a u8, 1 on and 0 off. The draws written
++ * while it is on are the game's ambience drawn a second time for the room (the view delta applied):
++ * the frame's picture leaves them out, and only the ambience's replays (one per eye, after the frame)
++ * draw them. Off at the end of each frame.
++ */
++#define GX_AURORA_SET_AMBIENT 0x0054
++
+ #define GX2_SET_POLYGON_OFFSET 0x1000
+ 
+ 
+@@ -231,6 +239,11 @@ void AuroraSetSeeThrough(const f32* params);
+  */
+ void AuroraSetClipPlane(const f32* plane);
+ 
++/**
++ * GX_AURORA_SET_AMBIENT, recorded in the command stream.
++ */
++void AuroraSetAmbient(bool on);
++
+ /**
+  * Create an offscreen framebuffer and switch rendering to it.
+  * All subsequent GX rendering will target this framebuffer until GXRestoreFrameBuffer() is called.
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -361,6 +361,15 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   const bool sideBySide = xr && webgpu::xr_present::stereo_wanted();
+   // The diorama (patch 0026) is always in stereo: ImGui goes to the HUD's panel.
+   gfx::stereo::request(sideBySide && (!imguiDrawData || xrDiorama));
++  // Patch 0034: the room's ambience around the giant screen, with nothing over the screen (ImGui)
++  gfx::stereo::request_ambient(xr && !xrDiorama && !imguiDrawData && webgpu::xr_present::ambient_wanted());
++  uint32_t xrAmbientTag = 0;
++  {
++    webgpu::xr_present::AmbientMask am;
++    if (webgpu::xr_present::ambient_mask(am)) {
++      xrAmbientTag = am.tag;
++    }
++  }
+ 
+   wgpu::BindGroup rmlBindGroup;
+   bool rmlOverlay = false;
+@@ -373,14 +382,19 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+ #endif
+ 
+   gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, surfaceViewport = viewport, xr, xrWidth,
+-                  xrHeight, xrViewport, sideBySide, xrTag, xrDiorama, imguiDrawData = std::move(imguiDrawData)](
++                  xrHeight, xrViewport, sideBySide, xrTag, xrDiorama, xrAmbientTag, imguiDrawData = std::move(imguiDrawData)](
+                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+     // XR presentation (patch 0023): one of the XR layer's buffers; the surface when that fails.
+     // patch 0026: the diorama's buffers are three wide (left, right, the HUD's panel)
+-    const uint32_t xrBufferWidth = sideBySide ? xrWidth * (xrDiorama ? 3 : 2) : xrWidth;
++    // patch 0034: the room's ambience adds two eyes after the screen's (its replays ran: the render
++    // worker encodes the frame's end before this callback)
++    const bool xrAmbient = xr && !xrDiorama && gfx::stereo::ambient_presented() &&
++                           gfx::stereo::ambient_eye(0).view && gfx::stereo::ambient_eye(1).view;
++    const uint32_t xrScreenEyes = sideBySide ? (xrDiorama ? 3 : 2) : 1;
++    const uint32_t xrBufferWidth = xrWidth * (xrScreenEyes + (xrAmbient ? 2 : 0));
+     if (xr) {
+       currentView = webgpu::xr_present::begin(xrBufferWidth, xrHeight);
+     }
+@@ -459,6 +473,37 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+         region(s_imguiTarget, 2);
+       }
+       pass.End();
++    } else if (canPresent && xrFrame && xrAmbient) {
++      // patch 0034: the screen's picture (the left eye's copy, then the right's in stereo), then the
++      // ambience's eyes stretched over theirs with their alpha
++      const bool screenStereo = sideBySide && gfx::stereo::presented() && gfx::stereo::left_eye().view;
++      const wgpu::RenderPassColorAttachment attachment{
++          .view = currentView,
++          .loadOp = wgpu::LoadOp::Clear,
++          .storeOp = wgpu::StoreOp::Store,
++          .clearValue = {0.0, 0.0, 0.0, 0.0},
++      };
++      const wgpu::RenderPassDescriptor desc{.label = "XR ambience blit", .colorAttachmentCount = 1,
++                                            .colorAttachments = &attachment};
++      const auto pass = encoder.BeginRenderPass(&desc);
++      const auto region = [&](const webgpu::TextureWithSampler& source, uint32_t index, webgpu::Viewport vp) {
++        vp.left += static_cast<float>(xrWidth) * static_cast<float>(index);
++        pass.SetBindGroup(0, webgpu::create_copy_bind_group(source), 0, nullptr);
++        set_present_viewport(pass, vp, targetWidth, targetHeight);
++        pass.Draw(3);
++      };
++      pass.SetPipeline(webgpu::g_CopyPipeline);
++      if (screenStereo) {
++        region(gfx::stereo::left_eye(), 0, viewport);
++        region(gfx::stereo::screen_eye(1), 1, viewport);
++      } else {
++        region(gfx::stereo::screen_eye(0), 0, viewport);
++      }
++      const webgpu::Viewport full{0.f, 0.f, static_cast<float>(xrWidth), static_cast<float>(xrHeight), 0.f, 1.f};
++      pass.SetPipeline(webgpu::g_CopyPremultipliedAlphaPipeline);
++      region(gfx::stereo::ambient_eye(0), xrScreenEyes, full);
++      region(gfx::stereo::ambient_eye(1), xrScreenEyes + 1, full);
++      pass.End();
+     } else if (canPresent) {
+       wgpu::BindGroup presentBindGroup;
+       if (rmlBindGroup && !rmlOverlay) {
+@@ -539,7 +584,8 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+     webgpu::gpu_prof::after_submit();
+     if (xrFrame) {
+       // XR presentation (patch 0023): the XR layer shows it; nothing to present here.
+-      webgpu::xr_present::end(sideBySide, xrStereo || xrDioramaFull, xrDiorama, xrTag);
++      webgpu::xr_present::end(sideBySide, xrStereo || xrDioramaFull || (xrAmbient && sideBySide && gfx::stereo::presented()),
++                              xrDiorama, xrAmbient ? xrAmbientTag : xrTag, xrAmbient);
+       gfx::after_present();
+     } else if (canPresent && g_surface) {
+       ZoneScopedN("Present");
+diff --git a/lib/dolphin/gx/GXAurora.cpp b/lib/dolphin/gx/GXAurora.cpp
+--- a/lib/dolphin/gx/GXAurora.cpp
++++ b/lib/dolphin/gx/GXAurora.cpp
+@@ -136,6 +136,11 @@ void AuroraSetClipPlane(const f32* plane) {
+   }
+ }
+ 
++void AuroraSetAmbient(bool on) {
++  GX_WRITE_AURORA(GX_AURORA_SET_AMBIENT);
++  GX_WRITE_U8(on ? 1 : 0);
++}
++
+ void GXCreateFrameBuffer(u32 width, u32 height) {
+   GX_WRITE_AURORA(GX_AURORA_BEGIN_OFFSCREEN);
+   GX_WRITE_U32(width);
+diff --git a/lib/gfx/clear.cpp b/lib/gfx/clear.cpp
+--- a/lib/gfx/clear.cpp
++++ b/lib/gfx/clear.cpp
+@@ -140,6 +140,10 @@ wgpu::RenderPipeline create_pipeline(const PipelineConfig& config, const RenderT
+ }
+ 
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass, const wgpu::Extent3D& targetSize) {
++  // the room's ambience's replays (patch 0034) draw its own draws alone, over a cleared EFB
++  if (stereo::ambient_replay()) {
++    return;
++  }
+   if (!bind_pipeline(data.pipeline, pass)) {
+     return;
+   }
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -258,8 +258,10 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+     return;
+   }
+ 
+-  for (const auto& conv : passInfo.paletteConvs) {
+-    tex_palette_conv::run(cmd, conv);
++  if (!stereo::ambient_replay()) {
++    for (const auto& conv : passInfo.paletteConvs) {
++      tex_palette_conv::run(cmd, conv);
++    }
+   }
+   if (passInfo.discardable) {
+     // This pass has no effect and can be safely discarded (e.g. an empty EFB segment between two back-to-back pass
+@@ -269,6 +271,7 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+ 
+   // The diorama's HUD replay (patch 0026) draws over a transparent EFB: its clears are transparent.
+   const bool hud = stereo::hud_replay();
++  const bool ambience = stereo::ambient_replay();  // patch 0034
+   std::array<wgpu::RenderPassColorAttachment, MaxColorAttachments> attachments{};
+   for (uint32_t i = 0; i < passInfo.colorAttachmentCount; ++i) {
+     auto source = passInfo.colorAttachments[i];
+@@ -278,7 +281,8 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+     attachments[i] = {
+         .view = source.view,
+         .resolveTarget = source.resolveView,
+-        .loadOp = source.loadOp != wgpu::LoadOp::Undefined ? source.loadOp
++        .loadOp = ambience                              ? wgpu::LoadOp::Load
++                  : source.loadOp != wgpu::LoadOp::Undefined ? source.loadOp
+                                                            : (source.clear ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load),
+         .storeOp = source.storeOp,
+         .clearValue =
+@@ -295,7 +299,8 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+   if (passInfo.depthStencilView) {
+     depthStencilAttachment = {
+         .view = passInfo.depthStencilView,
+-        .depthLoadOp = passInfo.hasDepth ? (passInfo.depthLoadOp != wgpu::LoadOp::Undefined
++        .depthLoadOp = passInfo.hasDepth ? (ambience ? wgpu::LoadOp::Load
++                                            : passInfo.depthLoadOp != wgpu::LoadOp::Undefined
+                                                 ? passInfo.depthLoadOp
+                                                 : (passInfo.clearDepth ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load))
+                                          : wgpu::LoadOp::Undefined,
+@@ -324,6 +329,9 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+   auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
+   render_pass(pass, frame, passInfo);
+   pass.End();
++  if (ambience) {
++    return;  // patch 0034: no copies, snapshots nor resolves of the ambience's pictures
++  }
+ 
+   // The depth snapshot is for the CPU (depth_peek): the left eye's is the frame's.
+   if (passInfo.captureDepthSnapshot && !stereo::replaying()) {
+@@ -584,6 +592,35 @@ void encode_hud(wgpu::CommandEncoder& cmd, FramePacket& frame) {
+   }
+   set_hud_replay(false);
+ }
++
++// Patch 0034: the room's ambience. The screen's picture (the EFB: the frame's, or its right eye's in
++// stereo, the left one already kept by copy_left_eye) kept aside; then for each eye the passes that
++// hold the ambience's draws, over a cleared EFB, drawing those alone (no clears, copies nor tasks),
++// each masked into its own picture.
++bool encode_ambient(wgpu::CommandEncoder& cmd, FramePacket& frame, bool stereoFrame) {
++  ZoneScoped;
++  bool any = false;
++  for (const auto& op : frame.ops) {
++    any = any || (op.type == FrameOpType::RenderPass && op.renderPass != nullptr && op.renderPass->hasAmbient);
++  }
++  if (!any) {
++    return false;
++  }
++  const webgpu::gpu_prof::Zone zone{cmd, "Ambience"};
++  copy_screen_eye(cmd, stereoFrame ? 1 : 0);
++  for (int eye = 0; eye < 2; eye++) {
++    clear_efb(cmd);
++    begin_ambient_replay(eye);
++    for (const auto& op : frame.ops) {
++      if (op.type == FrameOpType::RenderPass && op.renderPass != nullptr && op.renderPass->hasAmbient) {
++        render(cmd, frame, *op.renderPass, op.index);
++      }
++    }
++    end_ambient_replay();
++    encode_ambient_mask(cmd, eye);
++  }
++  return true;
++}
+ } // namespace stereo
+ 
+ void bind_pipeline(const wgpu::RenderPipeline& pipeline, const wgpu::RenderPassEncoder& pass) {
+diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
+--- a/lib/gfx/frame.cpp
++++ b/lib/gfx/frame.cpp
+@@ -704,7 +704,8 @@ void end_frame(EndFrameCallback callback) {
+   const size_t stagingSlot = frame.stagingBuffer;
+   // Patch 0024: whether the present wants this frame in stereo (nothing over it must be alike in both eyes).
+   const bool stereoRequested = stereo::take_request();
+-  render_worker::enqueue_end_frame(frameId, [frameSlot, stagingSlot, stereoRequested,
++  const bool ambientRequested = stereo::take_ambient_request();  // patch 0034
++  render_worker::enqueue_end_frame(frameId, [frameSlot, stagingSlot, stereoRequested, ambientRequested,
+                                              callback = std::move(callback)]() mutable {
+     auto& packet = g_framePackets[frameSlot];
+     g_stagingBuffers[stagingSlot].Unmap();
+@@ -727,6 +728,12 @@ void end_frame(EndFrameCallback callback) {
+       }
+     }
+     stereo::set_presented(stereoFrame);
++    // Patch 0034: the room's ambience around the giant screen, after the screen's eyes
++    bool ambientFrame = false;
++    if (ambientRequested && !stereo::frame_diorama() && (!stereoFrame || stereo::left_eye().view)) {
++      ambientFrame = stereo::encode_ambient(encoder, packet, stereoFrame);
++    }
++    stereo::set_ambient_presented(ambientFrame);
+     packet = {};
+     g_resources.stats.drawCallCount = stats.drawCallCount;
+     g_resources.stats.mergedDrawCallCount = stats.mergedDrawCallCount;
+diff --git a/lib/gfx/frame_packet.hpp b/lib/gfx/frame_packet.hpp
+--- a/lib/gfx/frame_packet.hpp
++++ b/lib/gfx/frame_packet.hpp
+@@ -108,6 +108,7 @@ struct RenderPass {
+   bool hasDepth = true;
+   bool hasStencil = false;
+   bool hasDraws = false;
++  bool hasAmbient = false; // patch 0034: the room's ambience is drawn in this pass
+   bool discardable = false;
+   bool captureDepthSnapshot = false;
+   float depthSnapshotScale = 1.f; // native/patches/aurora/0009: the EFB part the depth was drawn in
+diff --git a/lib/gfx/recording.cpp b/lib/gfx/recording.cpp
+--- a/lib/gfx/recording.cpp
++++ b/lib/gfx/recording.cpp
+@@ -1163,6 +1163,9 @@ bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSi
+ 
+ template <>
+ void push_draw_command(gx::DrawData data) {
++  if (data.ambient && g_recorder.currentRenderPass != UINT32_MAX) {
++    current_render_passes()[g_recorder.currentRenderPass].hasAmbient = true; // patch 0034
++  }
+   push_draw_command(make_draw_command<gx::render>(data));
+ }
+ 
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -26,6 +26,14 @@ webgpu::TextureWithSampler g_left;
+ // the diorama (patch 0026)
+ bool g_frameDiorama = false;
+ bool g_hudReplay = false;
++// the room's ambience (patch 0034)
++bool g_ambientReplay = false;
++bool g_ambientPresented = false;
++float g_ambB = 0.f;  // the replay's eye shift b (the diorama's: half the distance between the eyes)
++webgpu::TextureWithSampler g_screen[2];
++webgpu::TextureWithSampler g_ambEye[2];
++wgpu::Buffer g_ambUniform[2];
++std::atomic_bool g_ambientRequest{false};
+ webgpu::TextureWithSampler g_masked[2];
+ wgpu::RenderPipeline g_maskPipeline;
+ wgpu::BindGroupLayout g_maskLayout;
+@@ -44,8 +52,9 @@ int16_t snorm16(float v) { return static_cast<int16_t>(std::lround(std::clamp(v,
+ // that both a screen's focus term (several clip units) and the diorama's eye offset (a few hundredths)
+ // keep their precision (patch 0025)
+ uint32_t make_word(int eye) {
+-  const float a = static_cast<float>(eye) * g_a;
+-  const float b = static_cast<float>(eye) * g_b;
++  // the ambience's replays (patch 0034): the head moved by half the distance between the eyes
++  const float a = g_ambientReplay ? 0.f : static_cast<float>(eye) * g_a;
++  const float b = static_cast<float>(eye) * (g_ambientReplay ? g_ambB : g_b);
+   const float y = std::copysign(std::sqrt(std::min(std::fabs(b), 64.f) / 64.f), b);
+   const uint32_t word = static_cast<uint16_t>(snorm16(a)) | (static_cast<uint32_t>(static_cast<uint16_t>(snorm16(y))) << 16);
+   return word != 0 ? word : 1u;  // a non-zero word for "shift by nothing"
+@@ -60,6 +69,7 @@ void begin_frame() noexcept {
+   g_replaying = false;
+   g_frameDiorama = g_frameActive && webgpu::xr_present::diorama_wanted();
+   g_hudReplay = false;
++  g_ambientReplay = false;
+ }
+ 
+ bool frame_diorama() noexcept { return g_frameDiorama; }
+@@ -69,7 +79,11 @@ void set_hud_replay(bool on) noexcept {
+   g_eye = on ? 0 : g_eye;
+ }
+ 
+-bool skip_draw(bool worldView) noexcept {
++bool skip_draw(bool worldView, bool ambient) noexcept {
++  // patch 0034: the ambience's draws in its replays alone, and nothing else there
++  if (ambient || g_ambientReplay) {
++    return ambient != g_ambientReplay;
++  }
+   if (!g_frameDiorama) {
+     return false;
+   }
+@@ -77,7 +91,16 @@ bool skip_draw(bool worldView) noexcept {
+ }
+ 
+ bool frame_active() noexcept { return g_frameActive; }
+-bool replaying() noexcept { return g_replaying || g_hudReplay; }
++bool replaying() noexcept { return g_replaying || g_hudReplay || g_ambientReplay; }
++
++void request_ambient(bool on) noexcept { g_ambientRequest.store(on, std::memory_order_relaxed); }
++bool take_ambient_request() noexcept { return g_ambientRequest.load(std::memory_order_relaxed); }
++bool ambient_replay() noexcept { return g_ambientReplay; }
++void set_ambient_presented(bool on) noexcept { g_ambientPresented = on; }
++bool ambient_presented() noexcept { return g_ambientPresented; }
++const webgpu::TextureWithSampler& screen_eye(int eye) noexcept { return g_screen[eye]; }
++const webgpu::TextureWithSampler& ambient_eye(int eye) noexcept { return g_ambEye[eye]; }
++
+ 
+ void begin_pass(const detail::RenderPass& pass) noexcept {
+   const auto& color = pass.colorAttachments[SceneColorAttachmentIndex];
+@@ -224,6 +247,26 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+     let h = u.table_from_clip * ndc;
+     let t = h.xyz / h.w;
+     var a: f32;
++    if (u.fade.w > 2.5) {
++        // patch 0034: the room's ambience around the giant screen. Hidden where the line from the eye
++        // through the point crosses the screen's rectangle (the screen shows it there), soft over
++        // fade.x at its edges; fading out from free_count.z metres away from the rectangle over
++        // free_count.w; nothing where nothing was drawn (the depth as cleared, fade.z).
++        let e = u.eye.xyz;
++        var inside = 0.0;
++        if (t.z < e.z) {
++            let k = e.z / max(e.z - t.z, 1e-6);
++            let q = e.xy + (t.xy - e.xy) * k;
++            let out_by = max(abs(q.x) - 1.0, abs(q.y) - 1.0);
++            inside = clamp(1.0 - out_by / u.fade.x, 0.0, 1.0);
++        }
++        let dx = max(abs(t.x) - 1.0, 0.0) * u.free_count.x;
++        let dy = max(abs(t.y) - 1.0, 0.0) * u.free_count.y;
++        let dist = length(vec3f(dx, dy, t.z));
++        let far_a = clamp((u.free_count.z - dist) / u.free_count.w, 0.0, 1.0);
++        a = select((1.0 - inside) * far_a, 0.0, d == u.fade.z);
++        return vec4f(c.rgb, select(a, 0.0, h.w <= 0.0));
++    }
+     if (u.fade.w > 1.5) {
+         // patch 0030: the window. Behind its plane: where the line from the eye crosses it, within
+         // the rectangle; in front (coming out): within the game camera's near frustum (the rectangle
+@@ -473,9 +516,103 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+ 
+ const webgpu::TextureWithSampler& masked_eye(int eye) noexcept { return g_masked[eye]; }
+ 
++// Patch 0034: the screen's picture kept aside before the ambience's replays clear the EFB
++void copy_screen_eye(wgpu::CommandEncoder& cmd, int eye) {
++  const auto& source = webgpu::present_source();
++  auto& target = g_screen[eye];
++  if (!target.texture || target.size.width != source.size.width || target.size.height != source.size.height ||
++      target.format != source.format) {
++    target = webgpu::create_render_texture(source.size.width, source.size.height, false);
++  }
++  const wgpu::TexelCopyTextureInfo src{.texture = source.texture};
++  const wgpu::TexelCopyTextureInfo dst{.texture = target.texture};
++  const wgpu::Extent3D size{source.size.width, source.size.height, 1};
++  cmd.CopyTextureToTexture(&src, &dst, &size);
++}
++
++void begin_ambient_replay(int eye) noexcept {
++  webgpu::xr_present::AmbientMask mk;
++  webgpu::xr_present::ambient_mask(mk);
++  g_ambB = mk.eyeShift;
++  g_ambientReplay = true;
++  g_eye = eye == 0 ? -1 : 1;
++}
++
++void end_ambient_replay() noexcept {
++  g_ambientReplay = false;
++  g_eye = g_frameActive ? -1 : 0;
++}
++
++// The ambience's eye with its mask in the alpha: the screen's space through the mask's table matrix
++void encode_ambient_mask(wgpu::CommandEncoder& cmd, int eye) {
++  webgpu::xr_present::AmbientMask am;
++  if (!webgpu::xr_present::ambient_mask(am)) {
++    return;
++  }
++  if (!g_maskPipeline) {
++    create_mask_pipeline();
++  }
++  if (!g_ambUniform[eye]) {
++    const wgpu::BufferDescriptor bufferDesc{
++        .label = "XR ambience mask uniform",
++        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
++        .size = sizeof(MaskUniform),
++    };
++    g_ambUniform[eye] = webgpu::g_device.CreateBuffer(&bufferDesc);
++  }
++  const auto& source = webgpu::present_source();
++  auto& target = g_ambEye[eye];
++  if (!target.texture || target.size.width != source.size.width || target.size.height != source.size.height) {
++    target = webgpu::create_render_texture(source.size.width, source.size.height, false);
++  }
++  webgpu::xr_present::DioramaMask mk{};
++  std::copy(am.screenFromHead, am.screenFromHead + 12, mk.tableFromHead);
++  std::copy(am.proj, am.proj + 6, mk.proj);
++  mk.eyeShift = am.eyeShift;
++  const M4 m = table_from_clip(mk, eye);
++  MaskUniform u{};
++  for (int i = 0; i < 4; i++)
++    for (int j = 0; j < 4; j++) u.tableFromClip[j * 4 + i] = m.m[i][j];
++  u.fade[0] = am.edge;
++  u.fade[1] = am.edge;
++  u.fade[2] = gx::UseReversedZ ? 0.f : 1.f;  // the depth as cleared: nothing drawn
++  u.fade[3] = 3.f;
++  u.freeCount[0] = am.halfSize[0];
++  u.freeCount[1] = am.halfSize[1];
++  u.freeCount[2] = am.range;
++  u.freeCount[3] = am.fade;
++  // the eye in the screen's space: the head moved by half the distance between the eyes along its x
++  const float half = am.proj[0] != 0.f ? -am.eyeShift / am.proj[0] : 0.f;
++  const float ex = eye == 0 ? -half : half;
++  for (int i = 0; i < 3; i++) u.eye[i] = am.screenFromHead[i * 4 + 0] * ex + am.screenFromHead[i * 4 + 3];
++  webgpu::g_queue.WriteBuffer(g_ambUniform[eye], 0, &u, sizeof(u));
++  const std::array bindEntries{
++      wgpu::BindGroupEntry{.binding = 0, .buffer = g_ambUniform[eye], .size = sizeof(MaskUniform)},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = source.view},
++      wgpu::BindGroupEntry{.binding = 2, .textureView = webgpu::g_depthBuffer.view},
++  };
++  const wgpu::BindGroupDescriptor bindDesc{.layout = g_maskLayout, .entryCount = bindEntries.size(), .entries = bindEntries.data()};
++  const auto bindGroup = webgpu::g_device.CreateBindGroup(&bindDesc);
++  const wgpu::RenderPassColorAttachment color{
++      .view = target.view,
++      .loadOp = wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  };
++  const wgpu::RenderPassDescriptor desc{.label = "XR ambience mask", .colorAttachmentCount = 1, .colorAttachments = &color};
++  auto pass = cmd.BeginRenderPass(&desc);
++  pass.SetPipeline(g_maskPipeline);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
++
+ void shutdown() noexcept {
+   g_left = {};
+   g_masked[0] = g_masked[1] = {};
++  g_screen[0] = g_screen[1] = {};
++  g_ambEye[0] = g_ambEye[1] = {};
++  g_ambUniform[0] = g_ambUniform[1] = {};
+   g_maskPipeline = {};
+   g_maskLayout = {};
+   g_maskUniform[0] = g_maskUniform[1] = {};
+diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
+--- a/lib/gfx/stereo.hpp
++++ b/lib/gfx/stereo.hpp
+@@ -70,7 +70,7 @@ void shutdown() noexcept;
+ // while its depth is in the EFB: alpha 0 outside the table's box, fading at its edges.
+ bool frame_diorama() noexcept;
+ bool hud_replay() noexcept;
+-bool skip_draw(bool worldView) noexcept;
++bool skip_draw(bool worldView, bool ambient) noexcept;
+ void set_hud_replay(bool on) noexcept;
+ // The EFB's colour (transparent) and depth cleared, before the HUD replay.
+ void clear_efb(wgpu::CommandEncoder& cmd);
+@@ -80,4 +80,24 @@ const webgpu::TextureWithSampler& masked_eye(int eye) noexcept;
+ // encoding.cpp: the HUD replay
+ void encode_hud(wgpu::CommandEncoder& cmd, detail::FramePacket& frame);
+ 
++// The room's ambience around the giant screen (patch 0034). Its draws (DrawData.ambient) are left out
++// of the frame's picture; after it (and its right eye in stereo) the screen's picture is kept aside
++// (screen_eye) and two replays, left and right, draw them alone over a cleared EFB, each masked
++// (ambient_eye): alpha 0 where the screen is as that eye sees it, fading away from it.
++void request_ambient(bool on) noexcept;
++bool take_ambient_request() noexcept;
++bool ambient_replay() noexcept;
++// encoding.cpp: the screen's eye kept, then both replays; false when there was nothing to do
++bool encode_ambient(wgpu::CommandEncoder& cmd, detail::FramePacket& frame, bool stereoFrame);
++void set_ambient_presented(bool on) noexcept;
++bool ambient_presented() noexcept;
++// the screen's picture of the last ambient frame (its right eye in the EFB copy right_eye in stereo)
++const webgpu::TextureWithSampler& screen_eye(int eye) noexcept;
++const webgpu::TextureWithSampler& ambient_eye(int eye) noexcept;
++// stereo.cpp, for encode_ambient
++void copy_screen_eye(wgpu::CommandEncoder& cmd, int eye);
++void begin_ambient_replay(int eye) noexcept;
++void end_ambient_replay() noexcept;
++void encode_ambient_mask(wgpu::CommandEncoder& cmd, int eye);
++
+ } // namespace aurora::gfx::stereo
+diff --git a/lib/gx/command_processor.cpp b/lib/gx/command_processor.cpp
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -732,6 +732,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+       .instanceCount = instanceCount,
+       .dstAlpha = state.dstAlpha,
+       .worldView = view_delta_applies_to_draw(), // patch 0026
++      .ambient = g_gxState.ambient,              // patch 0034
+   });
+   if (gfx::census::recording() != nullptr)
+     UNLIKELY { census_record(prim, vtxCount, cache.config, cache.shaderInfo); }
+@@ -1169,6 +1170,13 @@ void handle_aurora(ByteReader& reader) noexcept {
+       g_gxState.dirty |= DirtyUniform;
+     }
+     st.active = active;
++  } else if (subCmd == GX_AURORA_SET_AMBIENT) {
++    // native/patches/aurora/0034: marks the draws (DrawData.ambient); a new uniform, so no merge across
++    const bool on = reader.read<u8>() != 0;
++    if (on != g_gxState.ambient) {
++      g_gxState.dirty |= DirtyUniform;
++    }
++    g_gxState.ambient = on;
+   } else if (subCmd == GX_AURORA_SET_CLIP_PLANE) {
+     // native/patches/aurora/0031: as the see-through
+     auto& st = g_gxState.seeThrough;
+@@ -1265,6 +1273,7 @@ void clear_draw_cache() noexcept {
+   g_gxState.viewDelta.active = false; // native/patches/aurora/0019: never past a frame
+   g_gxState.seeThrough.active = false; // native/patches/aurora/0031: nor the see-through
+   g_gxState.seeThrough.clipActive = false; // and the clip plane
++  g_gxState.ambient = false; // native/patches/aurora/0034: nor the ambience's mark
+   sDrawCache.bindGeneration = 0;
+   sDrawCache.uniformRange = {};
+   sDrawCache.fogRange = {};
+diff --git a/lib/gx/gx.hpp b/lib/gx/gx.hpp
+--- a/lib/gx/gx.hpp
++++ b/lib/gx/gx.hpp
+@@ -348,6 +348,7 @@ struct GXState {
+   // Decoded state
+   ViewDelta viewDelta; // native/patches/aurora/0019
+   SeeThrough seeThrough; // native/patches/aurora/0031
++  bool ambient = false;  // native/patches/aurora/0034: the room's ambience
+   std::array<PnMtx, MaxPnMtx> pnMtx;
+   u32 currentPnMtx;
+   Mat4x4<float> proj;
+diff --git a/lib/gx/pipeline.cpp b/lib/gx/pipeline.cpp
+--- a/lib/gx/pipeline.cpp
++++ b/lib/gx/pipeline.cpp
+@@ -61,7 +61,7 @@ gfx::CompiledPipeline create_pipeline(const PipelineConfig& config, const gfx::R
+ 
+ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+   // The diorama (patch 0026): the eyes draw the world alone, the HUD replay everything else.
+-  if (gfx::stereo::skip_draw(data.worldView)) {
++  if (gfx::stereo::skip_draw(data.worldView, data.ambient)) {
+     return;
+   }
+   gfx::CompiledPipeline pipeline;
+diff --git a/lib/gx/pipeline.hpp b/lib/gx/pipeline.hpp
+--- a/lib/gx/pipeline.hpp
++++ b/lib/gx/pipeline.hpp
+@@ -17,6 +17,8 @@ struct DrawData {
+   uint32_t dstAlpha;
+   // patch 0026: the view delta (patch 0019) applied to this draw (the diorama's world)
+   bool worldView = false;
++  // patch 0034: the room's ambience (GX_AURORA_SET_AMBIENT): drawn by its replays alone
++  bool ambient = false;
+ };
+ 
+ constexpr uint32_t GXPipelineConfigVersion = 13;
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -28,6 +28,8 @@ std::atomic_bool g_frameDiorama{false};
+ std::mutex g_maskMutex;                      // patch 0026: aurora_xr_set_diorama_mask
+ DioramaMask g_mask{};
+ bool g_maskValid = false;
++AmbientMask g_ambient{};                     // patch 0034: aurora_xr_set_ambient (under g_maskMutex)
++std::atomic_bool g_ambientOn{false};
+ 
+ #ifdef __ANDROID__
+ Module Log("aurora::xr");
+@@ -55,6 +57,7 @@ bool g_latestSideBySide = false, g_latestStereo = false;  // patch 0024
+ bool g_latestDiorama = false;                              // patch 0025
+ uint32_t g_latestTag = 0;
+ bool g_latestHud = false;                                  // patch 0026
++bool g_latestAmbient = false;                              // patch 0034
+ uint32_t g_serial = 0;
+ bool g_failed = false;  // creating the buffers failed: the surface for good
+ 
+@@ -173,7 +176,7 @@ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept {
+ #endif
+ }
+ 
+-void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag) noexcept {
++void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag, bool ambient) noexcept {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+   if (g_writing < 0) {
+@@ -219,6 +222,7 @@ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag) noexcept {
+   g_latestDiorama = diorama;
+   g_latestTag = tag;
+   g_latestHud = diorama && sideBySide;  // patch 0026: the diorama's buffers are left | right | HUD
++  g_latestAmbient = ambient;            // patch 0034: then the ambience's left | right
+   g_writing = -1;
+   ++g_serial;
+ #else
+@@ -226,6 +230,7 @@ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag) noexcept {
+   (void)stereo;
+   (void)diorama;
+   (void)tag;
++  (void)ambient;
+ #endif
+ }
+ 
+@@ -242,6 +247,14 @@ bool diorama_mask(DioramaMask& out) noexcept {
+   return g_maskValid;
+ }
+ 
++bool ambient_wanted() noexcept { return g_ambientOn.load(std::memory_order_relaxed) && active(); }
++
++bool ambient_mask(AmbientMask& out) noexcept {
++  std::lock_guard lock{g_maskMutex};
++  out = g_ambient;
++  return g_ambientOn.load(std::memory_order_relaxed);
++}
++
+ bool stereo_wanted() noexcept { return g_stereo.load(std::memory_order_relaxed) && active(); }
+ float stereo_a() noexcept { return g_stereoA.load(std::memory_order_relaxed); }
+ float stereo_b() noexcept { return g_stereoB.load(std::memory_order_relaxed); }
+@@ -296,6 +309,23 @@ void aurora_xr_set_diorama_window(float popout, float depth) {
+   g_mask.window[1] = std::max(depth, 1e-3f);
+ }
+ 
++void aurora_xr_set_ambient(bool enable, uint32_t tag, const float screenFromHead[12], const float proj[6],
++                           float eyeShift, const float halfSize[2], float range, float fade, float edge) {
++  std::lock_guard lock{g_maskMutex};
++  if (enable) {
++    g_ambient.tag = tag;
++    std::copy(screenFromHead, screenFromHead + 12, g_ambient.screenFromHead);
++    std::copy(proj, proj + 6, g_ambient.proj);
++    g_ambient.eyeShift = eyeShift;
++    g_ambient.halfSize[0] = std::max(halfSize[0], 1e-3f);
++    g_ambient.halfSize[1] = std::max(halfSize[1], 1e-3f);
++    g_ambient.range = std::max(range, 1e-3f);
++    g_ambient.fade = std::max(fade, 1e-3f);
++    g_ambient.edge = std::max(edge, 1e-3f);
++  }
++  g_ambientOn.store(enable);
++}
++
+ void aurora_xr_set_frame_info(uint32_t tag, bool diorama) {
+   g_frameTag.store(tag);
+   g_frameDiorama.store(diorama);
+@@ -317,6 +347,7 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+   out->diorama = g_latestDiorama;
+   out->tag = g_latestTag;
+   out->hud = g_latestHud;
++  out->ambient = g_latestAmbient;
+   g_reading = g_latest;
+   g_latest = g_latestFd = -1;
+   return true;
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -20,7 +20,8 @@ bool active() noexcept;
+ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept;
+ // On the render worker, after the queue submit: publishes the frame to the XR layer. sideBySide:
+ // the buffer is two eyes wide (patch 0024); stereo: both halves hold this frame's eyes.
+-void end(bool sideBySide = false, bool stereo = false, bool diorama = false, uint32_t tag = 0) noexcept;
++void end(bool sideBySide = false, bool stereo = false, bool diorama = false, uint32_t tag = 0,
++         bool ambient = false) noexcept;
+ // Patch 0025: the frame info the game set (aurora_xr_set_frame_info), taken once per frame by the
+ // present on the thread that ends frames.
+ void take_frame_info(uint32_t& tag, bool& diorama) noexcept;
+@@ -47,4 +48,16 @@ struct DioramaMask {
+ };
+ bool diorama_mask(DioramaMask& out) noexcept;
+ 
++// Patch 0034: the room's ambience around the giant screen (aurora_xr_set_ambient), while active().
++struct AmbientMask {
++  uint32_t tag;
++  float screenFromHead[12]; // row-major 3x4
++  float proj[6];
++  float eyeShift;
++  float halfSize[2];
++  float range, fade, edge;
++};
++bool ambient_wanted() noexcept;
++bool ambient_mask(AmbientMask& out) noexcept;
++
+ } // namespace aurora::webgpu::xr_present

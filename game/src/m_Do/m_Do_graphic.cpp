@@ -9,6 +9,7 @@
 #include "pc/pc_gpu_opts.h"
 #include "pc/pc_dynres.h"
 #include "pc/game_hooks.h"
+#include "pc/pc_vr.h"
 // COS_GPU_GROUPS (pc_gpu_opts.h): a GX debug marker before each bucket the GPU timer groups by.
 #define PC_GPU_GROUP(name) pc_gpu_group(name)
 #else
@@ -1774,6 +1775,9 @@ bool mDoGph_Painter() {
             }
 
             PC_GPU_GROUP("filter");
+#if TARGET_PC
+            pc_vr_ambient_draw(); // the room's ambience (pc_vr.h): its actors again, for the room
+#endif
             dComIfGd_drawOpaListFilter();
 
 #if VERSION == VERSION_JPN

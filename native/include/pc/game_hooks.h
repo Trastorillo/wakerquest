@@ -134,6 +134,9 @@ void pc_fps60_camera_reset(void);
    (Aurora patch 0019), unless it is a cut; nothing in paint A or with the mode off. */
 void pc_fps60_view_begin(view_class* view);
 void pc_fps60_view_end(void);
+/* The view delta of this paint (pc_fps60_view_begin's, or none) set again, after another use of it
+   within the world (the room's ambience, pc_vr_ambient_draw). */
+void pc_fps60_view_restore(void);
 /* mDoGph_Painter, before the shadow images (dComIfGd_imageDrawShadow): in paint B, decides the cut and
    points the models at their blended world-space joints already (step D: the real shadows are cast
    from the models at t); pc_fps60_view_begin does the rest. COS_FPS60_SHADOWS=0: nothing here. */

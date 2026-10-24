@@ -38,6 +38,11 @@
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
+#include "JSystem/J3DGraphBase/J3DPacket.h"
+#include "JSystem/J3DGraphBase/J3DMaterial.h"
+#include "JSystem/J3DGraphBase/J3DShape.h"
+#include "SSystem/SComponent/c_counter.h"
+#include "pc/game_hooks.h"
 #include "d/d_kankyo.h"
 #include "d/d_meter.h"
 #include "m_Do/m_Do_lib.h"
@@ -455,12 +460,32 @@ int collectBird(void* actor, void*) {
     return 1;
 }
 
-// The room's ambience (ambient, mode = pantalla; docs: wakerquest-files/ambiente-plan.md): the game's own
+// The room's ambience (ambient, mode = pantalla; wakerquest-files/ambiente-plan.md): the game's own
 // ambient actors (the seagulls, the crabs, the small birds, the fireflies), its wind lines and seagull
-// emitters and its rain, to be drawn again outside the giant screen. Step 1: picked and logged only.
+// emitters and its rain, drawn a second time outside the giant screen, in the room. The screen is seen
+// as a window from a point in front of it where its picture matches the game camera's (the frustum's
+// height across the screen's), the camera's view space scaled so that what is ambient_focus game units
+// away lies on the screen's plane: what is out of the camera's frame is in the room around the screen,
+// where it would be. Aurora (patch 0034) draws those draws for each eye and hides them where the
+// screen is, fading them out away from it. Step 2: one seagull (the nearest to Link) as a test.
 struct Ambient {
     unsigned n[5] = {};  // KAMOME (and KAMOME2, the same process here), DEMO_KMM, KN, KT, FF
     uint64_t lastLogNs = 0;
+    bool on = false;      // this frame's painter draws the ambience (pc_vr_ambient_draw)
+    bool wasOn = false;
+    Mtx delta;            // the game camera's view space to the head's
+    f32 projFrom[6], projTo[6];
+    // the packets taken from the ambient actor's draw (J3DJoint::entryIn), for one game frame
+    struct Rec {
+        J3DMatPacket* mat;
+        J3DShapePacket* shape;
+    };
+    Rec rec[64];
+    int recN = 0;
+    u32 recFrame = 0;
+    const fopAc_ac_c* best = nullptr;  // the test's seagull, nearest to Link
+    float bestDist = 0.0f;
+    cXyz link;
 };
 Ambient sAmbient;
 
@@ -477,20 +502,96 @@ int ambientKind(s16 name) {
 }
 
 int collectAmbient(void* actor, void*) {
-    const int kind = ambientKind(fopAcM_GetName((fopAc_ac_c*)actor));
-    if (kind >= 0) sAmbient.n[kind]++;
+    const fopAc_ac_c* ac = (const fopAc_ac_c*)actor;
+    const int kind = ambientKind(fopAcM_GetName((fopAc_ac_c*)ac));
+    if (kind < 0) return 1;
+    sAmbient.n[kind]++;
+    if (kind == 0) {
+        const float d = (ac->current.pos - sAmbient.link).abs();
+        if (sAmbient.best == nullptr || d < sAmbient.bestDist) {
+            sAmbient.best = ac;
+            sAmbient.bestDist = d;
+        }
+    }
     return 1;
 }
 
-void ambientScan(uint64_t now) {
-    if (now - sAmbient.lastLogNs < 5000000000ull) return;
-    sAmbient.lastLogNs = now;
+void ambientOff() {
+    if (sAmbient.wasOn) {
+        aurora_xr_set_ambient(false, 0, nullptr, nullptr, 0.0f, nullptr, 0.0f, 0.0f, 0.0f);
+        pc::writef(STDERR_FILENO, "[vr] ambient off\n");
+        sAmbient.wasOn = false;
+    }
+    sAmbient.on = false;
+    pc_vr_ambient_actor = nullptr;
+}
+
+// The giant screen's frame (pc_vr_view_begin, mode = pantalla): which actor is ambient, and the
+// ambience's view delta, frustum and mask for this frame's draws.
+void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* player) {
+    WqXrHead head;
+    if (!table.ambient || view == nullptr || player == nullptr || !wq_xr_head(&head) || head.tag == 0 ||
+        view->mProjMtx[3][3] != 0.0f || view->mProjMtx[0][0] == 0.0f) {
+        ambientOff();
+        return;
+    }
+    sAmbient.link = player->current.pos;
+    sAmbient.best = nullptr;
     memset(sAmbient.n, 0, sizeof(sAmbient.n));
     fopAcIt_Executor(collectAmbient, nullptr);
-    pc::writef(STDERR_FILENO,
-               "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d\n",
-               sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4],
-               g_env_light.mRainCount);
+    pc_vr_ambient_actor = sAmbient.best;
+
+    // the screen as a window (roomFromWindow's fields), its picture's aspect the game projection's
+    const float p00 = view->mProjMtx[0][0], p11 = view->mProjMtx[1][1];
+    WqXrTable scr = table;
+    scr.windowX = table.screenX;
+    scr.windowY = table.screenY;
+    scr.windowDistance = table.screenDistance;
+    scr.windowYaw = table.screenYaw;
+    scr.windowWidth = table.screenWidth;
+    scr.windowHeight = table.screenWidth * p00 / p11;
+    // the point in front of the screen whose view of it is the camera's frustum, and the scale that
+    // puts ambient_focus game units on its plane
+    scr.windowDepth = 0.5f * scr.windowHeight * p11;
+    const float k = scr.windowDepth / std::max(table.ambientFocus, 1.0f);  // metres per game unit
+    const M4 c = mul(headFromStage(head), roomFromCameraView(scr, k));
+    toMtx(c, sAmbient.delta);
+    projParams(view->mProjMtx, sAmbient.projFrom);
+    const float gameFar =
+        std::fabs(sAmbient.projFrom[4]) > 1e-9f ? std::fabs(sAmbient.projFrom[5] / sAmbient.projFrom[4]) : 0.0f;
+    const float far = std::max(kWindowFar, gameFar * k);
+    const float fov[4] = {head.tanLeft, head.tanRight, head.tanDown, head.tanUp};
+    Mtx44 p;
+    C_MTXFrustum(p, kNear * fov[3], kNear * fov[2], kNear * fov[0], kNear * fov[1], kNear, far);
+    projParams(p, sAmbient.projTo);
+    const float eyeShift = -p[0][0] * head.ipd * 0.5f;
+    const M4 screenHead = mul(windowTableFromRoom(scr), stageFromHead(head));
+    float sfh[12];
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 4; j++) sfh[i * 4 + j] = screenHead.m[i][j];
+    const float half[2] = {0.5f * scr.windowWidth, 0.5f * scr.windowHeight};
+    wq_xr_set_frame_view(head.tag, false, nullptr);
+    aurora_xr_set_ambient(true, head.tag, sfh, sAmbient.projTo, eyeShift, half, table.ambientRange,
+                          0.4f * table.ambientRange, 0.03f);
+    sAmbient.on = true;
+
+    const uint64_t now = nowNs();
+    if (!sAmbient.wasOn || now - sAmbient.lastLogNs > 5000000000ull) {
+        sAmbient.lastLogNs = now;
+        pc::writef(STDERR_FILENO,
+                   "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d; test "
+                   "seagull %s (%.0f m from Link), %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
+                   "%.4f m per unit, range %.1f m\n",
+                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], g_env_light.mRainCount,
+                   sAmbient.best != nullptr ? "yes" : "none", sAmbient.bestDist / kUnitsPerMetre, sAmbient.recN,
+                   scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange);
+    }
+    sAmbient.wasOn = true;
+}
+
+// The ambient actor's clips: never culled, so what flies out of the camera's frame is still drawn
+bool ambientClipActor() {
+    return sAmbient.on && pc_vr_ambient_actor != nullptr && pc_vr_clip_actor == pc_vr_ambient_actor;
 }
 
 // The census's window line (COS_CENSUS, pc_census.cpp; logging only): what passes the window's
@@ -883,9 +984,14 @@ bool pc_vr_view_begin(view_class* view) {
         s.focusAmt = 0.0f;
         s.focusValid = false;
         wq_xr_set_talk(false);
-        if (table.ambient && !modeOn && player != nullptr) ambientScan(nowNs());
+        if (!modeOn) {
+            ambientFrame(view, table, player);
+        } else {
+            ambientOff();
+        }
         return false;
     }
+    ambientOff();  // the diorama and the window: none
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
     // for the left stick relative to the player's view (wq_xr.cpp)
     const bool freeControl = !pc::menuOpen() && dMenu_flag() == 0 && !dComIfGp_event_runCheck();
@@ -1070,6 +1176,7 @@ int pc_vr_panel_frame(void) {
 }
 
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius) {
+    if (ambientClipActor()) return 0;
     if (!cullSetup()) return -1;
     Vec p;
     MTXMultVec(m, center, &p);
@@ -1078,6 +1185,7 @@ int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius) {
 }
 
 int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min) {
+    if (ambientClipActor()) return 0;
     if (!cullSetup()) return -1;
     // the box's middle and half diagonal, scaled as the matrix scales (its largest column)
     Vec c = {0.5f * (max->x + min->x), 0.5f * (max->y + min->y), 0.5f * (max->z + min->z)};
@@ -1092,6 +1200,16 @@ int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min) {
 }
 
 int pc_vr_clip_model(J3DModel* model) {
+    if (ambientClipActor()) {
+        // every joint shown: its shapes may be out of the camera's frame and in the room
+        J3DModelData* data = model->getModelData();
+        for (u16 i = 0; i < data->getJointNum(); i++) {
+            for (J3DMaterial* mat = data->getJointNodePointer(i)->getMesh(); mat != nullptr; mat = mat->getNext()) {
+                mat->getShape()->show();
+            }
+        }
+        return 0;
+    }
     if (!cullSetup()) return -1;
     // as J3DUClipper::clipByBox, each joint's box against the table instead of the camera's view
     int hidden = 0;
@@ -1114,7 +1232,47 @@ int pc_vr_clip_model(J3DModel* model) {
     return hidden;
 }
 
+void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
+    if (sAmbient.recFrame != g_Counter.mCounter0) {
+        sAmbient.recFrame = g_Counter.mCounter0;
+        sAmbient.recN = 0;
+    }
+    if (sAmbient.recN < (int)(sizeof(sAmbient.rec) / sizeof(sAmbient.rec[0]))) {
+        sAmbient.rec[sAmbient.recN++] = {(J3DMatPacket*)matPacket, (J3DShapePacket*)shapePacket};
+    }
+}
+
+// After the world's lists and the particles: the ambient actor's packets again, marked for Aurora's
+// ambience replays (patch 0034) and taken to the room by the ambience's view delta; then the paint's
+// own view delta (60 fps's, or none) again. J3DMatPacket::draw's steps, for this packet's own shape
+// (its list may hold another model's shapes merged into it).
+void pc_vr_ambient_draw(void) {
+    if (!sAmbient.on || sAmbient.recN == 0 || sAmbient.recFrame != g_Counter.mCounter0) return;
+    view_class* view = dComIfGd_getView();
+    if (view == nullptr) return;
+    GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
+    AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
+    AuroraSetAmbient(true);
+    j3dSys.reinitGX();
+    for (int i = 0; i < sAmbient.recN; i++) {
+        J3DMatPacket* mat = sAmbient.rec[i].mat;
+        J3DShapePacket* shape = sAmbient.rec[i].shape;
+        if (mat == nullptr || shape == nullptr || mat->getMaterial() == nullptr || shape->getShape() == nullptr) continue;
+        j3dSys.setTexture(mat->getTexture());
+        j3dSys.setMatPacket(mat);
+        mat->getMaterial()->load();
+        shape->getShape()->loadPreDrawSetting();
+        if (shape->getDisplayListObj() != nullptr) shape->getDisplayListObj()->callDL();
+        shape->drawFast();
+        shape->getShape()->resetVcdVatCache();
+    }
+    AuroraSetAmbient(false);
+    pc_fps60_view_restore();
+}
+
 #else
+void pc_vr_ambient_record(void*, void*) {}
+void pc_vr_ambient_draw(void) {}
 
 bool pc_vr_view_begin(view_class*) { return false; }
 void pc_vr_view_end(void) {}

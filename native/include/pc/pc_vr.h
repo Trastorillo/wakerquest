@@ -64,6 +64,14 @@ struct PcVrClipOwner {
    leaves this actor out as culled (an NPC far from Link, outside events, with hysteresis), else 0. */
 int pc_npc_distance_hidden(void* actor);
 
+/* The room's ambience (mode = pantalla, xr.ini ambient; pc_vr_diorama.cpp): the game's own ambient
+   actors drawn a second time outside the giant screen (Aurora patch 0034). The actor whose draws are
+   taken (nullptr: none); J3DJoint::entryIn hands its packets over while fopAc_Draw draws it, and the
+   painter draws them again for the room after the particles (pc_vr_ambient_draw). */
+extern const void* pc_vr_ambient_actor;
+void pc_vr_ambient_record(void* matPacket, void* shapePacket);
+void pc_vr_ambient_draw(void);
+
 class J3DModel;
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);
 int pc_vr_clip_box(const f32 m[3][4], const Vec* max, const Vec* min);

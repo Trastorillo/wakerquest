@@ -362,6 +362,14 @@ void pc_fps60_view_begin(view_class* view) {
     sInterp++;
 }
 
+void pc_fps60_view_restore(void) {
+    if (sDeltaOn) {
+        AuroraSetViewDelta(&sDelta[0][0], sProjFrom, sProjTo);
+    } else {
+        AuroraSetViewDelta(nullptr, nullptr, nullptr);
+    }
+}
+
 void pc_fps60_view_end(void) {
     pc_vr_view_end();
     if (sDeltaOn) {

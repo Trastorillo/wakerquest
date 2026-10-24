@@ -42,6 +42,10 @@ typedef struct WqXrTable {
     float birdRange; // how far: radii of the bubble from its middle
     bool ambient;        // mode = pantalla, ambient 1: the game's ambience also outside the screen
     float ambientRange;  // metres from the screen's edge where it has faded out
+    float ambientFocus;  // the game's units that lie on the screen's plane (stereo_focus)
+    // the giant screen in the room (LOCAL space): its middle, its turn about the vertical (radians,
+    // positive to the left) and its width (metres)
+    float screenX, screenY, screenDistance, screenYaw, screenWidth;
     // the window (mode = ventana): the world at its own scale seen through a rectangle in the room, the
     // game camera's eye in front of it looking through it, each eye looking through it from where it is
     bool window;
