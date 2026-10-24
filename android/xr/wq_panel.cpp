@@ -160,7 +160,7 @@ const Item kGameItems[] = {
     {kXr, "special_window", "Helmaroc por la ventana", "Si no, la burbuja se acerca al pájaro", kSwitch},
     // the giant screen's (General is full)
     {kXr, "passthrough", "Tu habitación", "Alrededor de la pantalla gigante", kSwitch},
-    {kXr, "screen_frame", "Marco de madera", "Alrededor de la pantalla y de la ventana", kSwitch},
+    {kXr, "screen_frame", "Marco", "Cuero verde alrededor de la pantalla y la ventana", kSwitch},
     {kXr, "height", "Altura de la pantalla", "Sobre tus ojos; o con un grip", kStepper, nullptr, 0, -3.0f, 3.0f,
      0.1f, "%.1f m"},
 };

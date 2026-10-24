@@ -1575,19 +1575,19 @@ void main() {
     return chain;
 }
 
-// The giant screen's frame: one plank of red-painted wood, as the King of Red Lions' hull, drawn once
-// by a shader into a static swapchain (our own procedural art: cel-shaded bands, a wavy grain, plank
-// joints and brass nails; nothing taken from the game). kFrameTexW x kFrameTexH, as long as 25
-// thicknesses: the frame's four bars show the part of it as long as each bar, so the wood keeps one
-// scale. y = 1 is the outer edge, y = 0 the edge against the picture. Opaque, so the compositor need
-// not blend it.
-constexpr uint32_t kFrameTexW = 1600, kFrameTexH = 64;
+// The frame around the giant screen and the window: a band of green leather with gold studs, drawn once
+// by a shader into a static swapchain (our own procedural art: a pebbled grain, a rounded cel-shaded
+// profile, a stitched seam along each edge and round brass-gold studs; nothing taken from the game).
+// kFrameTexW x kFrameTexH, as long as 54 thicknesses (a 16:9 frame's top bar is 52): the frame's four bars
+// show the part of it as long as each bar, so the leather keeps one scale (the studs stay round). y = 1 is the outer edge, y = 0 the edge against the
+// picture. Opaque, so the compositor need not blend it.
+constexpr uint32_t kFrameTexW = 3456, kFrameTexH = 64;
 XrSwapchain makeFrameTexture() {
     static const char* vs = R"(#version 300 es
 out vec2 v_px;
 void main() {
     vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-    v_px = p * vec2(1600.0, 64.0);
+    v_px = p * vec2(3456.0, 64.0);
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }
 )";
@@ -1596,35 +1596,28 @@ precision highp float;
 uniform int u_linear;
 in vec2 v_px;
 out vec4 o_color;
-float hash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void main() {
     float x = v_px.x, a = v_px.y / 64.0;  // a: 0 at the picture, 1 at the outer edge
-    // planks 560 px long, each its own shade and grain
-    float plank = floor((x + 90.0) / 560.0);
-    float px = mod(x + 90.0, 560.0);
-    float seed = hash(plank + 3.0);
-    // a cel-shaded profile across the bar (a rounded log seen from the front): shadow by the
-    // picture, the body, a light band toward the outer edge
-    vec3 body = vec3(0.70, 0.12, 0.09) * (0.92 + 0.16 * seed);
-    vec3 c = body;
-    if (a < 0.30) c = body * 0.72;
-    if (a > 0.70 && a < 0.86) c = mix(body, vec3(0.95, 0.38, 0.26), 0.55);
-    // the grain: wavy lines along the plank, in two flat tones
-    float g = sin(a * 26.0 + 2.2 * sin(px * 0.011 + seed * 6.28) + 0.9 * sin(px * 0.037 + seed * 17.0));
-    if (g > 0.82) c *= 0.80;
-    // a knot here and there
-    vec2 k = vec2(px - (140.0 + 280.0 * seed), (a - 0.5) * 64.0);
-    float kr = length(k * vec2(0.45, 1.0));
-    if (seed > 0.35 && kr < 7.0) c *= kr < 3.5 ? 0.62 : 0.80;
-    // brass nails, two per plank, at its ends, with a dark rim and a highlight
-    float nx = min(abs(px - 34.0), abs(px - 526.0));
-    float nr = length(vec2(nx, (a - 0.5) * 64.0));
-    if (nr < 8.5) c = nr > 6.5 ? vec3(0.20, 0.07, 0.03)
-                 : length(vec2(nx + 2.0, (a - 0.5) * 64.0 - 2.0)) < 2.5 ? vec3(1.0, 0.93, 0.62)
-                 : vec3(0.86, 0.64, 0.22);
-    // the joints between planks, and the dark outlines of the toon look on both edges
-    if (px < 3.0 || px > 557.0) c = vec3(0.22, 0.05, 0.04);
-    if (a < 0.06 || a > 0.95) c = vec3(0.16, 0.04, 0.03);
+    vec3 leather = vec3(0.10, 0.36, 0.18);
+    // a rounded band, cel-shaded: a shadow by the picture, a light band toward the outer edge
+    vec3 c = leather;
+    if (a < 0.25) c = leather * 0.70;
+    if (a > 0.62 && a < 0.80) c = mix(leather, vec3(0.32, 0.62, 0.36), 0.45);
+    // the pebbled grain: cells of slightly different shades
+    vec2 cell = floor(v_px / 5.0);
+    c *= 0.93 + 0.12 * hash(cell);
+    // the seams: a stitch along each edge, light dashes
+    float sx = mod(x, 12.0);
+    if ((abs(a - 0.13) < 0.035 || abs(a - 0.87) < 0.035) && sx > 2.0 && sx < 8.0) c = vec3(0.80, 0.74, 0.50);
+    // gold studs every 64 px, with a dark rim and a highlight
+    float k = mod(x + 32.0, 64.0) - 32.0;
+    float r = length(vec2(k, (a - 0.5) * 64.0));
+    if (r < 13.0) c = r > 11.0 ? vec3(0.22, 0.14, 0.03)
+                 : length(vec2(k + 3.0, (a - 0.5) * 64.0 - 3.5)) < 3.5 ? vec3(1.0, 0.95, 0.70)
+                 : r < 7.0 ? vec3(0.93, 0.74, 0.25) : vec3(0.78, 0.56, 0.16);
+    // the dark outlines of the toon look on both edges
+    if (a < 0.05 || a > 0.95) c = vec3(0.03, 0.10, 0.05);
     if (u_linear != 0) c = pow(c, vec3(2.2));
     o_color = vec4(c, 1.0);
 }
@@ -1688,7 +1681,7 @@ void main() {
 }
 
 // The frame's four bars around a screen quad (same pose and size): top and bottom as wide as the
-// frame, the sides between them, each turned in its plane so the plank's outer edge faces out.
+// frame, the sides between them, each turned in its plane so the band's outer edge faces out.
 // Returns the layers written.
 int frameLayers(const XrPosef& pose, XrExtent2Df size, XrCompositionLayerQuad* out) {
     if (!s.frameSwapchain) {
@@ -1698,7 +1691,7 @@ int frameLayers(const XrPosef& pose, XrExtent2Df size, XrCompositionLayerQuad* o
         s.frameSwapchain = makeFrameTexture();
         if (!s.frameSwapchain) return 0;
     }
-    const float t = 0.045f * size.width;  // the bar's thickness
+    const float t = 0.02f * size.width;  // the bar's thickness
     const float hw = 0.5f * size.width, hh = 0.5f * size.height;
     struct Bar {
         float x, y, len, roll;
