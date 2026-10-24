@@ -42,6 +42,10 @@
 #include "JSystem/J3DGraphBase/J3DMaterial.h"
 #include "JSystem/J3DGraphBase/J3DShape.h"
 #include "SSystem/SComponent/c_counter.h"
+#include "JSystem/JParticle/JPAEmitter.h"
+#include "JSystem/JParticle/JPAEmitterManager.h"
+#include "d/d_particle.h"
+#include "d/d_particle_name.h"
 #include "pc/game_hooks.h"
 #include "d/d_kankyo.h"
 #include "d/d_meter.h"
@@ -483,7 +487,10 @@ struct Ambient {
     Rec rec[256];  // Link's models hold many
     int recN = 0;
     u32 recFrame = 0;
-    const fopAc_ac_c* best = nullptr;  // the test's seagull, nearest to Link
+    const fopAc_ac_c* best = nullptr;  // the nearest seagull to Link (the log's)
+    const void* actors[16];             // this frame's ambient actors (drawn again, never culled)
+    int nActors = 0;
+    bool testLink = false;
     float bestDist = 0.0f;
     cXyz link;
     // the log's: the painter's calls since it last wrote, the ones that drew, and why the others did not
@@ -508,6 +515,8 @@ int collectAmbient(void* actor, void*) {
     const int kind = ambientKind(fopAcM_GetName((fopAc_ac_c*)ac));
     if (kind < 0) return 1;
     sAmbient.n[kind]++;
+    const float dLink = (ac->current.pos - sAmbient.link).abs();
+    if (kind != 4 && dLink < 6000.0f && sAmbient.nActors < 16) sAmbient.actors[sAmbient.nActors++] = ac;
     if (kind == 0) {
         const float d = (ac->current.pos - sAmbient.link).abs();
         if (sAmbient.best == nullptr || d < sAmbient.bestDist) {
@@ -539,9 +548,16 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     }
     sAmbient.link = player->current.pos;
     sAmbient.best = nullptr;
+    sAmbient.nActors = 0;
     memset(sAmbient.n, 0, sizeof(sAmbient.n));
     fopAcIt_Executor(collectAmbient, nullptr);
-    pc_vr_ambient_actor = table.ambientTestLink ? (const void*)player : (const void*)sAmbient.best;
+    // the test (ambient_test = link): Link alone
+    sAmbient.testLink = table.ambientTestLink;
+    if (sAmbient.testLink) {
+        sAmbient.actors[0] = player;
+        sAmbient.nActors = 1;
+    }
+    pc_vr_ambient_actor = sAmbient.nActors > 0 ? sAmbient.actors[0] : nullptr;
 
     // the screen as a window (roomFromWindow's fields), its picture's aspect the game projection's
     const float p00 = view->mProjMtx[0][0], p11 = view->mProjMtx[1][1];
@@ -599,11 +615,11 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.lastLogNs = now;
         pc::writef(STDERR_FILENO,
                    "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d; test "
-                   "%s, %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
+                   "%s %d, %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
                    "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u)\n",
                    sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], g_env_light.mRainCount,
-                   table.ambientTestLink ? "Link" : sAmbient.best != nullptr ? "the nearest seagull" : "no seagull",
-                   sAmbient.recN,
+                   table.ambientTestLink ? "Link (test)" : sAmbient.nActors > 0 ? "actors" : "no actors",
+                   sAmbient.nActors, sAmbient.recN,
                    scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange, sAmbient.paints,
                    sAmbient.drawn, sAmbient.stale, sAmbient.noView);
         sAmbient.paints = sAmbient.drawn = sAmbient.stale = sAmbient.noView = 0;
@@ -626,6 +642,7 @@ int collectWindowAmbient(void* actor, void*) {
     const float dx = std::max(std::fabs(t[0]) - 1.0f, 0.0f) * s.winHalfW;
     const float dy = std::max(std::fabs(t[1]) - 1.0f, 0.0f) * s.winHalfH;
     if (std::sqrt(dx * dx + dy * dy) > sBirds.range) return 1;
+    if (kind == 4) return 1;  // the fireflies read the EFB's depth: left out
     const float size = kind == 2 ? 80.0f : 150.0f;  // game units around its middle (a crab, a bird)
     float* b = sBirds.t[sBirds.n++];
     b[0] = t[0], b[1] = t[1], b[2] = t[2];
@@ -637,6 +654,25 @@ void windowAmbient(const WqXrTable& table, const WqXrHead& head, const float tfh
     memset(sAmbient.n, 0, sizeof(sAmbient.n));
     sBirds.range = table.ambientRange;
     fopAcIt_Executor(collectWindowAmbient, nullptr);
+    // the weather's seagulls and wind lines (JPA, group 0), around their emitters
+    if (JPAEmitterManager* mng = dPa_control_c::getEmitterManager()) {
+        for (JSULink<JPABaseEmitter>* l = mng->mEmtrGroup[0].getFirst(); l != nullptr && sBirds.n < AURORA_XR_FREE_SPHERES;
+             l = l->getNext()) {
+            JPABaseEmitter* e = l->getObject();
+            if (!pc_vr_ambient_jpa_kept(e->getPcUserID())) continue;
+            JGeometry::TVec3<f32> g;
+            e->getGlobalTranslation(g);
+            const float p[3] = {g.x, g.y, g.z};
+            float t[3];
+            xform(s.tableFromWorld, p, t);
+            const float dx = std::max(std::fabs(t[0]) - 1.0f, 0.0f) * s.winHalfW;
+            const float dy = std::max(std::fabs(t[1]) - 1.0f, 0.0f) * s.winHalfH;
+            if (std::sqrt(dx * dx + dy * dy) > sBirds.range) continue;
+            float* b = sBirds.t[sBirds.n++];
+            b[0] = t[0], b[1] = t[1], b[2] = t[2];
+            b[3] = 600.0f * s.k / std::min(s.winHalfW, s.winHalfH);  // the effect's spread
+        }
+    }
     // the fade's numbers (the rest is the screen's, unused by the window's frames)
     const float half[2] = {s.winHalfW, s.winHalfH};
     aurora_xr_set_ambient(true, head.tag, tfh, s.projTo, eyeShift, half, table.ambientRange,
@@ -657,7 +693,8 @@ void windowAmbient(const WqXrTable& table, const WqXrHead& head, const float tfh
 
 // The ambient actor's clips: never culled, so what flies out of the camera's frame is still drawn
 bool ambientClipActor() {
-    return sAmbient.on && pc_vr_ambient_actor != nullptr && pc_vr_clip_actor == pc_vr_ambient_actor;
+    return sAmbient.on && pc_vr_ambient_actor != nullptr && pc_vr_clip_actor != nullptr &&
+           pc_vr_ambient_is(pc_vr_clip_actor);
 }
 
 // The census's window line (COS_CENSUS, pc_census.cpp; logging only): what passes the window's
@@ -1313,6 +1350,16 @@ int pc_vr_clip_model(J3DModel* model) {
     return hidden;
 }
 
+int pc_vr_ambient_is(const void* actor) {
+    for (int i = 0; i < sAmbient.nActors; i++)
+        if (sAmbient.actors[i] == actor) return 1;
+    return 0;
+}
+
+int pc_vr_ambient_jpa_kept(unsigned short userId) {
+    return userId == dPa_name::ID_AK_JN_KAMOME00 || userId == dPa_name::ID_AK_JN_WINDLINE00;
+}
+
 void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
     if (sAmbient.recFrame != g_Counter.mCounter0) {
         sAmbient.recFrame = g_Counter.mCounter0;
@@ -1332,10 +1379,9 @@ void pc_vr_ambient_draw(void) {
     // in this frame's actor draws are one count behind
     if (!sAmbient.on) return;
     sAmbient.paints++;
-    if (sAmbient.recN == 0 || (u32)(g_Counter.mCounter0 - sAmbient.recFrame) > 1) {
-        sAmbient.stale++;
-        return;
-    }
+    const bool packets = sAmbient.recN > 0 && (u32)(g_Counter.mCounter0 - sAmbient.recFrame) <= 1;
+    if (!packets) sAmbient.stale++;
+    if (!packets && sAmbient.testLink) return;
     view_class* view = dComIfGd_getView();
     if (view == nullptr) {
         sAmbient.noView++;
@@ -1346,7 +1392,7 @@ void pc_vr_ambient_draw(void) {
     AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
     AuroraSetAmbient(true);
     j3dSys.reinitGX();
-    for (int i = 0; i < sAmbient.recN; i++) {
+    for (int i = 0; packets && i < sAmbient.recN; i++) {
         J3DMatPacket* mat = sAmbient.rec[i].mat;
         J3DShapePacket* shape = sAmbient.rec[i].shape;
         if (mat == nullptr || shape == nullptr || mat->getMaterial() == nullptr || shape->getShape() == nullptr) continue;
@@ -1358,12 +1404,24 @@ void pc_vr_ambient_draw(void) {
         shape->drawFast();
         shape->getShape()->resetVcdVatCache();
     }
+    if (!sAmbient.testLink) {
+        // the weather's seagulls and wind lines (JPA, the normal group), their emitters alone
+        JPADrawInfo info(view->mViewMtx, 45.0f, 1.218f);
+        info.setFovy(view->mFovy);
+        info.setAspect(view->mAspect);
+        pc_vr_ambient_jpa = 1;
+        dComIfGp_particle_draw(&info);
+        pc_vr_ambient_jpa = 0;
+        GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
+    }
     AuroraSetAmbient(false);
     pc_fps60_view_restore();
 }
 
 #else
 void pc_vr_ambient_record(void*, void*) {}
+int pc_vr_ambient_is(const void*) { return 0; }
+int pc_vr_ambient_jpa_kept(unsigned short) { return 0; }
 void pc_vr_ambient_draw(void) {}
 
 bool pc_vr_view_begin(view_class*) { return false; }

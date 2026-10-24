@@ -14,6 +14,7 @@
 #if TARGET_PC
 #include "pc/game_hooks.h"
 #include "pc/pc_controls.h"
+#include "pc/pc_vr.h"
 #endif
 
 /* 8025EE44-8025F0E4       .text __ct__17JPAEmitterManagerFP18JPAResourceManagerUlUlUlP7JKRHeap */
@@ -118,6 +119,10 @@ void JPAEmitterManager::draw(JPADrawInfo* drawInfo, u8 groupID) {
 #if TARGET_PC
         // SwitchWaker: "Distorsión por calor" off hides the heat-haze emitters (still simulated).
         if (pc_heat_haze_hidden(emtr->getPcUserID())) {
+            continue;
+        }
+        // the room's ambience (pc_vr.h): its emitters alone, drawn again for the room
+        if (pc_vr_ambient_jpa && !pc_vr_ambient_jpa_kept(emtr->getPcUserID())) {
             continue;
         }
 #endif

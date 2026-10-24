@@ -258,7 +258,7 @@ void J3DJoint::entryIn() {
             matPacket->setShapePacket(shapePacket);
 #if TARGET_PC
             // the room's ambience (pc_vr.h): this actor's packets drawn again for the room
-            if (pc_vr_ambient_actor != nullptr && pc_vr_clip_actor == pc_vr_ambient_actor) {
+            if (pc_vr_ambient_actor != nullptr && pc_vr_clip_actor != nullptr && pc_vr_ambient_is(pc_vr_clip_actor)) {
                 pc_vr_ambient_record(matPacket, shapePacket);
             }
 #endif

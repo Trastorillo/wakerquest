@@ -32,6 +32,7 @@
 const void* pc_vr_clip_actor = nullptr;
 const char* pc_vr_clip_kind = nullptr;
 const void* pc_vr_ambient_actor = nullptr;  // pc_vr.h: the room's ambience (pc_vr_diorama.cpp)
+int pc_vr_ambient_jpa = 0;
 
 namespace pc {
 

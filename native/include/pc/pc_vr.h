@@ -75,8 +75,13 @@ int pc_npc_distance_hidden(void* actor);
    actors drawn a second time outside the giant screen (Aurora patch 0034). The actor whose draws are
    taken (nullptr: none); J3DJoint::entryIn hands its packets over while fopAc_Draw draws it, and the
    painter draws them again for the room after the particles (pc_vr_ambient_draw). */
-extern const void* pc_vr_ambient_actor;
+extern const void* pc_vr_ambient_actor;  /* the first of them; nullptr: none (the test's cheap check) */
+int pc_vr_ambient_is(const void* actor);  /* 1 for an ambient actor this frame */
 void pc_vr_ambient_record(void* matPacket, void* shapePacket);
+/* While the painter draws the ambience again, JPAEmitterManager::draw draws only its emitters (the
+   weather's seagulls and wind lines, by user id). */
+extern int pc_vr_ambient_jpa;
+int pc_vr_ambient_jpa_kept(unsigned short userId);
 void pc_vr_ambient_draw(void);
 
 class J3DModel;
