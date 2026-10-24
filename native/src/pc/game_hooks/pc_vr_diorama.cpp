@@ -498,6 +498,8 @@ struct Ambient {
     M4 stageWorld, headStage, worldView;  // worldView: the game camera's view space to the world
     float headY = 0.0f, tableY = 0.0f, headPos[3] = {0, 0, 0};
     float windYaw = 0.0f, k = 0.0f;
+    float screenMid[3] = {0, 0, 0};
+    uint64_t placeLogNs = 0;
     int nActors = 0;
     bool testLink = false;
     // anchored in the room (ambient_anchor = world): the world's heading kept from when it started and a
@@ -650,6 +652,8 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.headY = head.pos[1];
         memcpy(sAmbient.headPos, head.pos, sizeof(sAmbient.headPos));
         sAmbient.tableY = table.screenY - 0.5f * scr.windowHeight;  // the screen's bottom edge
+        sAmbient.screenMid[0] = table.screenX, sAmbient.screenMid[1] = table.screenY;
+        sAmbient.screenMid[2] = -table.screenDistance;
         sAmbient.windYaw = sAmbient.worldYaw + table.screenYaw;
         sAmbient.k = k;
     } else {
@@ -1445,26 +1449,46 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // Anchored in the room, each kind its own place: the seagulls over the player's head (at least 0.3 m
 // above it), the crabs and small birds at the screen's bottom edge (a table's height), Link as he is.
 // The view delta of one actor (index i), or of the anchored world lifted by dy metres.
-void ambientDelta(float dy, Mtx out) {
+void ambientDelta(const float d[3], Mtx out) {
     M4 lift = identity();
-    lift.m[1][3] = dy;
+    lift.m[0][3] = d[0], lift.m[1][3] = d[1], lift.m[2][3] = d[2];
     toMtx(mul(mul(mul(sAmbient.headStage, lift), sAmbient.stageWorld), sAmbient.worldView), out);
 }
 
-float ambientLift(int kind, const float p[3]) {
+// Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
+// in the game is brought near, keeping its direction, so it stays within the ambience's range. The
+// seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
+// 1 m of the screen's middle, on its bottom edge's height.
+void ambientPlace(int kind, const float p[3], float d[3]) {
     float r[3];
     xform(sAmbient.stageWorld, p, r);
-    if (kind == 0 || kind == 1) return std::max(0.0f, sAmbient.headY + 0.3f - r[1]);  // seagulls: overhead
-    if (kind == 2 || kind == 3) return sAmbient.tableY - r[1];                         // on the table
-    return 0.0f;
+    d[0] = d[1] = d[2] = 0.0f;
+    if (kind == 0 || kind == 1) {
+        const float* h = sAmbient.headPos;
+        float vx = r[0] - h[0], vz = r[2] - h[2];
+        const float l = std::sqrt(vx * vx + vz * vz);
+        if (l < 1e-3f) vx = 0.0f, vz = -1.0f;
+        const float ring = std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f) / std::max(l, 1e-3f);
+        const float y = h[1] + 0.3f + std::clamp(0.05f * (r[1] - h[1]), 0.0f, 0.5f);
+        d[0] = h[0] + vx * ring - r[0];
+        d[1] = y - r[1];
+        d[2] = h[2] + vz * ring - r[2];
+    } else if (kind == 2 || kind == 3) {
+        const float* m = sAmbient.screenMid;
+        float vx = r[0] - m[0], vz = r[2] - m[2];
+        const float l = std::sqrt(vx * vx + vz * vz);
+        const float f = l > 1.0f ? 1.0f / l : 1.0f;
+        d[0] = m[0] + vx * f - r[0];
+        d[1] = sAmbient.tableY - r[1];
+        d[2] = m[2] + vz * f - r[2];
+    }
 }
 
 // The wind lines (made around the game camera's eye) around the player: the camera's eye at the head,
 // the world's axes as anchored (so they blow with the game's wind), 1000 game units 2.5 m.
-void ambientWindDelta(Mtx out) {
+void ambientWindDelta(Mtx out, float kw = 0.0025f, float lift = 0.0f) {
     float r[3], u[3], b[3];
     axes(sAmbient.windYaw, r, u, b);
-    const float kw = 0.0025f;
     M4 m = identity();
     for (int col = 0; col < 3; col++) {
         m.m[0][col] = r[col] * kw;
@@ -1473,7 +1497,8 @@ void ambientWindDelta(Mtx out) {
     }
     const float eye[3] = {sAmbient.worldView.m[0][3], sAmbient.worldView.m[1][3], sAmbient.worldView.m[2][3]};
     for (int row = 0; row < 3; row++)
-        m.m[row][3] = sAmbient.headPos[row] - (m.m[row][0] * eye[0] + m.m[row][1] * eye[1] + m.m[row][2] * eye[2]);
+        m.m[row][3] = sAmbient.headPos[row] + (row == 1 ? lift : 0.0f) -
+                      (m.m[row][0] * eye[0] + m.m[row][1] * eye[1] + m.m[row][2] * eye[2]);
     toMtx(mul(mul(sAmbient.headStage, m), sAmbient.worldView), out);
 }
 
@@ -1496,6 +1521,25 @@ void pc_vr_ambient_draw(void) {
     AuroraSetAmbient(true);
     j3dSys.reinitGX();
     const void* deltaActor = nullptr;
+    const uint64_t nowLog = nowNs();
+    if (sAmbient.placed && nowLog - sAmbient.placeLogNs > 5000000000ull) {
+        sAmbient.placeLogNs = nowLog;
+        for (int j = 0; j < sAmbient.nActors && j < 6; j++) {
+            float r[3], mv[3];
+            xform(sAmbient.stageWorld, sAmbient.pos[j], r);
+            ambientPlace(sAmbient.kinds[j], sAmbient.pos[j], mv);
+            for (int c = 0; c < 3; c++) r[c] += mv[c];
+            pc::writef(STDERR_FILENO,
+                       "[vr] ambient place: kind %d at (%.2f, %.2f, %.2f) m from the head, %.2f m from the screen's "
+                       "middle; %.4f m per unit" "\n",
+                       sAmbient.kinds[j], r[0] - sAmbient.headPos[0], r[1] - sAmbient.headPos[1],
+                       r[2] - sAmbient.headPos[2],
+                       std::sqrt((r[0] - sAmbient.screenMid[0]) * (r[0] - sAmbient.screenMid[0]) +
+                                 (r[1] - sAmbient.screenMid[1]) * (r[1] - sAmbient.screenMid[1]) +
+                                 (r[2] - sAmbient.screenMid[2]) * (r[2] - sAmbient.screenMid[2])),
+                       sAmbient.k);
+        }
+    }
     for (int i = 0; packets && i < sAmbient.recN; i++) {
         // anchored in the room: each actor's own lift
         const void* who = sAmbient.rec[i].actor;
@@ -1504,7 +1548,9 @@ void pc_vr_ambient_draw(void) {
             if (sAmbient.actors[j] == who) a = j;
         if (sAmbient.placed && a >= 0) {
             Mtx d;
-            ambientDelta(ambientLift(sAmbient.kinds[a], sAmbient.pos[a]), d);
+            float mv[3];
+            ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
+            ambientDelta(mv, d);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
             deltaActor = who;
         }
@@ -1524,26 +1570,11 @@ void pc_vr_ambient_draw(void) {
         JPADrawInfo info(view->mViewMtx, 45.0f, 1.218f);
         info.setFovy(view->mFovy);
         info.setAspect(view->mAspect);
-        // the seagulls: lifted over the head by their emitters' middle
+        // the weather's seagulls (made around the game camera too): around the head, 0.6 m over it
         if (sAmbient.placed) {
-            float mid[3] = {0, 0, 0};
-            int n = 0;
-            if (JPAEmitterManager* mng = dPa_control_c::getEmitterManager()) {
-                for (JSULink<JPABaseEmitter>* l = mng->mEmtrGroup[0].getFirst(); l != nullptr; l = l->getNext()) {
-                    JPABaseEmitter* e = l->getObject();
-                    if (e->getPcUserID() != dPa_name::ID_AK_JN_KAMOME00) continue;
-                    JGeometry::TVec3<f32> g;
-                    e->getGlobalTranslation(g);
-                    mid[0] += g.x, mid[1] += g.y, mid[2] += g.z;
-                    n++;
-                }
-            }
-            if (n > 0) {
-                for (float& v : mid) v /= (float)n;
-                Mtx d;
-                ambientDelta(ambientLift(0, mid) + 0.2f, d);
-                AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
-            }
+            Mtx d;
+            ambientWindDelta(d, 0.0012f, 0.6f);
+            AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
         } else {
             AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
         }

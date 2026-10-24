@@ -138,7 +138,7 @@ struct Settings {
     // the room's ambience (mode = pantalla, pc_vr_ambient.cpp): the game's own seagulls, crabs, small
     // birds, wind lines and rain drawn again outside the giant screen, fading with the distance from it
     bool ambient = false;       // off until tried live
-    float ambientRange = 2.5f;  // m from the screen's edge where it has faded out
+    float ambientRange = 4.0f;  // m from the screen's edge where it has faded out
     bool ambientTestLink = false;  // the test's actor: Link instead of the nearest seagull
     bool ambientMask = true;       // hidden where the screen is (0: drawn over it too, for the tests)
     // the giant screen's ambience moved and sized by hand (ambient_move: the grips hold it instead of
