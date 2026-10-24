@@ -491,6 +491,12 @@ struct Ambient {
     const void* actors[16];             // this frame's ambient actors (drawn again, never culled)
     int nActors = 0;
     bool testLink = false;
+    // anchored in the room (ambient_anchor = world): the world's heading kept from when it started and a
+    // pivot following Link smoothly
+    bool worldValid = false;
+    float worldYaw = 0.0f;
+    float pivot[3] = {0, 0, 0};
+    uint64_t pivotNs = 0;
     float bestDist = 0.0f;
     cXyz link;
     // the log's: the painter's calls since it last wrote, the ones that drew, and why the others did not
@@ -528,6 +534,7 @@ int collectAmbient(void* actor, void*) {
 }
 
 void ambientOff() {
+    sAmbient.worldValid = false;  // its heading taken again when it starts
     if (sAmbient.wasOn) {
         aurora_xr_set_ambient(false, 0, nullptr, nullptr, 0.0f, nullptr, 0.0f, 0.0f, 0.0f);
         pc::writef(STDERR_FILENO, "[vr] ambient off\n");
@@ -588,7 +595,41 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
             moved.m[i][3] = r + table.ambientMove[i];
         }
     }
-    const M4 c = mul(mul(headFromStage(head), moved), roomFromCameraView(scr, k));
+    M4 c;
+    if (table.ambientWorld) {
+        // the world's own axes, turned once to the camera's heading when it started (then fixed in the
+        // room), scaled about Link (smoothed), Link at the screen's middle; then moved by hand
+        const float link[3] = {player->current.pos.x, player->current.pos.y, player->current.pos.z};
+        const uint64_t nowP = nowNs();
+        if (!sAmbient.worldValid) {
+            sAmbient.worldYaw = cameraYaw(view->mViewMtx);
+            memcpy(sAmbient.pivot, link, sizeof(link));
+            sAmbient.worldValid = true;
+        } else {
+            const float dx = link[0] - sAmbient.pivot[0], dy = link[1] - sAmbient.pivot[1], dz = link[2] - sAmbient.pivot[2];
+            const float a = dx * dx + dy * dy + dz * dz > kSnapDistance * kSnapDistance
+                                ? 1.0f
+                                : blend((nowP - sAmbient.pivotNs) * 1e-9, 0.25f);
+            for (int i = 0; i < 3; i++) sAmbient.pivot[i] += (link[i] - sAmbient.pivot[i]) * a;
+        }
+        sAmbient.pivotNs = nowP;
+        float r[3], u[3], b[3];
+        axes(sAmbient.worldYaw + table.screenYaw, r, u, b);
+        M4 rw = identity();
+        for (int col = 0; col < 3; col++) {
+            rw.m[0][col] = r[col] * k;
+            rw.m[1][col] = u[col] * k;
+            rw.m[2][col] = b[col] * k;
+        }
+        const float mid[3] = {table.screenX, table.screenY, -table.screenDistance};
+        for (int row = 0; row < 3; row++)
+            rw.m[row][3] = mid[row] - (rw.m[row][0] * sAmbient.pivot[0] + rw.m[row][1] * sAmbient.pivot[1] +
+                                       rw.m[row][2] * sAmbient.pivot[2]);
+        c = mul(mul(mul(headFromStage(head), moved), rw), rigidInverse(view->mViewMtx));
+    } else {
+        sAmbient.worldValid = false;
+        c = mul(mul(headFromStage(head), moved), roomFromCameraView(scr, k));
+    }
     toMtx(c, sAmbient.delta);
     projParams(view->mProjMtx, sAmbient.projFrom);
     const float gameFar =

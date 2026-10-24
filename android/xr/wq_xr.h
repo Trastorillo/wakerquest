@@ -48,6 +48,7 @@ typedef struct WqXrTable {
     float ambientMove[4];  // the screen's ambience moved: metres in the room (x, y, z), radians about the
                            // vertical through the screen's middle
     float ambientScale;    // and sized about the screen's middle
+    bool ambientWorld;     // anchored in the room around Link (else the game camera's view)
     // the giant screen in the room (LOCAL space): its middle, its turn about the vertical (radians,
     // positive to the left) and its width (metres)
     float screenX, screenY, screenDistance, screenYaw, screenWidth;

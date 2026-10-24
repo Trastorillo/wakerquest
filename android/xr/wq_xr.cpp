@@ -144,6 +144,7 @@ struct Settings {
     // the giant screen's ambience moved and sized by hand (ambient_move: the grips hold it instead of
     // the screen): metres in the room, degrees about the vertical through the screen's middle, a scale
     bool ambientMove = false;
+    bool ambientWorld = true;  // anchored in the room (the world's, around Link); false: the game camera's view
     float ambientX = 0.0f, ambientY = 0.0f, ambientZ = 0.0f, ambientYaw = 0.0f, ambientScale = 1.0f;
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
@@ -295,7 +296,10 @@ const char kDefaultSettings[] =
     "ambient_z = 0\n"
     "ambient_yaw = 0\n"
     "ambient_scale = 1\n"
-    "ambient_move = 0\n";
+    "ambient_move = 0\n"
+    "# ambient_anchor = world: anchored in the room around Link, not turning with the game camera; camera: as\n"
+    "# the camera sees it (lined up with the screen's picture, moving with the camera).\n"
+    "ambient_anchor = world\n";
 
 // The Rendimiento presets (perf_preset): the keys each sets when chosen, in xr.ini's form.
 const char* const kPresetNames[] = {"personal", "ahorro", "equilibrado", "maximo"};
@@ -395,6 +399,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "ambient_test")) s.ambientTestLink = !strcmp(v, "link");
     else if (!strcmp(key, "ambient_mask")) s.ambientMask = on;
     else if (!strcmp(key, "ambient_move")) s.ambientMove = on;
+    else if (!strcmp(key, "ambient_anchor")) s.ambientWorld = strcmp(v, "camera") != 0;
     else if (!strcmp(key, "ambient_x")) s.ambientX = clampf(f, -10.0f, 10.0f);
     else if (!strcmp(key, "ambient_y")) s.ambientY = clampf(f, -10.0f, 10.0f);
     else if (!strcmp(key, "ambient_z")) s.ambientZ = clampf(f, -10.0f, 10.0f);
@@ -507,6 +512,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "ambient_test")) return s.ambientTestLink ? "link" : "seagull";
     if (!strcmp(key, "ambient_mask")) return flag(s.ambientMask);
     if (!strcmp(key, "ambient_move")) return flag(s.ambientMove);
+    if (!strcmp(key, "ambient_anchor")) return s.ambientWorld ? "world" : "camera";
     if (!strcmp(key, "ambient_x")) return num(s.ambientX);
     if (!strcmp(key, "ambient_y")) return num(s.ambientY);
     if (!strcmp(key, "ambient_z")) return num(s.ambientZ);
@@ -3074,6 +3080,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->ambientMove[2] = st.ambientZ;
     out->ambientMove[3] = st.ambientYaw * 0.0174532925f;
     out->ambientScale = st.ambientScale;
+    out->ambientWorld = st.ambientWorld;
     out->screenX = st.screenX;
     out->screenY = st.height;
     out->screenDistance = st.distance;

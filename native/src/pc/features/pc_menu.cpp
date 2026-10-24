@@ -624,6 +624,8 @@ const PcSettingChoice kVrRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "
 const PcSettingChoice kVrHud[] = {{"0.9", "90 cm"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}, {"2.0", "2 m"}};
 const PcSettingChoice kVrAmbientScale[] = {{"0.25", "x0,25"}, {"0.5", "x0,5"}, {"0.75", "x0,75"}, {"1", "x1"},
                                            {"1.5", "x1,5"},   {"2", "x2"},     {"3", "x3"}};
+const PcSettingChoice kVrAmbientAnchor[] = {{"world", "En la habitación", "In the room"},
+                                            {"camera", "Con la cámara", "With the camera"}};
 const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
 
 void applyVrStereo(const char*, const char* v, void*) {
@@ -685,6 +687,13 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kVrAmbientScale), "1", applyVr, (void*)"ambient_scale", 9, "Ambience size",
      "Screen mode: the size of what comes out of the screen, about its middle (also with both grips while Move "
      "the ambience is on)."},
+    {"COS_VR_AMBIENT_ANCHOR", "Ambiente anclado",
+     "Modo pantalla: En la habitación = lo que sale queda quieto en tu habitación alrededor de Link aunque gire la "
+     "cámara del juego; Con la cámara = se mueve con la cámara, alineado con la imagen de la pantalla.",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrAmbientAnchor), "world", applyVr, (void*)"ambient_anchor", 9,
+     "Ambience anchor",
+     "Screen mode: In the room = what comes out stays still in your room around Link even when the game's "
+     "camera turns; With the camera = it moves with the camera, lined up with the screen's picture."},
     {"COS_VR_AMBIENT_MOVE", "Mover el ambiente con los grips",
      "Modo pantalla: los grips agarran lo que sale de la pantalla en vez de la pantalla: muévelo y gíralo con "
      "uno, cambia su tamaño con los dos; el clic del stick derecho lo devuelve a su sitio. Se guarda al soltar.",
