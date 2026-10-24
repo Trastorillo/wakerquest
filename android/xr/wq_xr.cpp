@@ -135,6 +135,10 @@ struct Settings {
     float seeThroughRadius = 1.2f;
     bool birdsFree = true;                       // the flying birds around the room, outside the bubble
     float birdRange = 3.0f;                      // how far, in the bubble's radii
+    // the room's ambience (mode = pantalla, pc_vr_ambient.cpp): the game's own seagulls, crabs, small
+    // birds, wind lines and rain drawn again outside the giant screen, fading with the distance from it
+    bool ambient = false;       // off until tried live
+    float ambientRange = 2.5f;  // m from the screen's edge where it has faded out
     float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
     float tableYaw = 0.0f;                       // degrees, the world turned by the grip
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
@@ -255,7 +259,11 @@ const char kDefaultSettings[] =
     "special_zoom = 0.5\n"
     "special_window = 0\n"
     "window_depth_special = 2.0\n"
-    "window_popout_special = 1.8\n";
+    "window_popout_special = 1.8\n"
+    "# mode = pantalla: ambient 1 = the game's own seagulls, crabs, birds, wind lines and rain also\n"
+    "# outside the screen, in the room, fading out ambient_range m from its edge (in progress).\n"
+    "ambient = 0\n"
+    "ambient_range = 2.5\n";
 
 // The Rendimiento presets (perf_preset): the keys each sets when chosen, in xr.ini's form.
 const char* const kPresetNames[] = {"personal", "ahorro", "equilibrado", "maximo"};
@@ -346,6 +354,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "special_zoom")) s.specialZoom = clampf(f, 0.1f, 1.0f);
     else if (!strcmp(key, "birds_free")) s.birdsFree = on;
     else if (!strcmp(key, "bird_range")) s.birdRange = clampf(f, 1.0f, 8.0f);
+    else if (!strcmp(key, "ambient")) s.ambient = on;
+    else if (!strcmp(key, "ambient_range")) s.ambientRange = clampf(f, 0.3f, 10.0f);
     else if (!strcmp(key, "dialogue_back")) s.dialogueBack = clampf(f, -1.0f, 3.0f);
     else if (!strcmp(key, "window_width")) s.windowWidth = clampf(f, 0.3f, kWindowMaxWidth);
     else if (!strcmp(key, "window_distance")) s.windowDistance = clampf(f, 0.3f, 10.0f);
@@ -444,6 +454,8 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "special_zoom")) return num(s.specialZoom);
     if (!strcmp(key, "birds_free")) return flag(s.birdsFree);
     if (!strcmp(key, "bird_range")) return num(s.birdRange);
+    if (!strcmp(key, "ambient")) return flag(s.ambient);
+    if (!strcmp(key, "ambient_range")) return num(s.ambientRange);
     if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
     if (!strcmp(key, "stereo_focus")) return num(s.stereoFocus);
     if (!strcmp(key, "cine_3d")) return flag(s.cine3d);
@@ -2915,6 +2927,8 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->cineScreen = st.cineScreen;
     out->birdsFree = st.birdsFree;
     out->birdRange = st.birdRange;
+    out->ambient = st.ambient && !st.diorama && !st.window && s_sharedRunning;
+    out->ambientRange = st.ambientRange;
     out->window = st.window && s_sharedRunning;
     out->windowWidth = st.windowWidth;
     out->windowHeight = st.windowWidth * 9.0f / 16.0f;

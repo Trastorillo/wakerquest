@@ -40,6 +40,8 @@ typedef struct WqXrTable {
     bool cineScreen; // and its cutscenes
     bool birdsFree;  // the flying birds drawn around the room, outside the bubble
     float birdRange; // how far: radii of the bubble from its middle
+    bool ambient;        // mode = pantalla, ambient 1: the game's ambience also outside the screen
+    float ambientRange;  // metres from the screen's edge where it has faded out
     // the window (mode = ventana): the world at its own scale seen through a rectangle in the room, the
     // game camera's eye in front of it looking through it, each eye looking through it from where it is
     bool window;

@@ -38,6 +38,7 @@
 #include "JSystem/J3DGraphAnimator/J3DModel.h"
 #include "JSystem/J3DGraphAnimator/J3DModelData.h"
 #include "JSystem/J3DGraphBase/J3DSys.h"
+#include "d/d_kankyo.h"
 #include "d/d_meter.h"
 #include "m_Do/m_Do_lib.h"
 
@@ -454,6 +455,44 @@ int collectBird(void* actor, void*) {
     return 1;
 }
 
+// The room's ambience (ambient, mode = pantalla; docs: wakerquest-files/ambiente-plan.md): the game's own
+// ambient actors (the seagulls, the crabs, the small birds, the fireflies), its wind lines and seagull
+// emitters and its rain, to be drawn again outside the giant screen. Step 1: picked and logged only.
+struct Ambient {
+    unsigned n[5] = {};  // KAMOME (and KAMOME2, the same process here), DEMO_KMM, KN, KT, FF
+    uint64_t lastLogNs = 0;
+};
+Ambient sAmbient;
+
+// 0..4 for an ambient actor's kind, -1 for any other
+int ambientKind(s16 name) {
+    switch (name) {
+    case fpcNm_KAMOME_e: return 0;
+    case fpcNm_DEMO_KMM_e: return 1;
+    case fpcNm_KN_e: return 2;
+    case fpcNm_KT_e: return 3;
+    case fpcNm_FF_e: return 4;
+    default: return -1;
+    }
+}
+
+int collectAmbient(void* actor, void*) {
+    const int kind = ambientKind(fopAcM_GetName((fopAc_ac_c*)actor));
+    if (kind >= 0) sAmbient.n[kind]++;
+    return 1;
+}
+
+void ambientScan(uint64_t now) {
+    if (now - sAmbient.lastLogNs < 5000000000ull) return;
+    sAmbient.lastLogNs = now;
+    memset(sAmbient.n, 0, sizeof(sAmbient.n));
+    fopAcIt_Executor(collectAmbient, nullptr);
+    pc::writef(STDERR_FILENO,
+               "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d\n",
+               sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4],
+               g_env_light.mRainCount);
+}
+
 // The census's window line (COS_CENSUS, pc_census.cpp; logging only): what passes the window's
 // culling, by who asked (pc_vr_clip_actor's process name, else pc_vr_clip_kind, else "untagged"), per
 // second with the culling's own line; the tests let through by kKeepRadius (beyond the window's draw
@@ -844,6 +883,7 @@ bool pc_vr_view_begin(view_class* view) {
         s.focusAmt = 0.0f;
         s.focusValid = false;
         wq_xr_set_talk(false);
+        if (table.ambient && !modeOn && player != nullptr) ambientScan(nowNs());
         return false;
     }
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
