@@ -1,8 +1,9 @@
 // The characters' draw distance (xr.ini npc_draw_distance, the headset panel's "Distancia de
 // personajes"; Android only, every mode): the NPCs (an NPC_* process, or the NPC group) farther from
 // Link than that are not drawn, as if the game's own culling had left them out (fopAc_Draw's culled
-// branch: they still execute, talk and walk). Several NPCs at once in view (Outset toward Grandma's
-// house) made the frames stall in every mode.
+// branch). Several NPCs at once in view (Outset toward Grandma's house) made the frames stall in every
+// mode. As with that culling, one with fopAcStts_NOCULLEXEC_e also pauses its execute while hidden
+// (fopAc_Execute), as when the camera looks away; it goes on once Link is near again.
 //
 // - Only actors that accept the game's culling (fopAcStts_CULL_e) and never while an event runs (a
 //   cutscene, a dialogue: the talk partner and every event actor are drawn) or for an actor the event

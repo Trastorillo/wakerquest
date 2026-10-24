@@ -5,11 +5,13 @@ scene viewport) get a scissor to the bounds of the window's rectangle and of wha
 (the rectangle narrowing toward the camera's eye, up to the pop-out), projected into that eye with a
 margin of 5% of the picture a side, intersected with the game's own scissor: the pixels the mask
 hides are no longer shaded. No scissor when a corner is at or behind the eye.
+A viewport that takes no window scissor (a partial one) after one that did gets the game's own
+scissor back.
 
 diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
 --- a/lib/gfx/stereo.hpp
 +++ b/lib/gfx/stereo.hpp
-@@ -39,6 +39,12 @@ void set_viewport(float width, float height) noexcept;
+@@ -39,6 +39,12 @@
  void end_pass() noexcept;
  // The value for DrawImmediateData::_pad: the eye's shift and the focus (two snorm16), 0 for none.
  uint32_t draw_word() noexcept;
@@ -25,7 +27,7 @@ diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
 diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 --- a/lib/gfx/stereo.cpp
 +++ b/lib/gfx/stereo.cpp
-@@ -33,6 +33,11 @@ wgpu::Buffer g_maskUniform[2];
+@@ -33,6 +33,11 @@
  
  std::atomic_bool g_request{false};
  
@@ -37,7 +39,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
  int16_t snorm16(float v) { return static_cast<int16_t>(std::lround(std::clamp(v, -1.f, 1.f) * 32767.f)); }
  
  // unpack2x16snorm in the shader: x = the eye's a (from the low 16 bits); y = sign(b) * sqrt(|b| / 64), so
-@@ -82,6 +87,10 @@ void begin_pass(const detail::RenderPass& pass) noexcept {
+@@ -82,6 +87,10 @@
    g_passWidth = static_cast<float>(color.size.width) * scale;
    g_passHeight = static_cast<float>(color.size.height) * scale;
    g_word = 0;  // every pass sets its viewport first (recording.cpp)
@@ -48,7 +50,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
  }
  
  void set_viewport(float width, float height) noexcept {
-@@ -94,6 +103,7 @@ void set_viewport(float width, float height) noexcept {
+@@ -94,6 +103,7 @@
  void end_pass() noexcept {
    g_efbPass = false;
    g_word = 0;
@@ -56,7 +58,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
  }
  
  uint32_t draw_word() noexcept { return g_word; }
-@@ -327,8 +337,63 @@ M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
+@@ -327,8 +337,63 @@
    table.m[3][3] = 1.f;
    return mul(table, inverse(clip));
  }
@@ -123,7 +125,7 @@ diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
 diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
 --- a/lib/gfx/encoding.cpp
 +++ b/lib/gfx/encoding.cpp
-@@ -42,11 +42,22 @@ void apply_viewport(const wgpu::RenderPassEncoder& pass, const Viewport& vp) {
+@@ -42,12 +42,27 @@
    pass.SetViewport(vp.left, vp.top, vp.width, vp.height, minDepth, maxDepth);
  }
  
@@ -132,7 +134,8 @@ diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
 -  const auto y = std::clamp(static_cast<uint32_t>(sc.y), 0u, size.height);
 -  const auto w = std::clamp(static_cast<uint32_t>(sc.width), 0u, size.width - x);
 -  const auto h = std::clamp(static_cast<uint32_t>(sc.height), 0u, size.height - y);
-+void apply_scissor(const wgpu::RenderPassEncoder& pass, const ClipRect& sc, const wgpu::Extent3D& size,
++// true when the window's scissor narrowed it (patch 0033)
++bool apply_scissor(const wgpu::RenderPassEncoder& pass, const ClipRect& sc, const wgpu::Extent3D& size,
 +                   const Viewport* vp = nullptr) {
 +  auto x = std::clamp(static_cast<uint32_t>(sc.x), 0u, size.width);
 +  auto y = std::clamp(static_cast<uint32_t>(sc.y), 0u, size.height);
@@ -140,7 +143,9 @@ diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
 +  auto h = std::clamp(static_cast<uint32_t>(sc.height), 0u, size.height - y);
 +  // patch 0033: the window's frames, each eye's scene kept to the window as that eye sees it
 +  uint32_t wx0, wy0, wx1, wy1;
-+  if (vp != nullptr && stereo::window_scissor(vp->left, vp->top, vp->width, vp->height, wx0, wy0, wx1, wy1)) {
++  const bool narrowed =
++      vp != nullptr && stereo::window_scissor(vp->left, vp->top, vp->width, vp->height, wx0, wy0, wx1, wy1);
++  if (narrowed) {
 +    const uint32_t x0 = std::max(x, wx0), y0 = std::max(y, wy0);
 +    const uint32_t x1 = std::min(x + w, wx1), y1 = std::min(y + h, wy1);
 +    x = std::min(x0, size.width);
@@ -149,37 +154,52 @@ diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
 +    h = y1 > y ? y1 - y : 0u;
 +  }
    pass.SetScissorRect(x, y, w, h);
++  return narrowed;
  }
  
-@@ -150,10 +161,20 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+ DrawContext make_draw_context(const RenderPass& passInfo) {
+@@ -117,6 +132,7 @@
+   ClipRect currentScissor{};
+   bool hasViewport = false;
+   bool hasScissor = false;
++  bool scissorNarrowed = false;  // patch 0033: the scissor set holds the window's
+ 
+   // Bind bind group for the whole pass
+   pass.SetBindGroup(0, resources().staticBindGroup);
+@@ -150,10 +166,21 @@
        currentViewport = vp;
        hasViewport = true;
        stereo::set_viewport(vp.width, vp.height);
 +      {
-+        // patch 0033: the scissor again with the window's (the whole target when none was set)
++        // patch 0033: the scissor again with the window's (the whole target when none was set), and
++        // the game's own again when a viewport that takes none (a partial one) follows one that did
 +        uint32_t wx0, wy0, wx1, wy1;
 +        const auto& size = passInfo.colorAttachments[SceneColorAttachmentIndex].size;
-+        if (stereo::window_scissor(vp.left, vp.top, vp.width, vp.height, wx0, wy0, wx1, wy1)) {
++        if (scissorNarrowed || stereo::window_scissor(vp.left, vp.top, vp.width, vp.height, wx0, wy0, wx1, wy1)) {
 +          const ClipRect whole{0, 0, static_cast<int32_t>(size.width), static_cast<int32_t>(size.height)};
-+          apply_scissor(pass, hasScissor ? currentScissor : whole, size, &currentViewport);
++          scissorNarrowed = apply_scissor(pass, hasScissor ? currentScissor : whole, size, &currentViewport);
 +        }
 +      }
      } break;
      case CommandType::SetScissor: {
        const auto& sc = cmd.data.setScissor;
 -      apply_scissor(pass, sc, passInfo.colorAttachments[SceneColorAttachmentIndex].size);
-+      apply_scissor(pass, sc, passInfo.colorAttachments[SceneColorAttachmentIndex].size,
-+                    hasViewport ? &currentViewport : nullptr);
++      scissorNarrowed = apply_scissor(pass, sc, passInfo.colorAttachments[SceneColorAttachmentIndex].size,
++                                      hasViewport ? &currentViewport : nullptr);
        currentScissor = sc;
        hasScissor = true;
      } break;
-@@ -177,7 +198,8 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+@@ -176,8 +203,11 @@
+       if (hasViewport) {
          apply_viewport(pass, currentViewport);
        }
-       if (hasScissor) {
+-      if (hasScissor) {
 -        apply_scissor(pass, currentScissor, passInfo.colorAttachments[SceneColorAttachmentIndex].size);
-+        apply_scissor(pass, currentScissor, passInfo.colorAttachments[SceneColorAttachmentIndex].size,
-+                      hasViewport ? &currentViewport : nullptr);
++      if (hasScissor || scissorNarrowed) {
++        const auto& size = passInfo.colorAttachments[SceneColorAttachmentIndex].size;
++        const ClipRect whole{0, 0, static_cast<int32_t>(size.width), static_cast<int32_t>(size.height)};
++        scissorNarrowed = apply_scissor(pass, hasScissor ? currentScissor : whole, size,
++                                        hasViewport ? &currentViewport : nullptr);
        }
      } break;
      case CommandType::DebugMarker: {

@@ -6,8 +6,9 @@
 // Read-only, at the end of the game frame (pc_frame_end, after the frame's execute and draw); no
 // allocation (static tables).
 //
-// COS_CENSUS: on unless "0" or "off" (this test build; it costs one actor walk and one emitter walk
-// every 5 s). The window's line ("[census] window: ...", pc_vr_diorama.cpp) uses the same switch.
+// COS_CENSUS: off unless "1" or "on" (a diagnostic: player builds ship it off; on, it costs one actor
+// walk and one emitter walk every 5 s). The window's line ("[census] window: ...", pc_vr_diorama.cpp)
+// and the characters' draw distance line (pc_npc_distance.cpp) use the same switch.
 #include "pc_internal.h"
 #include "pc/pc_vr.h"
 
@@ -193,7 +194,7 @@ const char* censusProcName(int name) {
 bool censusOn() {
     if (sOn < 0) {
         const char* v = getenv("COS_CENSUS");
-        sOn = !(v != nullptr && (strcmp(v, "0") == 0 || strcmp(v, "off") == 0));
+        sOn = v != nullptr && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0);
     }
     return sOn != 0;
 }
