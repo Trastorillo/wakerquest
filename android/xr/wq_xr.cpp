@@ -285,7 +285,7 @@ const char kDefaultSettings[] =
     "# mode = pantalla: ambient 1 = the game's own seagulls, crabs, birds, wind lines and rain also\n"
     "# outside the screen, in the room, fading out ambient_range m from its edge (in progress).\n"
     "ambient = 0\n"
-    "ambient_range = 2.5\n"
+    "ambient_range = 4\n"
     "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
     "ambient_test = seagull\n"
     "ambient_mask = 1\n"
