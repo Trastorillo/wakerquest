@@ -586,6 +586,7 @@ struct Xr {
     XrSessionState state = XR_SESSION_STATE_UNKNOWN;
     bool running = false, focused = false, exiting = false;
     XrSpace space = XR_NULL_HANDLE;
+    XrSpace stageSpace = XR_NULL_HANDLE;  // the room's floor (the ambience's crabs stand on it)
     XrFrameState frame{XR_TYPE_FRAME_STATE};
 
     // the screen
@@ -1039,6 +1040,12 @@ bool initSession() {
     rs.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
     rs.poseInReferenceSpace.orientation.w = 1.0f;
     if (!ok(xrCreateReferenceSpace(s.session, &rs, &s.space), "xrCreateReferenceSpace")) return false;
+    {
+        XrReferenceSpaceCreateInfo st{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+        st.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+        st.poseInReferenceSpace.orientation.w = 1.0f;
+        if (XR_FAILED(xrCreateReferenceSpace(s.session, &st, &s.stageSpace))) s.stageSpace = XR_NULL_HANDLE;
+    }
 
     uint32_t fmtCount = 0;
     xrEnumerateSwapchainFormats(s.session, 0, &fmtCount, nullptr);
@@ -2449,6 +2456,15 @@ void locateHead() {
     h.head.tanUp = std::max(std::tan(views[0].fov.angleUp), std::tan(views[1].fov.angleUp)) * margin;
     h.eyes[0] = views[0].pose;
     h.eyes[1] = views[1].pose;
+    h.head.floorValid = false;
+    if (s.stageSpace != XR_NULL_HANDLE) {
+        XrSpaceLocation sl{XR_TYPE_SPACE_LOCATION};
+        if (XR_SUCCEEDED(xrLocateSpace(s.stageSpace, s.space, s.frame.predictedDisplayTime, &sl)) &&
+            (sl.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {
+            h.head.floorValid = true;
+            h.head.floorY = sl.pose.position.y;
+        }
+    }
     std::lock_guard lock{s_shared};
     h.head.tag = s_nextTag++;
     if (s_nextTag == 0) s_nextTag = 1;

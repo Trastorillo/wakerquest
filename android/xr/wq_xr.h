@@ -22,6 +22,9 @@ typedef struct WqXrHead {
     float ipd;      // the distance between the eyes (metres)
     // the frustum both eyes' pictures are drawn with, as tangents from each eye (left and down < 0)
     float tanLeft, tanRight, tanDown, tanUp;
+    // the room's floor in the LOCAL space (metres, y; the STAGE space's origin), when the runtime knows it
+    bool floorValid;
+    float floorY;
 } WqXrHead;
 
 typedef struct WqXrTable {

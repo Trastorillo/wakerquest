@@ -48,6 +48,7 @@
 #include "d/d_particle_name.h"
 #include "pc/game_hooks.h"
 #include "d/d_kankyo.h"
+#include "d/d_kankyo_wether.h"
 #include "d/d_meter.h"
 #include "m_Do/m_Do_lib.h"
 
@@ -499,6 +500,7 @@ struct Ambient {
     float headY = 0.0f, tableY = 0.0f, headPos[3] = {0, 0, 0};
     float windYaw = 0.0f, k = 0.0f;
     float screenMid[3] = {0, 0, 0};
+    float floorY = 0.0f;  // the room's floor (the runtime's, else 1.3 m below the eyes)
     uint64_t placeLogNs = 0;
     int nActors = 0;
     bool testLink = false;
@@ -547,6 +549,15 @@ int collectAmbient(void* actor, void*) {
         }
     }
     return 1;
+}
+
+// The weather's emitters of a user id alive (the normal group), for the log
+int ambientEmitters(u16 id) {
+    int n = 0;
+    if (JPAEmitterManager* mng = dPa_control_c::getEmitterManager())
+        for (JSULink<JPABaseEmitter>* l = mng->mEmtrGroup[0].getFirst(); l != nullptr; l = l->getNext())
+            n += l->getObject()->getPcUserID() == id ? 1 : 0;
+    return n;
 }
 
 void ambientOff() {
@@ -598,13 +609,17 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     // puts ambient_focus game units on its plane
     scr.windowDepth = 0.5f * scr.windowHeight * p11;
     const float k = scr.windowDepth / std::max(table.ambientFocus, 1.0f);  // metres per game unit
-    // moved, turned and sized by hand (ambient_move) about the screen's middle; the screen's own place
-    // stays for its hole in the mask
+    // moved, turned and sized by hand (ambient_move) about its anchor; the screen's own place stays for
+    // its hole in the mask. Anchored in the room (ambient_anchor = world) the anchor and the scale are
+    // the room's own, apart from the screen's place and size (moving or sizing the screen leaves them)
+    const float kWorldAnchor[3] = {0.0f, -0.2f, -0.6f};  // LOCAL space: ahead of where the player started
+    const float kWorldK = 0.009f;                        // metres per game unit (1.0.1's, which looked right)
     M4 moved = identity();
     {
         const float yaw = table.ambientMove[3], sc = table.ambientScale;
         const float c0 = std::cos(yaw) * sc, s0 = std::sin(yaw) * sc;
-        const float mid[3] = {table.screenX, table.screenY, -table.screenDistance};
+        const float screenMid[3] = {table.screenX, table.screenY, -table.screenDistance};
+        const float* mid = table.ambientWorld ? kWorldAnchor : screenMid;
         moved.m[0][0] = c0, moved.m[0][2] = s0;
         moved.m[1][1] = sc;
         moved.m[2][0] = -s0, moved.m[2][2] = c0;
@@ -617,7 +632,7 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     M4 c;
     if (table.ambientWorld) {
         // the world's own axes, turned once to the camera's heading when it started (then fixed in the
-        // room), scaled about Link (smoothed), Link at the screen's middle; then moved by hand
+        // room), scaled about Link (smoothed), Link at the room's anchor; then moved by hand
         const float link[3] = {player->current.pos.x, player->current.pos.y, player->current.pos.z};
         const uint64_t nowP = nowNs();
         if (!sAmbient.worldValid) {
@@ -633,14 +648,14 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         }
         sAmbient.pivotNs = nowP;
         float r[3], u[3], b[3];
-        axes(sAmbient.worldYaw + table.screenYaw, r, u, b);
+        axes(sAmbient.worldYaw, r, u, b);
         M4 rw = identity();
         for (int col = 0; col < 3; col++) {
-            rw.m[0][col] = r[col] * k;
-            rw.m[1][col] = u[col] * k;
-            rw.m[2][col] = b[col] * k;
+            rw.m[0][col] = r[col] * kWorldK;
+            rw.m[1][col] = u[col] * kWorldK;
+            rw.m[2][col] = b[col] * kWorldK;
         }
-        const float mid[3] = {table.screenX, table.screenY, -table.screenDistance};
+        const float* mid = kWorldAnchor;
         for (int row = 0; row < 3; row++)
             rw.m[row][3] = mid[row] - (rw.m[row][0] * sAmbient.pivot[0] + rw.m[row][1] * sAmbient.pivot[1] +
                                        rw.m[row][2] * sAmbient.pivot[2]);
@@ -652,10 +667,11 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.headY = head.pos[1];
         memcpy(sAmbient.headPos, head.pos, sizeof(sAmbient.headPos));
         sAmbient.tableY = table.screenY - 0.5f * scr.windowHeight;  // the screen's bottom edge
-        sAmbient.screenMid[0] = table.screenX, sAmbient.screenMid[1] = table.screenY;
-        sAmbient.screenMid[2] = -table.screenDistance;
-        sAmbient.windYaw = sAmbient.worldYaw + table.screenYaw;
-        sAmbient.k = k;
+        sAmbient.floorY = head.floorValid ? head.floorY : head.pos[1] - 1.3f;
+        // the crabs and small birds gather around the anchor (the field keeps its name)
+        memcpy(sAmbient.screenMid, kWorldAnchor, sizeof(kWorldAnchor));
+        sAmbient.windYaw = sAmbient.worldYaw;
+        sAmbient.k = kWorldK;
     } else {
         sAmbient.worldValid = false;
         sAmbient.placed = false;
@@ -688,12 +704,14 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         pc::writef(STDERR_FILENO,
                    "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d; test "
                    "%s %d, %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
-                   "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u)\n",
+                   "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u); weather: "
+                   "%d seagull and %d wind line emitters, snow %d, spores/ash %d\n",
                    sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], g_env_light.mRainCount,
                    table.ambientTestLink ? "Link (test)" : sAmbient.nActors > 0 ? "actors" : "no actors",
                    sAmbient.nActors, sAmbient.recN,
                    scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange, sAmbient.paints,
-                   sAmbient.drawn, sAmbient.stale, sAmbient.noView);
+                   sAmbient.drawn, sAmbient.stale, sAmbient.noView, ambientEmitters(dPa_name::ID_AK_JN_KAMOME00),
+                   ambientEmitters(dPa_name::ID_AK_JN_WINDLINE00), g_env_light.mSnowCount, g_env_light.mHousiCount);
         sAmbient.paints = sAmbient.drawn = sAmbient.stale = sAmbient.noView = 0;
     }
     sAmbient.wasOn = true;
@@ -1447,18 +1465,28 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // own view delta (60 fps's, or none) again. J3DMatPacket::draw's steps, for this packet's own shape
 // (its list may hold another model's shapes merged into it).
 // Anchored in the room, each kind its own place: the seagulls over the player's head (at least 0.3 m
-// above it), the crabs and small birds at the screen's bottom edge (a table's height), Link as he is.
+// above it), the crabs and small birds on the room's floor, Link as he is.
 // The view delta of one actor (index i), or of the anchored world lifted by dy metres.
-void ambientDelta(const float d[3], Mtx out) {
+// The ambience's own size: everything 0.7 of the world's scale about where it is (Tamaño del ambiente
+// on top)
+const float kAmbientSize = 0.7f;
+
+void ambientDelta(const float p[3], const float d[3], Mtx out) {
+    // moved by d, sized kAmbientSize about where it lands
+    float r[3];
+    xform(sAmbient.stageWorld, p, r);
     M4 lift = identity();
-    lift.m[0][3] = d[0], lift.m[1][3] = d[1], lift.m[2][3] = d[2];
+    for (int i = 0; i < 3; i++) {
+        lift.m[i][i] = kAmbientSize;
+        lift.m[i][3] = (r[i] + d[i]) - kAmbientSize * r[i];
+    }
     toMtx(mul(mul(mul(sAmbient.headStage, lift), sAmbient.stageWorld), sAmbient.worldView), out);
 }
 
 // Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
 // in the game is brought near, keeping its direction, so it stays within the ambience's range. The
 // seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
-// 1 m of the screen's middle, on its bottom edge's height.
+// 1 m of the screen's middle, on the room's floor.
 void ambientPlace(int kind, const float p[3], float d[3]) {
     float r[3];
     xform(sAmbient.stageWorld, p, r);
@@ -1479,7 +1507,7 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
         const float l = std::sqrt(vx * vx + vz * vz);
         const float f = l > 1.0f ? 1.0f / l : 1.0f;
         d[0] = m[0] + vx * f - r[0];
-        d[1] = sAmbient.tableY - r[1];
+        d[1] = sAmbient.floorY - r[1];  // on the room's floor
         d[2] = m[2] + vz * f - r[2];
     }
 }
@@ -1550,7 +1578,7 @@ void pc_vr_ambient_draw(void) {
             Mtx d;
             float mv[3];
             ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
-            ambientDelta(mv, d);
+            ambientDelta(sAmbient.pos[a], mv, d);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
             deltaActor = who;
         }
@@ -1573,7 +1601,7 @@ void pc_vr_ambient_draw(void) {
         // the weather's seagulls (made around the game camera too): around the head, 0.6 m over it
         if (sAmbient.placed) {
             Mtx d;
-            ambientWindDelta(d, 0.0012f, 0.6f);
+            ambientWindDelta(d, 0.0012f * kAmbientSize, 0.6f);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
         } else {
             AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
@@ -1583,12 +1611,28 @@ void pc_vr_ambient_draw(void) {
         // the wind lines: around the player
         if (sAmbient.placed) {
             Mtx d;
-            ambientWindDelta(d);
+            ambientWindDelta(d, 0.0005f, -0.5f);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
         }
         pc_vr_ambient_jpa = dPa_name::ID_AK_JN_WINDLINE00;
         dComIfGp_particle_draw(&info);
         pc_vr_ambient_jpa = 0;
+        // the weather's rain, snow and spores or ash (dKankyo's packets, drawn around the camera's eye):
+        // around the player, 0.002 m per unit, while the game has them
+        const bool rain = g_env_light.mRainCount > 0 && g_env_light.mpRainPacket != nullptr;
+        const bool snow = g_env_light.mSnowCount > 0 && g_env_light.mpSnowPacket != nullptr;
+        const bool housi = g_env_light.mHousiCount > 0 && g_env_light.mpHousiPacket != nullptr;
+        if (sAmbient.placed && (rain || snow || housi)) {
+            Mtx d;
+            ambientWindDelta(d, 0.002f, -0.3f);
+            AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
+            j3dSys.reinitGX();
+            if (rain) g_env_light.mpRainPacket->draw();
+            if (snow) g_env_light.mpSnowPacket->draw();
+            if (housi) g_env_light.mpHousiPacket->draw();
+            j3dSys.reinitGX();
+            GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
+        }
         GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
     }
     AuroraSetAmbient(false);
