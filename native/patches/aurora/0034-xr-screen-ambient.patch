@@ -11,7 +11,6 @@ masked (the mask's fourth shape, fade[3] 3): alpha 0 where the line from the eye
 rectangle, fading out away from it, 0 where nothing was drawn. The buffer is then the screen's eye(s)
 and the ambience's left and right eyes (AuroraXrFrame.ambient, tag: the head pose they were drawn
 for), for a projection layer over the screen. Off (never called), nothing changes.
-
 diff --git a/include/aurora/xr.h b/include/aurora/xr.h
 --- a/include/aurora/xr.h
 +++ b/include/aurora/xr.h
@@ -78,12 +77,26 @@ diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
 diff --git a/lib/aurora.cpp b/lib/aurora.cpp
 --- a/lib/aurora.cpp
 +++ b/lib/aurora.cpp
-@@ -361,6 +361,15 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+@@ -361,6 +361,29 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
    const bool sideBySide = xr && webgpu::xr_present::stereo_wanted();
    // The diorama (patch 0026) is always in stereo: ImGui goes to the HUD's panel.
    gfx::stereo::request(sideBySide && (!imguiDrawData || xrDiorama));
 +  // Patch 0034: the room's ambience around the giant screen, with nothing over the screen (ImGui)
 +  gfx::stereo::request_ambient(xr && !xrDiorama && !imguiDrawData && webgpu::xr_present::ambient_wanted());
++  {
++    // patch 0034: why the ambience is not asked for, every 600 frames while the game wants it
++    static uint32_t s_wanted = 0, s_noXr = 0, s_diorama = 0, s_imgui = 0;
++    if (webgpu::xr_present::ambient_mask_on()) {
++      s_wanted++;
++      s_noXr += xr ? 0 : 1;
++      s_diorama += xrDiorama ? 1 : 0;
++      s_imgui += imguiDrawData ? 1 : 0;
++      if (s_wanted % 600 == 1) {
++        Log.info("ambience: wanted {} frames; no XR {}, diorama {}, ImGui over it {}", s_wanted, s_noXr, s_diorama,
++                 s_imgui);
++      }
++    }
++  }
 +  uint32_t xrAmbientTag = 0;
 +  {
 +    webgpu::xr_present::AmbientMask am;
@@ -94,7 +107,7 @@ diff --git a/lib/aurora.cpp b/lib/aurora.cpp
  
    wgpu::BindGroup rmlBindGroup;
    bool rmlOverlay = false;
-@@ -373,14 +382,19 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+@@ -373,14 +396,19 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
  #endif
  
    gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, surfaceViewport = viewport, xr, xrWidth,
@@ -116,7 +129,7 @@ diff --git a/lib/aurora.cpp b/lib/aurora.cpp
      if (xr) {
        currentView = webgpu::xr_present::begin(xrBufferWidth, xrHeight);
      }
-@@ -459,6 +473,37 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+@@ -459,6 +487,37 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
          region(s_imguiTarget, 2);
        }
        pass.End();
@@ -154,7 +167,7 @@ diff --git a/lib/aurora.cpp b/lib/aurora.cpp
      } else if (canPresent) {
        wgpu::BindGroup presentBindGroup;
        if (rmlBindGroup && !rmlOverlay) {
-@@ -539,7 +584,8 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+@@ -539,7 +598,8 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
      webgpu::gpu_prof::after_submit();
      if (xrFrame) {
        // XR presentation (patch 0023): the XR layer shows it; nothing to present here.
@@ -247,7 +260,7 @@ diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
  
    // The depth snapshot is for the CPU (depth_peek): the left eye's is the frame's.
    if (passInfo.captureDepthSnapshot && !stereo::replaying()) {
-@@ -584,6 +592,35 @@ void encode_hud(wgpu::CommandEncoder& cmd, FramePacket& frame) {
+@@ -584,6 +592,39 @@ void encode_hud(wgpu::CommandEncoder& cmd, FramePacket& frame) {
    }
    set_hud_replay(false);
  }
@@ -263,6 +276,10 @@ diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
 +    any = any || (op.type == FrameOpType::RenderPass && op.renderPass != nullptr && op.renderPass->hasAmbient);
 +  }
 +  if (!any) {
++    static uint32_t s_none = 0;
++    if (s_none++ % 600 == 0) {
++      Log.info("ambience: no pass holds its draws ({} frames)", s_none);
++    }
 +    return false;
 +  }
 +  const webgpu::gpu_prof::Zone zone{cmd, "Ambience"};
@@ -296,7 +313,7 @@ diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
                                               callback = std::move(callback)]() mutable {
      auto& packet = g_framePackets[frameSlot];
      g_stagingBuffers[stagingSlot].Unmap();
-@@ -727,6 +728,12 @@ void end_frame(EndFrameCallback callback) {
+@@ -727,6 +728,26 @@ void end_frame(EndFrameCallback callback) {
        }
      }
      stereo::set_presented(stereoFrame);
@@ -306,6 +323,20 @@ diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
 +      ambientFrame = stereo::encode_ambient(encoder, packet, stereoFrame);
 +    }
 +    stereo::set_ambient_presented(ambientFrame);
++    {
++      // patch 0034: what the ambience's frames did, every 600 frames while it is asked for
++      static uint32_t s_asked = 0, s_shown = 0, s_diorama = 0, s_noLeft = 0;
++      if (ambientRequested) {
++        s_asked++;
++        s_shown += ambientFrame ? 1 : 0;
++        s_diorama += stereo::frame_diorama() ? 1 : 0;
++        s_noLeft += stereoFrame && !stereo::left_eye().view ? 1 : 0;
++        if (s_asked % 600 == 1) {
++          Log.info("ambience: {} frames asked, {} drawn ({} diorama, {} without the left eye)", s_asked, s_shown,
++                   s_diorama, s_noLeft);
++        }
++      }
++    }
      packet = {};
      g_resources.stats.drawCallCount = stats.drawCallCount;
      g_resources.stats.mergedDrawCallCount = stats.mergedDrawCallCount;
@@ -683,11 +714,13 @@ diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
  #endif
  }
  
-@@ -242,6 +247,14 @@ bool diorama_mask(DioramaMask& out) noexcept {
+@@ -242,6 +247,16 @@ bool diorama_mask(DioramaMask& out) noexcept {
    return g_maskValid;
  }
  
 +bool ambient_wanted() noexcept { return g_ambientOn.load(std::memory_order_relaxed) && active(); }
++
++bool ambient_mask_on() noexcept { return g_ambientOn.load(std::memory_order_relaxed); }
 +
 +bool ambient_mask(AmbientMask& out) noexcept {
 +  std::lock_guard lock{g_maskMutex};
@@ -698,7 +731,7 @@ diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
  bool stereo_wanted() noexcept { return g_stereo.load(std::memory_order_relaxed) && active(); }
  float stereo_a() noexcept { return g_stereoA.load(std::memory_order_relaxed); }
  float stereo_b() noexcept { return g_stereoB.load(std::memory_order_relaxed); }
-@@ -296,6 +309,23 @@ void aurora_xr_set_diorama_window(float popout, float depth) {
+@@ -296,6 +311,23 @@ void aurora_xr_set_diorama_window(float popout, float depth) {
    g_mask.window[1] = std::max(depth, 1e-3f);
  }
  
@@ -722,7 +755,7 @@ diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
  void aurora_xr_set_frame_info(uint32_t tag, bool diorama) {
    g_frameTag.store(tag);
    g_frameDiorama.store(diorama);
-@@ -317,6 +347,7 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+@@ -317,6 +349,7 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
    out->diorama = g_latestDiorama;
    out->tag = g_latestTag;
    out->hud = g_latestHud;
@@ -743,7 +776,7 @@ diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
  // Patch 0025: the frame info the game set (aurora_xr_set_frame_info), taken once per frame by the
  // present on the thread that ends frames.
  void take_frame_info(uint32_t& tag, bool& diorama) noexcept;
-@@ -47,4 +48,16 @@ struct DioramaMask {
+@@ -47,4 +48,17 @@ struct DioramaMask {
  };
  bool diorama_mask(DioramaMask& out) noexcept;
  
@@ -757,6 +790,7 @@ diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
 +  float range, fade, edge;
 +};
 +bool ambient_wanted() noexcept;
++bool ambient_mask_on() noexcept;  // the game asks for it (whether or not the XR buffers are active)
 +bool ambient_mask(AmbientMask& out) noexcept;
 +
  } // namespace aurora::webgpu::xr_present

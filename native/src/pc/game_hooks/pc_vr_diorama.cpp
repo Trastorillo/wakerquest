@@ -486,6 +486,8 @@ struct Ambient {
     const fopAc_ac_c* best = nullptr;  // the test's seagull, nearest to Link
     float bestDist = 0.0f;
     cXyz link;
+    // the log's: the painter's calls since it last wrote, the ones that drew, and why the others did not
+    unsigned paints = 0, drawn = 0, stale = 0, noView = 0;
 };
 Ambient sAmbient;
 
@@ -581,10 +583,12 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         pc::writef(STDERR_FILENO,
                    "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d; test "
                    "seagull %s (%.0f m from Link), %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
-                   "%.4f m per unit, range %.1f m\n",
+                   "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u)\n",
                    sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], g_env_light.mRainCount,
                    sAmbient.best != nullptr ? "yes" : "none", sAmbient.bestDist / kUnitsPerMetre, sAmbient.recN,
-                   scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange);
+                   scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange, sAmbient.paints,
+                   sAmbient.drawn, sAmbient.stale, sAmbient.noView);
+        sAmbient.paints = sAmbient.drawn = sAmbient.stale = sAmbient.noView = 0;
     }
     sAmbient.wasOn = true;
 }
@@ -1249,9 +1253,18 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 void pc_vr_ambient_draw(void) {
     // the painter runs after the game frame's counter has moved on (fapGm_Execute): the packets taken
     // in this frame's actor draws are one count behind
-    if (!sAmbient.on || sAmbient.recN == 0 || (u32)(g_Counter.mCounter0 - sAmbient.recFrame) > 1) return;
+    if (!sAmbient.on) return;
+    sAmbient.paints++;
+    if (sAmbient.recN == 0 || (u32)(g_Counter.mCounter0 - sAmbient.recFrame) > 1) {
+        sAmbient.stale++;
+        return;
+    }
     view_class* view = dComIfGd_getView();
-    if (view == nullptr) return;
+    if (view == nullptr) {
+        sAmbient.noView++;
+        return;
+    }
+    sAmbient.drawn++;
     GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
     AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
     AuroraSetAmbient(true);
