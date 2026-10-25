@@ -178,9 +178,9 @@ bool daObjLpalm_c::_draw() {
         return true;
 
 #if TARGET_PC
-    // the vegetation's adaptive distance (pc_veg_distance.cpp): left out under load, or shrinking to
-    // its foot at the edge (the drawn model's scale only; its collision stays)
-    const f32 pcVegScale = pc_veg_draw_scale(current.pos.x, current.pos.y, current.pos.z, 650.0f);
+    // the palms' distance and the vegetation's adaptive one (pc_veg_distance.cpp): left out, or
+    // shrinking to its foot at the edge (the drawn model's scale only; its collision stays)
+    const f32 pcVegScale = pc_veg_palm_scale(current.pos.x, current.pos.y, current.pos.z);
     if (pcVegScale <= 0.0f)
         return true;
     if (pcVegScale < 1.0f) {

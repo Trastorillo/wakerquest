@@ -56,6 +56,8 @@ bool sOn = false;
 float sDist = 0.0f;           // metres; at the top (sMax) the cut is off
 float sMin = 20.0f, sMax = 120.0f;
 bool sActive = false;         // this frame: plants are cut (the distance under the top, no event)
+bool sPalmOn = false;         // this frame: the palms' own distance (palm_draw_distance, no event)
+float sPalmUnits = 0.0f;
 float sOuterUnits = 0.0f, sBandUnits = 0.0f;
 float sLinkX = 0.0f, sLinkY = 0.0f, sLinkZ = 0.0f;
 bool sOverloaded = false;     // the last window
@@ -93,6 +95,20 @@ float pc_veg_draw_scale(float x, float y, float z, float radius) {
 }
 
 float pc_veg_far_scale(float gameScale) { return sActive ? 1.0f : gameScale; }
+
+float pc_veg_palm_scale(float x, float y, float z) {
+    float s = pc_veg_draw_scale(x, y, z, 650.0f);
+    if (!sPalmOn || s <= 0.0f) return s;
+    const float dx = x - sLinkX, dy = y - sLinkY, dz = z - sLinkZ;
+    const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (d >= sPalmUnits) return 0.0f;
+    const float band = sPalmUnits * 0.15f > 300.0f ? sPalmUnits * 0.15f : 300.0f;
+    if (d > sPalmUnits - band) {
+        const float p = (sPalmUnits - d) / band;
+        if (p < s) s = p;
+    }
+    return s;
+}
 
 void pc_veg_scale_mtx(float (*mtx)[4], float scale) {
     for (int r = 0; r < 3; r++)
@@ -188,7 +204,9 @@ void vegDistanceFrame(unsigned int frames) {
         }
     }
     sActive = sOn && sDist < sMax && !allDrawn;
-    if (sActive) {
+    sPalmOn = table.palmDrawDistance > 0.0f && !allDrawn;
+    sPalmUnits = table.palmDrawDistance * 100.0f;
+    if (sActive || sPalmOn) {
         sLinkX = player->current.pos.x;
         sLinkY = player->current.pos.y;
         sLinkZ = player->current.pos.z;

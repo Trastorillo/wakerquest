@@ -82,6 +82,9 @@ int pc_npc_distance_hidden(void* actor);
    dynamic resolution's turn). */
 float pc_veg_draw_scale(float x, float y, float z, float radius);
 float pc_veg_far_scale(float gameScale);
+/* A palm's (Obj_Lpalm) scale: pc_veg_draw_scale's, and its own fixed distance (xr.ini palm_draw_distance)
+   always, with the same fade at the edge. */
+float pc_veg_palm_scale(float x, float y, float z);
 void pc_veg_scale_mtx(float (*mtx)[4], float scale);
 int pc_veg_distance_saturated(void);
 

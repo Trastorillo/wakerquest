@@ -82,6 +82,7 @@ typedef struct WqXrTable {
     // nearest it may go under load and the top (the game's metres from Link)
     bool vegAdaptive;
     float vegMin, vegMax;
+    float palmDrawDistance;  // the palms always within the game's metres from Link (0 = as the game)
     // the dynamic resolution (xr.ini dynres, pc_vr_dynres.cpp): on; the fps under which it goes down
     // (3 s) and that it must hold to go up (10 s), for 30 fps; the lowest fraction of the mode's lines
     bool dynres;

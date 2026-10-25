@@ -184,6 +184,9 @@ struct Settings {
     bool vegAdaptive = true;
     float vegMin = 20.0f;   // the game's metres
     float vegMax = 120.0f;  // the distance with no load (all drawn within the game's own culling)
+    float palmDrawDistance = 60.0f;  // the palms (Obj_Lpalm) always within this many of the game's metres
+                                     // from Link, fading at the edge (the game draws them 2.4 times its far
+                                     // plane); 0 = as the game
     // the dynamic resolution (pc_vr_dynres.cpp, on by default): the second step after the vegetation's
     // adaptive distance (only once that is at vegetation_min and the GPU still does not keep up, while
     // vegetation_adaptive is on): the mode's lines go down one step (a
@@ -277,6 +280,9 @@ const char kDefaultSettings[] =
     "vegetation_adaptive = 1\n"
     "vegetation_min = 20\n"
     "vegetation_max = 120\n"
+    "# palm_draw_distance = the game's metres from Link within which the palms are drawn, always (they shrink\n"
+    "# away at the edge); 0 = as far as the game draws them.\n"
+    "palm_draw_distance = 60\n"
     "# dynres 1 = the resolution follows the frame rate, after the vegetation (with vegetation_adaptive, only\n"
     "# once that is at vegetation_min): one step down (a tenth of the\n"
     "# mode's lines) when the game stays under dynres_low_fps for 3 s, one up when it holds\n"
@@ -413,6 +419,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "vegetation_adaptive")) s.vegAdaptive = on;
     else if (!strcmp(key, "vegetation_min")) s.vegMin = clampf(f, 10.0f, 100.0f);
     else if (!strcmp(key, "vegetation_max")) s.vegMax = clampf(f, 20.0f, 1000.0f);
+    else if (!strcmp(key, "palm_draw_distance")) s.palmDrawDistance = f <= 0.0f ? 0.0f : clampf(f, 20.0f, 1000.0f);
     else if (!strcmp(key, "dynres")) s.dynres = on;
     else if (!strcmp(key, "dynres_low_fps")) s.dynresLowFps = clampf(f, 10.0f, 30.0f);
     else if (!strcmp(key, "dynres_high_fps")) s.dynresHighFps = clampf(f, 10.0f, 30.0f);
@@ -538,6 +545,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "vegetation_adaptive")) return flag(s.vegAdaptive);
     if (!strcmp(key, "vegetation_min")) return num(s.vegMin);
     if (!strcmp(key, "vegetation_max")) return num(s.vegMax);
+    if (!strcmp(key, "palm_draw_distance")) return num(s.palmDrawDistance);
     if (!strcmp(key, "dynres")) return flag(s.dynres);
     if (!strcmp(key, "dynres_low_fps")) return num(s.dynresLowFps);
     if (!strcmp(key, "dynres_high_fps")) return num(s.dynresHighFps);
@@ -3303,6 +3311,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->vegAdaptive = st.vegAdaptive;
     out->vegMin = st.vegMin;
     out->vegMax = std::max(st.vegMax, st.vegMin);
+    out->palmDrawDistance = st.palmDrawDistance;
     out->dynres = st.dynres;
     // the high threshold kept over the low one (a dead band of 1 fps at least)
     out->dynresLowFps = st.dynresLowFps;
