@@ -155,7 +155,7 @@ const Item kControls[] = {
 const Item kSmooth[] = {
     {kXr, "npc_draw_distance", "Distancia de personajes", "Más lejos no se dibujan; menos = más fluido", kStepper,
      nullptr, 0, 10.0f, 200.0f, 10.0f, "%.0f m"},
-    {kXr, "vegetation_adaptive", "Vegetación adaptativa", "Si la GPU no llega, quita la más lejana", kSwitch},
+    {kXr, "vegetation_adaptive", "Vegetación adaptativa", "Si baja de 30 fps, quita la más lejana", kSwitch},
     {kXr, "vegetation_min", "Vegetación mínima", "Nunca quita la que esté más cerca de Link", kStepper, nullptr, 0,
      10.0f, 100.0f, 5.0f, "%.0f m"},
     {kXr, "dynres", "Resolución dinámica", "Si aun así no llega, baja la resolución", kSwitch},

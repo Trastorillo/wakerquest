@@ -6,9 +6,10 @@
 // at its top clock (640 MHz, 1 frame in 4 lost) with the CPU at 75%: the cost is the GPU's.
 //
 // - The load, every 500 ms: the GPU busy (wq_xr_gpu_busy: the runtime's metrics, else kgsl's counter)
-//   and the frames the headset lost (wq_xr_frames_lost). Overloaded: busy at kBusyHigh (94%) or more,
-//   or 2 frames lost or more in the window. Relaxed: busy under kBusyLow (82%) and none lost (without a
-//   busy reading, none lost alone).
+//   and the frames the headset lost (wq_xr_frames_lost). Overloaded only when the frame rate falls: 2
+//   frames lost or more in the window, or the game under kLowFps (28) in it; a busy GPU that still
+//   keeps 30 fps cuts nothing. Relaxed: none lost, the game at its rate and the GPU under kBusyLow (82%:
+//   room to bring plants back; without a busy reading, none lost alone).
 // - Down: each overloaded window, the distance times 0.8 (120 m, 96, 77... down to vegetation_min),
 //   then 1 s for it to show before the next step. Up: after kUpWindows relaxed windows in a row, times
 //   1.15 up to vegetation_max (the top: the cut is off there). A step down within 10 s of a step up
@@ -39,13 +40,14 @@ namespace {
 
 constexpr uint64_t kWindowNs = 500000000ull;
 constexpr uint64_t kLongFrameNs = 250000000ull;  // a load or a hitch: the window does not count
-constexpr float kBusyHigh = 94.0f;
+constexpr float kLowFps = 28.0f;
 constexpr float kBusyLow = 82.0f;
 constexpr unsigned kLostHigh = 2;
 constexpr float kDown = 0.8f, kUp = 1.15f;
 constexpr unsigned kSettleWindows = 2;   // after a step down
 constexpr unsigned kUpWindows = 6;       // 3 s relaxed
 constexpr unsigned kUpWindowsMax = 60;   // 30 s
+constexpr unsigned kTopWindows = 60;     // the last step up, to the top: 30 s relaxed
 constexpr uint64_t kUnstableNs = 10000000000ull;
 constexpr uint64_t kStableNs = 60000000000ull;
 constexpr float kSizeRatio = 160.0f;     // a radius of 0.3 m: 48 m (about 3 pixels across at 540 lines)
@@ -58,6 +60,7 @@ float sOuterUnits = 0.0f, sBandUnits = 0.0f;
 float sLinkX = 0.0f, sLinkY = 0.0f, sLinkZ = 0.0f;
 bool sOverloaded = false;     // the last window
 uint64_t sLastNs = 0, sWinNs = 0;
+unsigned sWinFrames = 0;
 uint32_t sLostAt = 0;
 float sBusyMax = -1.0f;       // the window's highest reading
 unsigned sSettle = 0, sRelaxed = 0, sUpWait = kUpWindows;
@@ -111,38 +114,54 @@ void vegDistanceFrame(unsigned int frames) {
 #if defined(__ANDROID__)
     WqXrTable table;
     wq_xr_table(&table);
+    const float busy = wq_xr_gpu_busy();
+    const uint32_t lost = wq_xr_frames_lost();
+    const fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    // an event, a first-person view or no Link: everything drawn, and its load says nothing about the
+    // plants (no step, the window starts over)
+    const bool allDrawn = player == nullptr || drawDistanceAllDrawn();
+    bool restart = false;
     if (table.vegAdaptive != sOn || table.vegMax != sMax || table.vegMin != sMin) {
-        if (table.vegAdaptive != sOn)
+        if (table.vegAdaptive != sOn) {
             writef(STDERR_FILENO, "[veg] adaptive vegetation %s (%.0f to %.0f m from Link)\n",
                    table.vegAdaptive ? "on" : "off", table.vegMin, table.vegMax);
+            restart = true;
+        }
+        const bool atTop = sDist >= sMax;
         sOn = table.vegAdaptive;
         sMin = table.vegMin;
         sMax = table.vegMax;
-        if (!sOn || sDist <= 0.0f || sDist > sMax) sDist = sMax;
+        if (!sOn || atTop || sDist <= 0.0f || sDist > sMax) sDist = sMax;
         if (sDist < sMin) sDist = sMin;
     }
     const uint64_t now = monotonicNs();
     const uint64_t dt = sLastNs != 0 ? now - sLastNs : 0;
     sLastNs = now;
-    const float busy = wq_xr_gpu_busy();
-    const uint32_t lost = wq_xr_frames_lost();
-    if (busy > sBusyMax) sBusyMax = busy;
-    if (dt > kLongFrameNs || sLostAt > lost) {
-        // a load, a hitch or a new session: start the window over
+    if (sOn && busy > sBusyMax) sBusyMax = busy;
+    if (restart || !sOn || allDrawn || dt > kLongFrameNs || sLostAt > lost) {
+        // a load, a hitch, a new session, an event, or the cut just turned on: start the window over
+        if (restart || !sOn || allDrawn) {
+            sOverloaded = false;
+            sSettle = sRelaxed = 0;
+        }
         sWinNs = 0;
+        sWinFrames = 0;
         sLostAt = lost;
         sBusyMax = -1.0f;
-    } else if (sOn) {
+    } else if (sOn && dt != 0) {
         sWinNs += dt;
+        sWinFrames++;
     }
     if (sOn && sWinNs >= kWindowNs) {
         const uint32_t lostIn = lost - sLostAt;
         const float b = sBusyMax;
+        const float fps = (float)(sWinFrames * 1e9 / (double)sWinNs);
         sWinNs = 0;
+        sWinFrames = 0;
         sLostAt = lost;
         sBusyMax = -1.0f;
-        sOverloaded = b >= kBusyHigh || lostIn >= kLostHigh;
-        const bool relaxed = lostIn == 0 && (b < 0.0f || b < kBusyLow);
+        sOverloaded = lostIn >= kLostHigh || fps < kLowFps;
+        const bool relaxed = lostIn == 0 && fps >= kLowFps && (b < 0.0f || b < kBusyLow);
         if (sUpWait > kUpWindows && now - sDownNs >= kStableNs) sUpWait = kUpWindows;
         if (sSettle > 0) {
             sSettle--;
@@ -155,7 +174,10 @@ void vegDistanceFrame(unsigned int frames) {
             sDownNs = now;
             sRelaxed = 0;
         } else if (relaxed && sDist < sMax) {
-            if (++sRelaxed >= sUpWait) {
+            // the last step to the top turns the cut off (the size limit, the far planes): all comes back
+            // at once, so it waits for kTopWindows relaxed (30 s) at least
+            const unsigned wait = sDist * kUp >= sMax && sUpWait < kTopWindows ? kTopWindows : sUpWait;
+            if (++sRelaxed >= wait) {
                 const float to = sDist * kUp > sMax ? sMax : sDist * kUp;
                 step(to, "steady", b, lostIn);
                 sUpNs = now;
@@ -165,8 +187,7 @@ void vegDistanceFrame(unsigned int frames) {
             sRelaxed = 0;
         }
     }
-    const fopAc_ac_c* player = dComIfGp_getPlayer(0);
-    sActive = sOn && sDist < sMax && player != nullptr && !drawDistanceAllDrawn();
+    sActive = sOn && sDist < sMax && !allDrawn;
     if (sActive) {
         sLinkX = player->current.pos.x;
         sLinkY = player->current.pos.y;

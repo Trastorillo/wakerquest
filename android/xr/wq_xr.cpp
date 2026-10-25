@@ -178,8 +178,8 @@ struct Settings {
     float npcDrawDistance = 10.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
                                     // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
     // the vegetation's adaptive draw distance (pc_veg_distance.cpp, on by default): the palms, grass,
-    // bushes, trees and flowers all drawn while the GPU keeps up; under load (the GPU busy over about
-    // 93%, or frames lost) the farthest go first, step by step down to vegetation_min metres from Link,
+    // bushes, trees and flowers all drawn while the game keeps its 30 fps; when the frame rate falls
+    // (frames lost) the farthest go first, step by step down to vegetation_min metres from Link,
     // shrinking away at the edge, and come back the same way when the load falls
     bool vegAdaptive = true;
     float vegMin = 20.0f;   // the game's metres
@@ -271,8 +271,8 @@ const char kDefaultSettings[] =
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
     "npc_draw_distance = 10\n"
-    "# vegetation_adaptive 1 = the palms, grass, bushes and flowers all drawn while the GPU keeps up; when it\n"
-    "# does not (busy over 93% or frames lost), the farthest are left out step by step, never nearer than\n"
+    "# vegetation_adaptive 1 = the palms, grass, bushes and flowers all drawn while the game keeps 30 fps; when\n"
+    "# the frame rate falls (frames lost), the farthest are left out step by step, never nearer than\n"
     "# vegetation_min m from Link, and come back when the load falls (vegetation_max: the top, in m).\n"
     "vegetation_adaptive = 1\n"
     "vegetation_min = 20\n"
@@ -411,7 +411,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_draw_distance")) s.windowDrawDistance = clampf(f, 100.0f, 10000.0f);
     else if (!strcmp(key, "npc_draw_distance")) s.npcDrawDistance = f <= 0.0f ? 0.0f : clampf(f, 10.0f, 1000.0f);
     else if (!strcmp(key, "vegetation_adaptive")) s.vegAdaptive = on;
-    else if (!strcmp(key, "vegetation_min")) s.vegMin = clampf(f, 10.0f, 200.0f);
+    else if (!strcmp(key, "vegetation_min")) s.vegMin = clampf(f, 10.0f, 100.0f);
     else if (!strcmp(key, "vegetation_max")) s.vegMax = clampf(f, 20.0f, 1000.0f);
     else if (!strcmp(key, "dynres")) s.dynres = on;
     else if (!strcmp(key, "dynres_low_fps")) s.dynresLowFps = clampf(f, 10.0f, 30.0f);
@@ -1119,6 +1119,8 @@ void pollGpuBusy() {
             else if (c.counterFlags & XR_PERFORMANCE_METRICS_COUNTER_UINT_VALUE_VALID_BIT_META) busy = (float)c.uintValue;
         }
     }
+    if (busy >= 0.0f && s_gpuBusy.load(std::memory_order_relaxed) < 0.0f)
+        xrlog("GPU load: first reading %.1f (the runtime's counter)", busy);
     if (busy < 0.0f) busy = readKgslBusy();
     s_gpuBusy.store(busy, std::memory_order_relaxed);
 }
