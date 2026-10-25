@@ -692,6 +692,9 @@ struct Xr {
     XrVector3f panelGrabAt{}, panelGrabFrom{};
     int dragHands = 0;        // the hands on the model when its drag (re)started: 1 left, 2 right, 3 both
     bool dragging = false;
+    // both hands sizing the room's ambience (1.0.7): taken away from the screen or the window (their
+    // rays off it), as the model is sized
+    bool dragAmbient = false;
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
@@ -732,7 +735,7 @@ struct Xr {
     bool dioramaFrame = false;
     uint32_t frameTag = 0;
     bool hudFrame = false;  // the buffer's third part is the HUD's panel (Aurora patch 0026)
-    GLint copyUAlpha = -1;
+    GLint copyUAlpha = -1, copyUHud = -1;
 };
 Xr s;
 
@@ -1005,6 +1008,7 @@ uniform sampler2D u_tex;
 uniform int u_linear;
 uniform int u_alpha;  // the diorama: keep the alpha (straight in the buffer), premultiplied for OpenXR
                       // 2, 3: the room's ambience after one or two screen eyes (those stay opaque)
+uniform vec2 u_hud;   // with u_alpha 1: the HUD's part of the buffer (the window's ambience after it)
 in vec2 v_uv;
 out vec4 o_color;
 void main() {
@@ -1016,7 +1020,7 @@ void main() {
     // the HUD's third: over its transparent background, the game's 2D often leaves the alpha unwritten
     // (the dialogue box, its text): what has colour shows
     if (u_alpha >= 2 && v_uv.x < (u_alpha == 2 ? 0.3333 : 0.5)) a = 1.0;
-    if (u_alpha == 1 && v_uv.x > 0.6667) {
+    if (u_alpha == 1 && v_uv.x > u_hud.x && v_uv.x < u_hud.y) {
         // ... and the game paints a full-screen opaque black behind its 2D: pure black is the background
         float m = max(max(t.r, t.g), t.b);
         a = m < 0.02 ? 0.0 : max(a, smoothstep(0.02, 0.12, m));
@@ -1041,6 +1045,7 @@ void main() {
     glUniform1i(glGetUniformLocation(s.copyProg, "u_tex"), 0);
     s.copyULinear = glGetUniformLocation(s.copyProg, "u_linear");
     s.copyUAlpha = glGetUniformLocation(s.copyProg, "u_alpha");
+    s.copyUHud = glGetUniformLocation(s.copyProg, "u_hud");
     return true;
 }
 
@@ -2293,7 +2298,25 @@ void updateGrips(float gripL, float gripR, bool click) {
     const int hands = (s.gripDown[0] && !s.grabbed[0] ? 1 : 0) | (s.gripDown[1] && !s.grabbed[1] ? 2 : 0);
     if (hands != s.dragHands) {
         const bool ambientHeld = !st.window && !st.diorama && st.ambient && st.ambientMove;
-        if (s.dragHands && !hands) st.window ? saveWindow() : st.diorama ? saveModel() : ambientHeld ? saveAmbient() : saveScreen();
+        // both hands with neither ray on the screen (or the window): they size the ambience instead
+        bool sizing = false;
+        if (hands == 3 && !st.diorama && st.ambient && !ambientHeld) {
+            const XrPosef frame = st.window ? windowPose(st) : screenPose(st);
+            const float w = (st.window ? st.windowWidth : st.width) * 1.2f;  // a little beyond its edges
+            const XrExtent2Df size{w, w * 9.0f / 16.0f};
+            bool on = false;
+            for (int h = 0; h < 2; h++) {
+                XrVector3f o, d;
+                float t = 0.0f;
+                on = on || (aimRay(h, &o, &d) && rayQuad(o, d, frame, size, &t));
+            }
+            sizing = !on;
+        }
+        if (s.dragAmbient && !sizing) saveAmbient();
+        if (sizing && !s.dragAmbient) xrlog("grip: both hands on the ambience (its size)");
+        s.dragAmbient = sizing;
+        if (s.dragHands && !hands && !s.dragAmbient)
+            st.window ? saveWindow() : st.diorama ? saveModel() : ambientHeld ? saveAmbient() : saveScreen();
         if (hands)
             xrlog("grip: %s", st.window ? (hands == 3 ? "both hands on the window" : "moving the window")
                               : !st.diorama ? (hands == 3 ? "both hands on the screen" : "moving the screen")
@@ -2317,6 +2340,25 @@ void updateGrips(float gripL, float gripR, bool click) {
         const XrPosef& pose = loc[hands == 1 ? 0 : 1].pose;
         at = pose.position;
         heading = headingOf(pose.orientation);
+    }
+    if (s.dragAmbient) {
+        // the ambience sized by both hands, apart and together (Tamaño del ambiente, saved when let go)
+        if (!s.dragging) {
+            s.dragging = true;
+            s.dragSpan = span;
+            s.dragSize = s.tickSize = st.ambientScale;
+        }
+        if (s.dragSpan > 0.05f) {
+            st.ambientScale = clampf(s.dragSize * span / s.dragSpan, 0.1f, 10.0f);
+            if (std::fabs(st.ambientScale / s.tickSize - 1.0f) >= 0.1f) {
+                s.tickSize = st.ambientScale;
+                pointerHaptic(0, 0.25f);
+                pointerHaptic(1, 0.25f);
+            }
+        }
+        publishSettings();
+        s.clickWas = click;
+        return;
     }
     if (st.window) {
         // the window: one hand moves it and turns it about the vertical (the right stick's click while
@@ -2707,6 +2749,9 @@ bool copyNewestFrame() {
             glUseProgram(s.copyProg);
             glUniform1i(s.copyULinear, s.srgb ? 1 : 0);
             glUniform1i(s.copyUAlpha, f.hud ? 1 : f.ambient ? (f.sideBySide ? 3 : 2) : 0);
+            // left | right | HUD, then the window's ambience's two eyes
+            if (f.ambient && f.hud) glUniform2f(s.copyUHud, 0.4f, 0.6f);
+            else glUniform2f(s.copyUHud, 0.6667f, 2.0f);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, tex);
             glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -2837,7 +2882,8 @@ void runFrame() {
                                                     {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
     if (screen && s.dioramaFrame && s.sideBySide && headForTag(s.frameTag, drawnFor)) {
         // left | right | HUD (Aurora patch 0026), or left | right
-        const int32_t eyeW = int32_t(s.screenW / (s.hudFrame ? 3 : 2));
+        // (then the window's ambience's left | right, Aurora patch 0034)
+        const int32_t eyeW = int32_t(s.screenW / ((s.hudFrame ? 3 : 2) + (s.ambientFrame ? 2 : 0)));
         // the frustum the frame was drawn with: the head's, or the one the game fitted to the window
         const XrFovf fov = drawnFor.fitted
                                ? XrFovf{std::atan(drawnFor.fit[0]), std::atan(drawnFor.fit[1]), std::atan(drawnFor.fit[3]),
@@ -2867,6 +2913,23 @@ void runFrame() {
             for (int i = 0; i < fl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&frameQuads[i];
         }
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&proj;
+        // the room's ambience through the window (Aurora patch 0034): its eyes after the HUD, drawn for
+        // the frame's head pose with the head's own frustum (not the one fitted to the window)
+        if (s.ambientFrame && s.hudFrame) {
+            const XrFovf afov{std::atan(drawnFor.head.tanLeft), std::atan(drawnFor.head.tanRight),
+                              std::atan(drawnFor.head.tanUp), std::atan(drawnFor.head.tanDown)};
+            for (int eye = 0; eye < 2; eye++) {
+                ambViews[eye].pose = drawnFor.eyes[eye];
+                ambViews[eye].fov = afov;
+                ambViews[eye].subImage.swapchain = s.swapchain;
+                ambViews[eye].subImage.imageRect = {{(3 + eye) * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            }
+            ambProj.space = s.space;
+            ambProj.viewCount = 2;
+            ambProj.views = ambViews;
+            ambProj.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&ambProj;
+        }
         if (s.hudFrame) {
             const Settings& st = s.settings;
             const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;

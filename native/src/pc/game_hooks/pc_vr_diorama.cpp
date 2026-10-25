@@ -486,18 +486,26 @@ struct Ambient {
         J3DShapePacket* shape;
         const void* actor;  // its actor
     };
-    Rec rec[256];  // Link's models hold many
+    Rec rec[512];  // Link's models hold many, and the characters'
     int recN = 0;
     u32 recFrame = 0;
     const fopAc_ac_c* best = nullptr;  // the nearest seagull to Link (the log's)
-    const void* actors[16];             // this frame's ambient actors (drawn again, never culled)
-    int kinds[16];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King
-    float pos[16][3];                   // where they are (the world)
+    // this frame's ambient actors (drawn again, never culled): up to 16 small ones, the Helmaroc King,
+    // then the nearest characters and animals (kMaxPeople)
+    const void* actors[24];
+    int kinds[24];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King,
+                                        // 6 a character or an animal (ambientPerson)
+    float pos[24][3];                   // where they are (the world)
+    unsigned nPeople = 0;               // the characters and animals near Link (the log's)
     // anchored in the room: the world to the room (stage space) and the head's, for the painter's
     // placing of each kind
     bool placed = false;
     M4 stageWorld, headStage, worldView;  // worldView: the game camera's view space to the world
     float headY = 0.0f, tableY = 0.0f, headPos[3] = {0, 0, 0};
+    float headFwd[3] = {0, 0, -1};  // the head's heading on the ground (LOCAL space)
+    // the Helmaroc King's place in the room, taken in front of the head when it first shows
+    bool kingPlaced = false;
+    float kingAt[3] = {0, 0, 0};
     float windYaw = 0.0f, k = 0.0f;
     float screenMid[3] = {0, 0, 0};
     float floorY = 0.0f;  // the room's floor (the runtime's, else 1.3 m below the eyes)
@@ -551,6 +559,46 @@ int collectAmbient(void* actor, void*) {
     return 1;
 }
 
+// The characters (an NPC_* process, or the NPC group) and the animals among the actors (the pigs) the
+// ambience takes too (1.0.7), within kPeopleRange of Link, the kMaxPeople nearest; never an enemy, nor the
+// giants (the Great Deku Tree, the street stalls)
+constexpr int kMaxPeople = 6;
+constexpr float kPeopleRange = 1000.0f;  // game units (10 m, the characters' draw distance's default)
+signed char sIsPerson[fpcNm_MAX_NUM_e];  // 0 unknown, 1 no, 2 yes
+bool ambientPerson(fopAc_ac_c* ac) {
+    if (fopAcM_GetGroup(ac) == fopAc_ENEMY_e || fopAcM_GetGroup(ac) == fopAc_PLAYER_e) return false;
+    const int name = fopAcM_GetName(ac);
+    if (name < 0 || name >= fpcNm_MAX_NUM_e) return false;
+    if (sIsPerson[name] == 0) {
+        const bool giant = name == fpcNm_NPC_DE1_e || name == fpcNm_NPC_ROTEN_e;
+        const bool person = fopAcM_GetGroup(ac) == fopAc_NPC_e || strncmp(pc::censusProcName(name), "NPC_", 4) == 0;
+        sIsPerson[name] = !giant && (person || name == fpcNm_KB_e) ? 2 : 1;
+    }
+    return sIsPerson[name] == 2;
+}
+struct PersonPick {
+    fopAc_ac_c* ac[kMaxPeople];
+    float d[kMaxPeople];
+    int n;
+};
+int collectPeople(void* actor, void* user) {
+    fopAc_ac_c* ac = (fopAc_ac_c*)actor;
+    PersonPick& pick = *(PersonPick*)user;
+    if (!ambientPerson(ac)) return 1;
+    const float d = (ac->current.pos - sAmbient.link).abs();
+    if (d > kPeopleRange) return 1;
+    sAmbient.nPeople++;
+    // kept nearest first
+    int at = pick.n;
+    while (at > 0 && pick.d[at - 1] > d) at--;
+    if (at >= kMaxPeople) return 1;
+    for (int j = std::min(pick.n, kMaxPeople - 1); j > at; j--) pick.ac[j] = pick.ac[j - 1], pick.d[j] = pick.d[j - 1];
+    pick.ac[at] = ac;
+    pick.d[at] = d;
+    pick.n = std::min(pick.n + 1, kMaxPeople);
+    return 1;
+}
+
 // The weather's emitters of a user id alive (the normal group), for the log
 int ambientEmitters(u16 id) {
     int n = 0;
@@ -573,9 +621,12 @@ void ambientOff() {
 
 // The giant screen's frame (pc_vr_view_begin, mode = pantalla): which actor is ambient, and the
 // ambience's view delta, frustum and mask for this frame's draws.
-void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* player) {
+// window: the window's frame (its head pose given; the hole is the window's rectangle)
+void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* player, const WqXrHead* given = nullptr) {
     WqXrHead head;
-    if (!table.ambient || view == nullptr || player == nullptr || !wq_xr_head(&head) || head.tag == 0 ||
+    const bool window = given != nullptr;
+    if (window) head = *given;
+    if (!table.ambient || view == nullptr || player == nullptr || (!window && !wq_xr_head(&head)) || head.tag == 0 ||
         view->mProjMtx[3][3] != 0.0f || view->mProjMtx[0][0] == 0.0f) {
         ambientOff();
         return;
@@ -595,14 +646,16 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.nActors = 1;
     }
     // the Helmaroc King taking Aryll on Outset (a demo in the sea stage's room 44, the d_a_demo_dk or
-    // d_a_dk actor): the bird too, over the player's head in the room (ambientPlace), the scene itself
+    // d_a_dk actor): the bird too, in front of the player in the room (ambientPlace), the scene itself
     // as it is
+    bool king = false;
     if (!sAmbient.testLink && sAmbient.nActors < 16 && dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0) {
         const char* stage = dComIfGp_getStartStageName();
         if (stage != nullptr && strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44) {
             fopAc_ac_c* bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e);
             if (bird == nullptr) bird = fopAcM_SearchByName(fpcNm_DK_e);
             if (bird != nullptr) {
+                king = true;
                 const int i = sAmbient.nActors++;
                 sAmbient.actors[i] = bird;
                 sAmbient.kinds[i] = 5;
@@ -614,17 +667,33 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
             }
         }
     }
+    if (!king) sAmbient.kingPlaced = false;  // its place taken again when it shows next
+    // the characters and animals near Link, on the room's floor (ambientPlace)
+    sAmbient.nPeople = 0;
+    if (!sAmbient.testLink) {
+        PersonPick pick{};
+        fopAcIt_Executor(collectPeople, &pick);
+        for (int j = 0; j < pick.n && sAmbient.nActors < 24; j++) {
+            const int i = sAmbient.nActors++;
+            sAmbient.actors[i] = pick.ac[j];
+            sAmbient.kinds[i] = 6;
+            sAmbient.pos[i][0] = pick.ac[j]->current.pos.x, sAmbient.pos[i][1] = pick.ac[j]->current.pos.y;
+            sAmbient.pos[i][2] = pick.ac[j]->current.pos.z;
+        }
+    }
     pc_vr_ambient_actor = sAmbient.nActors > 0 ? sAmbient.actors[0] : nullptr;
 
     // the screen as a window (roomFromWindow's fields), its picture's aspect the game projection's
     const float p00 = view->mProjMtx[0][0], p11 = view->mProjMtx[1][1];
     WqXrTable scr = table;
-    scr.windowX = table.screenX;
-    scr.windowY = table.screenY;
-    scr.windowDistance = table.screenDistance;
-    scr.windowYaw = table.screenYaw;
-    scr.windowWidth = table.screenWidth;
-    scr.windowHeight = table.screenWidth * p00 / p11;
+    if (!window) {
+        scr.windowX = table.screenX;
+        scr.windowY = table.screenY;
+        scr.windowDistance = table.screenDistance;
+        scr.windowYaw = table.screenYaw;
+        scr.windowWidth = table.screenWidth;
+        scr.windowHeight = table.screenWidth * p00 / p11;
+    }
     // the point in front of the screen whose view of it is the camera's frustum, and the scale that
     // puts ambient_focus game units on its plane
     scr.windowDepth = 0.5f * scr.windowHeight * p11;
@@ -686,7 +755,14 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.worldView = rigidInverse(view->mViewMtx);
         sAmbient.headY = head.pos[1];
         memcpy(sAmbient.headPos, head.pos, sizeof(sAmbient.headPos));
-        sAmbient.tableY = table.screenY - 0.5f * scr.windowHeight;  // the screen's bottom edge
+        {
+            // the head's forward (-z) on the ground
+            const float qx = head.rot[0], qy = head.rot[1], qz = head.rot[2], qw = head.rot[3];
+            float fx = -2.0f * (qx * qz + qw * qy), fz = -(1.0f - 2.0f * (qx * qx + qy * qy));
+            const float l = std::sqrt(fx * fx + fz * fz);
+            if (l > 1e-3f) sAmbient.headFwd[0] = fx / l, sAmbient.headFwd[1] = 0.0f, sAmbient.headFwd[2] = fz / l;
+        }
+        sAmbient.tableY = scr.windowY - 0.5f * scr.windowHeight;  // the screen's (or the window's) bottom edge
         sAmbient.floorY = head.floorValid ? head.floorY : head.pos[1] - 1.3f;
         // the crabs and small birds gather around the anchor (the field keeps its name)
         memcpy(sAmbient.screenMid, kWorldAnchor, sizeof(kWorldAnchor));
@@ -712,7 +788,7 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < 4; j++) sfh[i * 4 + j] = screenHead.m[i][j];
     const float half[2] = {0.5f * scr.windowWidth, 0.5f * scr.windowHeight};
-    wq_xr_set_frame_view(head.tag, false, nullptr);
+    if (!window) wq_xr_set_frame_view(head.tag, false, nullptr);  // the window's frame sets its own
     // the edge's softness; negative: not hidden where the screen is (ambient_mask 0)
     aurora_xr_set_ambient(true, head.tag, sfh, sAmbient.projTo, eyeShift, half, table.ambientRange,
                           0.4f * table.ambientRange, table.ambientMask ? 0.03f : -0.03f);
@@ -722,81 +798,19 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     if (!sAmbient.wasOn || now - sAmbient.lastLogNs > 5000000000ull) {
         sAmbient.lastLogNs = now;
         pc::writef(STDERR_FILENO,
-                   "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; rain %d; test "
+                   "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u, characters and "
+                   "animals %u; rain %d; test "
                    "%s %d, %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
                    "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u); weather: "
                    "%d seagull and %d wind line emitters, snow %d, spores/ash %d\n",
-                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], g_env_light.mRainCount,
+                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], sAmbient.nPeople,
+                   g_env_light.mRainCount,
                    table.ambientTestLink ? "Link (test)" : sAmbient.nActors > 0 ? "actors" : "no actors",
                    sAmbient.nActors, sAmbient.recN,
                    scr.windowWidth, scr.windowHeight, scr.windowDepth, k, table.ambientRange, sAmbient.paints,
                    sAmbient.drawn, sAmbient.stale, sAmbient.noView, ambientEmitters(dPa_name::ID_AK_JN_KAMOME00),
                    ambientEmitters(dPa_name::ID_AK_JN_WINDLINE00), g_env_light.mSnowCount, g_env_light.mHousiCount);
         sAmbient.paints = sAmbient.drawn = sAmbient.stale = sAmbient.noView = 0;
-    }
-    sAmbient.wasOn = true;
-}
-
-// The window's ambience (ambient, mode = ventana): the game's ambient actors within ambient_range metres
-// of the window's frame (sideways: behind its plane as far as the world goes) as the diorama's free
-// spheres (Aurora patch 0029), which the eyes' mask keeps outside the window, faded out over the range
-// from the frame (patch 0034's ambience fade, aurora_xr_set_ambient), and the window's culling draws.
-int collectWindowAmbient(void* actor, void*) {
-    const fopAc_ac_c* ac = (const fopAc_ac_c*)actor;
-    const int kind = ambientKind(fopAcM_GetName((fopAc_ac_c*)ac));
-    if (kind < 0 || sBirds.n >= AURORA_XR_FREE_SPHERES) return 1;
-    sAmbient.n[kind]++;
-    const float p[3] = {ac->current.pos.x, ac->current.pos.y, ac->current.pos.z};
-    float t[3];
-    xform(s.tableFromWorld, p, t);
-    const float dx = std::max(std::fabs(t[0]) - 1.0f, 0.0f) * s.winHalfW;
-    const float dy = std::max(std::fabs(t[1]) - 1.0f, 0.0f) * s.winHalfH;
-    if (std::sqrt(dx * dx + dy * dy) > sBirds.range) return 1;
-    if (kind == 4) return 1;  // the fireflies read the EFB's depth: left out
-    const float size = kind == 2 ? 80.0f : 150.0f;  // game units around its middle (a crab, a bird)
-    float* b = sBirds.t[sBirds.n++];
-    b[0] = t[0], b[1] = t[1], b[2] = t[2];
-    b[3] = size * s.k / std::min(s.winHalfW, s.winHalfH);
-    return 1;
-}
-
-void windowAmbient(const WqXrTable& table, const WqXrHead& head, const float tfh[12], float eyeShift) {
-    memset(sAmbient.n, 0, sizeof(sAmbient.n));
-    sBirds.range = table.ambientRange;
-    fopAcIt_Executor(collectWindowAmbient, nullptr);
-    // the weather's seagulls and wind lines (JPA, group 0), around their emitters
-    if (JPAEmitterManager* mng = dPa_control_c::getEmitterManager()) {
-        for (JSULink<JPABaseEmitter>* l = mng->mEmtrGroup[0].getFirst(); l != nullptr && sBirds.n < AURORA_XR_FREE_SPHERES;
-             l = l->getNext()) {
-            JPABaseEmitter* e = l->getObject();
-            if (!pc_vr_ambient_jpa_kept(e->getPcUserID())) continue;
-            JGeometry::TVec3<f32> g;
-            e->getGlobalTranslation(g);
-            const float p[3] = {g.x, g.y, g.z};
-            float t[3];
-            xform(s.tableFromWorld, p, t);
-            const float dx = std::max(std::fabs(t[0]) - 1.0f, 0.0f) * s.winHalfW;
-            const float dy = std::max(std::fabs(t[1]) - 1.0f, 0.0f) * s.winHalfH;
-            if (std::sqrt(dx * dx + dy * dy) > sBirds.range) continue;
-            float* b = sBirds.t[sBirds.n++];
-            b[0] = t[0], b[1] = t[1], b[2] = t[2];
-            b[3] = 600.0f * s.k / std::min(s.winHalfW, s.winHalfH);  // the effect's spread
-        }
-    }
-    // the fade's numbers (the rest is the screen's, unused by the window's frames)
-    const float half[2] = {s.winHalfW, s.winHalfH};
-    aurora_xr_set_ambient(true, head.tag, tfh, s.projTo, eyeShift, half, table.ambientRange,
-                          0.4f * table.ambientRange, 0.03f);
-    sAmbient.on = false;  // the painter draws nothing again: the window's eyes draw the world
-    pc_vr_ambient_actor = nullptr;
-    const uint64_t now = nowNs();
-    if (!sAmbient.wasOn || now - sAmbient.lastLogNs > 5000000000ull) {
-        sAmbient.lastLogNs = now;
-        pc::writef(STDERR_FILENO,
-                   "[vr] ambient (window): seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u; %d kept "
-                   "outside the window, within %.1f m of its frame\n",
-                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], sBirds.n,
-                   table.ambientRange);
     }
     sAmbient.wasOn = true;
 }
@@ -1000,6 +1014,10 @@ const float kSeeMargin = 100.0f;      // game units before him: what is nearer i
 const float kSeeSoftDepth = 40.0f;    // game units: the cut fades in over this toward him
 const float kSeeSoftEdge = 0.35f;     // of the radius, dithered at the cone's edge
 
+// This frame's see-through and clip plane (the window's), put back after the ambience's draws
+f32 sSeeParams[8], sClipPlane[4];
+bool sSeeOn = false, sClipOn = false;
+
 void seeThrough(const M4& headFromWorld, const fopAc_ac_c* player, float radiusMetres, float k) {
     if (radiusMetres <= 0.0f || player == nullptr) return;  // off: Aurora turns it off every frame
     const float p[3] = {player->current.pos.x, player->current.pos.y + kLinkMiddle, player->current.pos.z};
@@ -1010,6 +1028,8 @@ void seeThrough(const M4& headFromWorld, const fopAc_ac_c* player, float radiusM
     const float r = radiusMetres * kUnitsPerMetre * k;  // metres in the head's space
     const f32 params[8] = {l[0], l[1], l[2], kSeeSoftDepth * k, r / dist, kSeeMargin * k, kSeeSoftEdge, 0.0f};
     AuroraSetSeeThrough(params);
+    memcpy(sSeeParams, params, sizeof(sSeeParams));
+    sSeeOn = true;
 }
 
 // The window's frame (mode = ventana), from pc_vr_view_begin: the view delta from the game camera's view
@@ -1077,8 +1097,8 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
     // the birds fly in the world behind the window, at its size; with the room's ambience (ambient) the
     // game's ambient actors near the window are kept outside its frame too, fading away from it
     sBirds.n = 0;
-    if (table.ambient && !table.diorama) {
-        windowAmbient(table, head, tfh, eyeShift);
+    if (table.ambient && table.window) {  // not in a special scene through the window
+        ambientFrame(view, table, player, &head);  // as the screen's, the window its hole
     } else {
         ambientOff();
     }
@@ -1098,6 +1118,8 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
         xform(headWindow, o, at);
         const f32 plane[4] = {n[0], n[1], n[2], -(n[0] * at[0] + n[1] * at[1] + n[2] * at[2])};
         AuroraSetClipPlane(plane);
+        memcpy(sClipPlane, plane, sizeof(sClipPlane));
+        sClipOn = true;
     }
     // the sky's things built around the camera's eye: drawn as they are, beyond the window
     memcpy(s.skyDelta, s.delta, sizeof(s.skyDelta));
@@ -1143,6 +1165,7 @@ void logDemoStart() {
 
 bool pc_vr_view_begin(view_class* view) {
     s.on = false;
+    sSeeOn = sClipOn = false;
     WqXrTable table;
     wq_xr_table(&table);
     WqXrHead head;
@@ -1508,29 +1531,39 @@ void ambientDelta(const float p[3], const float d[3], Mtx out, float size = kAmb
 // Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
 // in the game is brought near, keeping its direction, so it stays within the ambience's range. The
 // seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
-// 1 m of the screen's middle, on the room's floor; the Helmaroc King in a wider ring, 1.5-2.5 m around
-// the head and 0.6-1.2 m over it.
+// 1 m of the screen's middle, on the room's floor; the Helmaroc King 1.8 m in front of the head, a little
+// above the eyes, where the head looked when it showed (it keeps that place while the scene lasts).
 void ambientPlace(int kind, const float p[3], float d[3]) {
     float r[3];
     xform(sAmbient.stageWorld, p, r);
     d[0] = d[1] = d[2] = 0.0f;
-    if (kind == 0 || kind == 1 || kind == 5) {
-        const bool king = kind == 5;
+    if (kind == 5) {
+        if (!sAmbient.kingPlaced) {
+            const float* h = sAmbient.headPos;
+            const float* f = sAmbient.headFwd;
+            sAmbient.kingAt[0] = h[0] + 1.8f * f[0];
+            sAmbient.kingAt[1] = h[1] + 0.15f;
+            sAmbient.kingAt[2] = h[2] + 1.8f * f[2];
+            sAmbient.kingPlaced = true;
+        }
+        for (int i = 0; i < 3; i++) d[i] = sAmbient.kingAt[i] - r[i];
+    } else if (kind == 0 || kind == 1) {
         const float* h = sAmbient.headPos;
         float vx = r[0] - h[0], vz = r[2] - h[2];
         const float l = std::sqrt(vx * vx + vz * vz);
         if (l < 1e-3f) vx = 0.0f, vz = -1.0f;
-        const float ring = (king ? std::clamp(1.5f + 0.05f * l, 1.5f, 2.5f) : std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f)) /
-                           std::max(l, 1e-3f);
-        const float y = h[1] + (king ? 0.6f : 0.3f) + std::clamp(0.05f * (r[1] - h[1]), 0.0f, king ? 0.6f : 0.5f);
+        const float ring = std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f) / std::max(l, 1e-3f);
+        const float y = h[1] + 0.3f + std::clamp(0.05f * (r[1] - h[1]), 0.0f, 0.5f);
         d[0] = h[0] + vx * ring - r[0];
         d[1] = y - r[1];
         d[2] = h[2] + vz * ring - r[2];
-    } else if (kind == 2 || kind == 3) {
+    } else if (kind == 2 || kind == 3 || kind == 6) {
+        // (the characters and animals within 1.2 m)
+        const float reach = kind == 6 ? 1.2f : 1.0f;
         const float* m = sAmbient.screenMid;
         float vx = r[0] - m[0], vz = r[2] - m[2];
         const float l = std::sqrt(vx * vx + vz * vz);
-        const float f = l > 1.0f ? 1.0f / l : 1.0f;
+        const float f = l > reach ? reach / l : 1.0f;
         d[0] = m[0] + vx * f - r[0];
         d[1] = sAmbient.floorY - r[1];  // on the room's floor
         d[2] = m[2] + vz * f - r[2];
@@ -1570,6 +1603,9 @@ void pc_vr_ambient_draw(void) {
     }
     sAmbient.drawn++;
     GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
+    // the window's see-through and clip plane would cut the ambience: off meanwhile
+    if (sSeeOn) AuroraSetSeeThrough(nullptr);
+    if (sClipOn) AuroraSetClipPlane(nullptr);
     AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
     AuroraSetAmbient(true);
     j3dSys.reinitGX();
@@ -1661,7 +1697,14 @@ void pc_vr_ambient_draw(void) {
         GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
     }
     AuroraSetAmbient(false);
-    pc_fps60_view_restore();
+    // the paint's own view delta again: the window's, or 60 fps's (or none)
+    if (s.on) {
+        AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
+    } else {
+        pc_fps60_view_restore();
+    }
+    if (sSeeOn) AuroraSetSeeThrough(sSeeParams);
+    if (sClipOn) AuroraSetClipPlane(sClipPlane);
 }
 
 #else
