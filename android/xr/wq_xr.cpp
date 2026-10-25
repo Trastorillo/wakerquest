@@ -43,6 +43,7 @@ extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <string>
 #include <thread>
@@ -176,10 +177,19 @@ struct Settings {
                                         // horizon; farther actors and models are not drawn
     float npcDrawDistance = 10.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
                                     // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
-    // the dynamic resolution (pc_vr_dynres.cpp, off by default): the mode's lines go down one step (a
+    // the vegetation's adaptive draw distance (pc_veg_distance.cpp, on by default): the palms, grass,
+    // bushes, trees and flowers all drawn while the GPU keeps up; under load (the GPU busy over about
+    // 93%, or frames lost) the farthest go first, step by step down to vegetation_min metres from Link,
+    // shrinking away at the edge, and come back the same way when the load falls
+    bool vegAdaptive = true;
+    float vegMin = 20.0f;   // the game's metres
+    float vegMax = 120.0f;  // the distance with no load (all drawn within the game's own culling)
+    // the dynamic resolution (pc_vr_dynres.cpp, on by default): the second step after the vegetation's
+    // adaptive distance (only once that is at vegetation_min and the GPU still does not keep up, while
+    // vegetation_adaptive is on): the mode's lines go down one step (a
     // tenth of them) when the game stays under dynres_low_fps for 3 s, and up one when it holds
     // dynres_high_fps for 10 s (longer after a step up that did not hold); never under dynres_min of them
-    bool dynres = false;
+    bool dynres = true;
     float dynresLowFps = 27.0f;
     float dynresHighFps = 29.5f;
     float dynresMin = 0.7f;
@@ -261,11 +271,18 @@ const char kDefaultSettings[] =
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
     "npc_draw_distance = 10\n"
-    "# dynres 1 = the resolution follows the frame rate (off by default): one step down (a tenth of the\n"
+    "# vegetation_adaptive 1 = the palms, grass, bushes and flowers all drawn while the GPU keeps up; when it\n"
+    "# does not (busy over 93% or frames lost), the farthest are left out step by step, never nearer than\n"
+    "# vegetation_min m from Link, and come back when the load falls (vegetation_max: the top, in m).\n"
+    "vegetation_adaptive = 1\n"
+    "vegetation_min = 20\n"
+    "vegetation_max = 120\n"
+    "# dynres 1 = the resolution follows the frame rate, after the vegetation (with vegetation_adaptive, only\n"
+    "# once that is at vegetation_min): one step down (a tenth of the\n"
     "# mode's lines) when the game stays under dynres_low_fps for 3 s, one up when it holds\n"
     "# dynres_high_fps for 10 s; never under dynres_min of the mode's resolution (0.5-1). The values are\n"
     "# for 30 fps (doubled with the 60 fps mode). The resolutions above stay the top.\n"
-    "dynres = 0\n"
+    "dynres = 1\n"
     "dynres_low_fps = 27\n"
     "dynres_high_fps = 29.5\n"
     "dynres_min = 0.7\n"
@@ -317,7 +334,7 @@ const PresetKey kPresetKeys[] = {
     {"gpu_boost", {"0", "0", "1"}},
     {"cpu_low", {"1", "0", "0"}},  // only Ahorro sets the CPU's level (updatePerformance)
     {"resolution", {"864", "1080", "1512"}},
-    {"stereo_resolution", {"756", "918", "1404"}},
+    {"stereo_resolution", {"756", "918", "756"}},  // maximo: 3D at 1404 lines kept the GPU at 99%
     {"diorama_resolution", {"864", "1080", "1512"}},
     {"window_resolution", {"756", "864", "1404"}},
     {"stereo", {"0", "0", "1"}},
@@ -393,6 +410,9 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "seethrough_radius")) s.seeThroughRadius = clampf(f, 0.3f, 5.0f);
     else if (!strcmp(key, "window_draw_distance")) s.windowDrawDistance = clampf(f, 100.0f, 10000.0f);
     else if (!strcmp(key, "npc_draw_distance")) s.npcDrawDistance = f <= 0.0f ? 0.0f : clampf(f, 10.0f, 1000.0f);
+    else if (!strcmp(key, "vegetation_adaptive")) s.vegAdaptive = on;
+    else if (!strcmp(key, "vegetation_min")) s.vegMin = clampf(f, 10.0f, 200.0f);
+    else if (!strcmp(key, "vegetation_max")) s.vegMax = clampf(f, 20.0f, 1000.0f);
     else if (!strcmp(key, "dynres")) s.dynres = on;
     else if (!strcmp(key, "dynres_low_fps")) s.dynresLowFps = clampf(f, 10.0f, 30.0f);
     else if (!strcmp(key, "dynres_high_fps")) s.dynresHighFps = clampf(f, 10.0f, 30.0f);
@@ -515,6 +535,9 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "seethrough_radius")) return num(s.seeThroughRadius);
     if (!strcmp(key, "window_draw_distance")) return num(s.windowDrawDistance);
     if (!strcmp(key, "npc_draw_distance")) return num(s.npcDrawDistance);
+    if (!strcmp(key, "vegetation_adaptive")) return flag(s.vegAdaptive);
+    if (!strcmp(key, "vegetation_min")) return num(s.vegMin);
+    if (!strcmp(key, "vegetation_max")) return num(s.vegMax);
     if (!strcmp(key, "dynres")) return flag(s.dynres);
     if (!strcmp(key, "dynres_low_fps")) return num(s.dynresLowFps);
     if (!strcmp(key, "dynres_high_fps")) return num(s.dynresHighFps);
@@ -680,6 +703,12 @@ struct Xr {
     bool comboWas = false, comboHeld = false;  // both triggers + the right grip
     bool hasPerf = false;
     int perfApplied = -1;
+    // the GPU's load (pollGpuBusy): the runtime's counter (XR_META_performance_metrics), else kgsl's
+    bool hasPerfMetrics = false;
+    XrPath gpuUtilPath = XR_NULL_PATH;
+    PFN_xrQueryPerformanceMetricsCounterMETA queryCounter = nullptr;
+    int kgslFd = -2;  // -2 not tried, -1 not readable
+    uint64_t gpuPolledMs = 0;
     int refreshAsked = 0;  // the refresh setting last given to the runtime (setRefreshRate)
     XrPath hands[2] = {XR_NULL_PATH, XR_NULL_PATH};
     SDL_JoystickID padId = 0;
@@ -753,6 +782,8 @@ std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it n
 std::atomic_bool s_cinematic{false};       // wq_xr_set_cinematic: the game runs an event (a cutscene)
 std::atomic_bool s_special{false};         // wq_xr_set_special: a special scene, through the window
 std::atomic_bool s_talk{false};            // wq_xr_set_talk: the bubble closes in on who talks
+std::atomic<float> s_gpuBusy{-1.0f};        // wq_xr_gpu_busy (pollGpuBusy)
+std::atomic<uint32_t> s_framesLost{0};      // wq_xr_frames_lost (copyNewestFrame's skipped)
 float s_stereoApplied[3] = {-1.0f, 0.0f, 0.0f};  // the screen's 3D as last given to Aurora: on, strength, focus
 float s_cineRamp = 0.0f;                   // 0..1, the cutscenes' 3D faded in and out
 bool s_refreshDirty = false;               // the refresh rate changed while running
@@ -865,6 +896,8 @@ bool initInstance() {
     if (s.hasPassthrough) enable.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
     s.hasPerf = hasExtension(exts, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     if (s.hasPerf) enable.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
+    s.hasPerfMetrics = hasExtension(exts, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
+    if (s.hasPerfMetrics) enable.push_back(XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
 
     XrInstanceCreateInfoAndroidKHR android{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     android.applicationVM = s.vm;
@@ -1041,6 +1074,55 @@ GLuint textureFor(AHardwareBuffer* buffer) {
 
 // ---- Session -------------------------------------------------------------------------------------
 
+// The GPU's load (wq_xr_gpu_busy, for the vegetation's adaptive distance): the runtime's device GPU
+// utilization (XR_META_performance_metrics, turned on with the session), else the kernel's own counter
+// (/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage, when the app may read it); polled every 250 ms on the
+// XR thread. Neither: -1 (pc_veg_distance.cpp then goes by the frames lost alone).
+void startGpuBusy() {
+    if (!s.hasPerfMetrics) return;
+    PFN_xrSetPerformanceMetricsStateMETA setState = nullptr;
+    xrGetInstanceProcAddr(s.instance, "xrSetPerformanceMetricsStateMETA", (PFN_xrVoidFunction*)&setState);
+    xrGetInstanceProcAddr(s.instance, "xrQueryPerformanceMetricsCounterMETA", (PFN_xrVoidFunction*)&s.queryCounter);
+    XrPerformanceMetricsStateMETA state{XR_TYPE_PERFORMANCE_METRICS_STATE_META};
+    state.enabled = XR_TRUE;
+    if (!setState || !s.queryCounter || XR_FAILED(setState(s.session, &state)) ||
+        XR_FAILED(xrStringToPath(s.instance, "/perfmetrics_meta/device/gpu_utilization", &s.gpuUtilPath))) {
+        s.queryCounter = nullptr;
+        xrlog("GPU load: the runtime's metrics are not available");
+        return;
+    }
+    xrlog("GPU load: the runtime's metrics (device GPU utilization)");
+}
+
+float readKgslBusy() {
+    if (s.kgslFd == -2) {
+        s.kgslFd = open("/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage", O_RDONLY | O_CLOEXEC);
+        xrlog("GPU load: kgsl's counter %s", s.kgslFd >= 0 ? "readable" : "not readable");
+    }
+    if (s.kgslFd < 0) return -1.0f;
+    char buf[16];
+    const ssize_t n = pread(s.kgslFd, buf, sizeof buf - 1, 0);
+    if (n <= 0) return -1.0f;
+    buf[n] = 0;
+    return (float)atoi(buf);
+}
+
+void pollGpuBusy() {
+    const uint64_t now = SDL_GetTicks();
+    if (now - s.gpuPolledMs < 250) return;
+    s.gpuPolledMs = now;
+    float busy = -1.0f;
+    if (s.queryCounter) {
+        XrPerformanceMetricsCounterMETA c{XR_TYPE_PERFORMANCE_METRICS_COUNTER_META};
+        if (XR_SUCCEEDED(s.queryCounter(s.session, s.gpuUtilPath, &c))) {
+            if (c.counterFlags & XR_PERFORMANCE_METRICS_COUNTER_FLOAT_VALUE_VALID_BIT_META) busy = c.floatValue;
+            else if (c.counterFlags & XR_PERFORMANCE_METRICS_COUNTER_UINT_VALUE_VALID_BIT_META) busy = (float)c.uintValue;
+        }
+    }
+    if (busy < 0.0f) busy = readKgslBusy();
+    s_gpuBusy.store(busy, std::memory_order_relaxed);
+}
+
 bool initSession() {
     PFN_xrGetOpenGLESGraphicsRequirementsKHR getReqs = nullptr;
     xrGetInstanceProcAddr(s.instance, "xrGetOpenGLESGraphicsRequirementsKHR", (PFN_xrVoidFunction*)&getReqs);
@@ -1074,6 +1156,7 @@ bool initSession() {
     xrEnumerateSwapchainFormats(s.session, fmtCount, &fmtCount, fmts.data());
     for (int64_t f : fmts) s.srgb |= f == GL_SRGB8_ALPHA8;
     xrlog("session created (swapchain %s)", s.srgb ? "sRGB" : "RGBA8");
+    startGpuBusy();
     return true;
 }
 
@@ -2581,6 +2664,7 @@ bool copyNewestFrame() {
     AuroraXrFrame f{};
     if (!aurora_xr_present_take(&f)) return s.haveScreen;
     if (s.lastSerial != 0 && f.serial > s.lastSerial + 1) s.skipped += f.serial - s.lastSerial - 1;
+    s_framesLost.store(s.skipped, std::memory_order_relaxed);
     s.lastSerial = f.serial;
     if (f.syncFd < 0) s.framesWithoutFence++;
     if (f.syncFd >= 0) {
@@ -2691,6 +2775,7 @@ void runFrame() {
         setRefreshRate();
     }
     updatePerformance();
+    pollGpuBusy();
     updateScreenStereo();
     locateHead();
     updatePad();
@@ -3213,6 +3298,9 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->seeThroughRadius = st.seeThroughOn ? st.seeThroughRadius : 0.0f;
     out->windowDrawDistance = st.windowDrawDistance;
     out->npcDrawDistance = st.npcDrawDistance;
+    out->vegAdaptive = st.vegAdaptive;
+    out->vegMin = st.vegMin;
+    out->vegMax = std::max(st.vegMax, st.vegMin);
     out->dynres = st.dynres;
     // the high threshold kept over the low one (a dead band of 1 fps at least)
     out->dynresLowFps = st.dynresLowFps;
@@ -3222,6 +3310,9 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->windowPopoutSpecial = st.windowPopoutSpecial;
     out->windowFade = st.windowFade;
 }
+
+extern "C" float wq_xr_gpu_busy(void) { return s_gpuBusy.load(std::memory_order_relaxed); }
+extern "C" uint32_t wq_xr_frames_lost(void) { return s_framesLost.load(std::memory_order_relaxed); }
 
 extern "C" bool wq_xr_start(void) {
     const char* e = getenv("WQ_XR");

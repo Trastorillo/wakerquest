@@ -15,6 +15,8 @@
 // - A step down that did not raise the rate by 1 fps (the CPU is the limit, not the GPU: many
 //   characters, Windfall) holds further steps down for 30 s: lower lines would not help.
 // - Never under dynres_min (0.7) of the mode's lines, nor over them: xr.ini's resolutions are the top.
+// - The second step after the vegetation's adaptive distance (pc_veg_distance.cpp): with it on, a step
+//   down only once it is at vegetation_min and the GPU still does not keep up (fewer plants first).
 // - Each step resizes the EFB (Aurora recreates its render targets and clears the copy caches: a
 //   hitch of a frame or two), so the 2 s after a step, frames over 250 ms (loading, a pipeline built),
 //   the options menu, the headset's panel and a session not shown are not counted.
@@ -164,7 +166,7 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
 
     int next = s.level;
     const char* why = nullptr;
-    if (s.low >= kDownWindows && s.level < floorLevel && now >= s.holdDownUntil) {
+    if (s.low >= kDownWindows && s.level < floorLevel && now >= s.holdDownUntil && pc_veg_distance_saturated()) {
         next = s.level + 1;
         why = "low";
         if (s.upNs != 0 && now - s.upNs < kUnstableNs) {

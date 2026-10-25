@@ -1732,6 +1732,7 @@ void pc_frame_end(void) {
     eventWatchFrame(frames);
     censusFrame(frames);
     npcDistanceFrame(frames);
+    vegDistanceFrame(frames);
     stageHopFrame(frames);
     cameraInvertFrame(frames);
     pictoBoxFrame(frames);

@@ -150,8 +150,15 @@ const Item kControls[] = {
      4.0f, 0.2f, "%.1f m"},
     {kXr, "window_draw_distance", "Distancia del mar / horizonte", "Ventana: más = más lejos y más GPU", kStepper,
      nullptr, 0, 200.0f, 3000.0f, 100.0f, "%.0f m"},
+};
+// what is drawn when the GPU does not keep up (pc_npc_distance.cpp, pc_veg_distance.cpp, pc_vr_dynres.cpp)
+const Item kSmooth[] = {
     {kXr, "npc_draw_distance", "Distancia de personajes", "Más lejos no se dibujan; menos = más fluido", kStepper,
      nullptr, 0, 10.0f, 200.0f, 10.0f, "%.0f m"},
+    {kXr, "vegetation_adaptive", "Vegetación adaptativa", "Si la GPU no llega, quita la más lejana", kSwitch},
+    {kXr, "vegetation_min", "Vegetación mínima", "Nunca quita la que esté más cerca de Link", kStepper, nullptr, 0,
+     10.0f, 100.0f, 5.0f, "%.0f m"},
+    {kXr, "dynres", "Resolución dinámica", "Si aun así no llega, baja la resolución", kSwitch},
 };
 const Item kGameItems[] = {
     {kGame, "COS_GAME_LANGUAGE", "Idioma del juego", "Al reiniciar el juego", kStepper, OPTS(kLanguage)},
@@ -189,7 +196,7 @@ struct Tab {
 };
 #define TAB(name, items) {name, items, (int)(sizeof(items) / sizeof(items[0]))}
 constexpr Tab kTabs[] = {TAB("General", kGeneral), TAB("Efectos", kStereo), TAB("Maqueta", kDiorama), TAB("Controles", kControls),
-                     TAB("Juego", kGameItems), TAB("Ambiente", kAmbient)};
+                     TAB("Juego", kGameItems), TAB("Ambiente", kAmbient), TAB("Fluidez", kSmooth)};
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));
 constexpr int kMaxItems = 10;

@@ -371,6 +371,11 @@ bool censusOn();
 const char* censusProcName(int name);
 // The characters' draw distance (pc_npc_distance.cpp): its setting read for the next frame's draws.
 void npcDistanceFrame(unsigned int frames);
+// Its event and first-person checks, for the next frame: everything drawn (the vegetation's too).
+bool drawDistanceAllDrawn();
+// The vegetation's adaptive draw distance (pc_veg_distance.cpp): the load read and the distance set
+// for the next frame's draws (after npcDistanceFrame).
+void vegDistanceFrame(unsigned int frames);
 // The same report on demand (the running event, its staff and cuts, the sub BGM and message
 // state); COS_SMOKE=item-sweep logs it for an item whose event does not end.
 void eventWatchReport(unsigned int frames);

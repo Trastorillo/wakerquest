@@ -491,8 +491,12 @@ void dFlower_packet_c::update() {
             cXyz temp(pData->field_0x04.x, pData->field_0x04.y + 260.0f, pData->field_0x04.z);
 #if TARGET_PC
             PcVrClipOwner pcClipOwner(nullptr, "flower");  // the census (pc_census.cpp)
-#endif
+            // the vegetation's adaptive distance: left out as culled, or shrinking at its edge
+            const f32 pcVegScale = pc_veg_draw_scale(pData->field_0x04.x, pData->field_0x04.y, pData->field_0x04.z, 30.0f);
+            if(pcVegScale <= 0.0f || mDoLib_clipper::clip(j3dSys.getViewMtx(), temp, 260.0f)) {
+#else
             if(mDoLib_clipper::clip(j3dSys.getViewMtx(), temp, 260.0f)) {
+#endif
                 cLib_onBit<u8>(pData->field_0x00, 0x4);
             }
             else {
@@ -502,6 +506,10 @@ void dFlower_packet_c::update() {
                 pMtx[1][3] = pData->field_0x04.y;
                 pMtx[2][3] = pData->field_0x04.z;
                 mDoMtx_concat(j3dSys.getViewMtx(), pMtx, pData->field_0x10);
+#if TARGET_PC
+                if (pcVegScale < 1.0f)
+                    pc_veg_scale_mtx(pData->field_0x10, pcVegScale);
+#endif
             }
         }
     }

@@ -580,7 +580,12 @@ void dTree_packet_c::update() {
     anm = getAnm();
 
     s32 numPerFrame = 0;
+#if TARGET_PC
+    // the vegetation's adaptive distance (pc_veg_distance.cpp): under load, the camera's own far plane
+    mDoLib_clipper::changeFar(mDoLib_clipper::getFar() * pc_veg_far_scale(1.8181819f));
+#else
     mDoLib_clipper::changeFar(mDoLib_clipper::getFar() * 1.8181819f);
+#endif
 
     for (int i = 0; i < (s32)ARRAY_SIZE(mData); i++) {
         if (cLib_checkBit<u8>(data->mState, 2)) {
@@ -593,8 +598,12 @@ void dTree_packet_c::update() {
             cXyz pos(data->mPos.x, data->mPos.y + 260.0f, data->mPos.z);
 #if TARGET_PC
             PcVrClipOwner pcClipOwner(nullptr, "tree");  // the census (pc_census.cpp)
-#endif
+            // the vegetation's adaptive distance: left out as culled, or shrinking at its edge
+            const f32 pcVegScale = pc_veg_draw_scale(data->mPos.x, data->mPos.y, data->mPos.z, 260.0f);
+            if (pcVegScale <= 0.0f || mDoLib_clipper::clip(j3dSys.getViewMtx(), pos, 260.0f)) {
+#else
             if (mDoLib_clipper::clip(j3dSys.getViewMtx(), pos, 260.0f)) {
+#endif
                 cLib_onBit<u8>(data->mState, 0x04);
             } else {
                 cLib_offBit<u8>(data->mState, 0x04);
@@ -616,6 +625,13 @@ void dTree_packet_c::update() {
 
                 mDoMtx_concat(j3dSys.getViewMtx(), var_r22->field_0x54, data->field_0x040);
                 mDoMtx_concat(j3dSys.getViewMtx(), data->mShadowMtx, data->field_0x0d0);
+#if TARGET_PC
+                if (pcVegScale < 1.0f) {
+                    pc_veg_scale_mtx(data->field_0x010, pcVegScale);
+                    pc_veg_scale_mtx(data->field_0x040, pcVegScale);
+                    pc_veg_scale_mtx(data->field_0x0d0, pcVegScale);
+                }
+#endif
             }
         }
         data++;

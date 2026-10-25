@@ -108,6 +108,8 @@ int pc_npc_distance_hidden(void* actor) {
 
 namespace pc {
 
+bool drawDistanceAllDrawn() { return sEvent || sFirstPerson; }
+
 void npcDistanceFrame(unsigned int frames) {
     // the last frame's counts, logged every 5 s with the census or at a change of the distance
     if (censusOn() && (frames - sLogFrame >= 150 || sLastLogged != sDistUnits) && (sAsked > 0 || sLastLogged != sDistUnits)) {

@@ -78,6 +78,10 @@ typedef struct WqXrTable {
     float seeThroughRadius;    // Link seen through what is in front of him: the game's metres (0 = off)
     float windowDrawDistance;  // the window: the game's metres drawn at scale 1 (the horizon)
     float npcDrawDistance;     // the characters drawn within the game's metres from Link, every mode (0 = all)
+    // the vegetation's adaptive draw distance (xr.ini vegetation_*, pc_veg_distance.cpp): on; the
+    // nearest it may go under load and the top (the game's metres from Link)
+    bool vegAdaptive;
+    float vegMin, vegMax;
     // the dynamic resolution (xr.ini dynres, pc_vr_dynres.cpp): on; the fps under which it goes down
     // (3 s) and that it must hold to go up (10 s), for 30 fps; the lowest fraction of the mode's lines
     bool dynres;
@@ -87,6 +91,12 @@ typedef struct WqXrTable {
 // The latest head pose and frustum (false while the session does not run).
 bool wq_xr_head(WqXrHead* out);
 void wq_xr_table(WqXrTable* out);
+// The GPU's load, for pc_veg_distance.cpp: its busy percentage over about the last quarter second (the
+// runtime's XR_META_performance_metrics, else the kernel's kgsl counter), -1 when neither answers; and
+// the Aurora frames the headset never showed so far (replaced by a newer one first: frames lost). Any
+// thread.
+float wq_xr_gpu_busy(void);
+uint32_t wq_xr_frames_lost(void);
 // The game, with each frame drawn for head pose `tag` (before aurora_xr_set_frame_info): whether it is a
 // window's frame (the window mode's, or a special scene's: the HUD over the window) and the frustum it
 // drew both eyes with when not the head's (tangents left, right, down, up, as WqXrHead's; the window's

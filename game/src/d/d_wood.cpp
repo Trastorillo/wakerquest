@@ -847,18 +847,33 @@ void dWood::Packet_c::update() {
         if (cLib_checkBit(unit->mFlags, Unit_c::STATE_ACTIVE)) {
 #if TARGET_PC
             PcVrClipOwner pcClipOwner(nullptr, "wood");  // the census (pc_census.cpp)
-#endif
+            // the vegetation's adaptive distance: left out as culled, or shrinking at its edge
+            const f32 pcVegScale = pc_veg_draw_scale(unit->mPos.x, unit->mPos.y, unit->mPos.z, L_attr.kClipRadius);
+            BOOL clip = pcVegScale <= 0.0f || mDoLib_clipper::clip(
+                j3dSys.getViewMtx(),
+                cXyz(unit->mPos.x, unit->mPos.y + L_attr.kClipCenterYOffset, unit->mPos.z),
+                L_attr.kClipRadius
+            );
+#else
             BOOL clip = mDoLib_clipper::clip(
                 j3dSys.getViewMtx(),
                 cXyz(unit->mPos.x, unit->mPos.y + L_attr.kClipCenterYOffset, unit->mPos.z),
                 L_attr.kClipRadius
             );
+#endif
 
             if (clip) {
                 cLib_onBit(unit->mFlags, Unit_c::STATE_FRUSTUM_CULLED);
             } else {
                 cLib_offBit(unit->mFlags, Unit_c::STATE_FRUSTUM_CULLED);
                 unit->set_mtx(mAnm);
+#if TARGET_PC
+                if (pcVegScale < 1.0f) {
+                    pc_veg_scale_mtx(unit->mModelViewMtx, pcVegScale);
+                    pc_veg_scale_mtx(unit->mTrunkModelViewMtx, pcVegScale);
+                    pc_veg_scale_mtx(unit->mShadowModelViewMtx, pcVegScale);
+                }
+#endif
             }
         }
     }

@@ -9,6 +9,9 @@
 #include "d/d_kankyo_wether.h"
 #include "res/Object/Oyashi.h"
 #include "m_Do/m_Do_ext.h"
+#if TARGET_PC
+#include "pc/pc_vr.h"
+#endif
 
 const char daObjLpalm_c::M_arcname[7] = "Oyashi";
 daObjLpalm_c::Attr_c const daObjLpalm_c::M_attr = {0, 0};
@@ -174,6 +177,19 @@ bool daObjLpalm_c::_draw() {
     if (attr().flag1)
         return true;
 
+#if TARGET_PC
+    // the vegetation's adaptive distance (pc_veg_distance.cpp): left out under load, or shrinking to
+    // its foot at the edge (the drawn model's scale only; its collision stays)
+    const f32 pcVegScale = pc_veg_draw_scale(current.pos.x, current.pos.y, current.pos.z, 650.0f);
+    if (pcVegScale <= 0.0f)
+        return true;
+    if (pcVegScale < 1.0f) {
+        cXyz pcScale = scale * pcVegScale;
+        mModel->setBaseScale(pcScale);
+    } else {
+        mModel->setBaseScale(scale);
+    }
+#endif
     g_env_light.settingTevStruct(TEV_TYPE_BG0, &current.pos, &tevStr);
     g_env_light.setLightTevColorType(mModel, &tevStr);
     mDoExt_modelUpdateDL(mModel);

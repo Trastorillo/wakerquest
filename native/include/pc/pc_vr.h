@@ -74,6 +74,17 @@ struct PcVrClipOwner {
    hysteresis), 2 when it is left out but nearer than 30 m (its execute goes on), else 0. */
 int pc_npc_distance_hidden(void* actor);
 
+/* The vegetation's adaptive draw distance (pc_veg_distance.cpp, xr.ini vegetation_*): a plant at
+   (x, y, z) of this radius (game units) drawn at this scale: 1 in full, under 1 shrinking at the edge,
+   0 left out (as culled). pc_veg_far_scale: the far plane's factor a packet widens the clipper by (the
+   game's, or 1 while plants are cut). pc_veg_scale_mtx: a model(-view) matrix scaled about its origin.
+   pc_veg_distance_saturated: 1 at vegetation_min and still overloaded, or the adaptive cut off (the
+   dynamic resolution's turn). */
+float pc_veg_draw_scale(float x, float y, float z, float radius);
+float pc_veg_far_scale(float gameScale);
+void pc_veg_scale_mtx(float (*mtx)[4], float scale);
+int pc_veg_distance_saturated(void);
+
 /* The room's ambience (mode = pantalla, xr.ini ambient; pc_vr_diorama.cpp): the game's own ambient
    actors drawn a second time outside the giant screen (Aurora patch 0034). The actor whose draws are
    taken (nullptr: none); J3DJoint::entryIn hands its packets over while fopAc_Draw draws it, and the

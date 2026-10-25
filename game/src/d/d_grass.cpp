@@ -394,7 +394,12 @@ void dGrass_packet_c::update() {
 
     s32 numPerFrame = 0;
 
+#if TARGET_PC
+    // the vegetation's adaptive distance (pc_veg_distance.cpp): under load, the camera's own far plane
+    mDoLib_clipper::changeFar(mDoLib_clipper::getFar() * pc_veg_far_scale(1.6363636f));
+#else
     mDoLib_clipper::changeFar(mDoLib_clipper::getFar() * 1.6363636f);
+#endif
     for (int i = 0; i < (s32)ARRAY_SIZE(mGrassData); i++) {
         if (data->mState != 0) {
             if (data->mState == 1 && numPerFrame < 30) {
@@ -406,8 +411,12 @@ void dGrass_packet_c::update() {
             cXyz pos(data->mPos.x, data->mPos.y + 260.0f, data->mPos.z);
 #if TARGET_PC
             PcVrClipOwner pcClipOwner(nullptr, "grass");  // the census (pc_census.cpp)
-#endif
+            // the vegetation's adaptive distance: left out as culled, or shrinking at its edge
+            const f32 pcVegScale = pc_veg_draw_scale(data->mPos.x, data->mPos.y, data->mPos.z, 40.0f);
+            if (pcVegScale <= 0.0f || mDoLib_clipper::clip(j3dSys.getViewMtx(), pos, 260.0f)) {
+#else
             if (mDoLib_clipper::clip(j3dSys.getViewMtx(), pos, 260.0f)) {
+#endif
                 cLib_onBit<u8>(data->mInitFlags, 0x02);
             } else {
                 cLib_offBit<u8>(data->mInitFlags, 0x02);
@@ -422,6 +431,10 @@ void dGrass_packet_c::update() {
                     mDoMtx_YrotM(data->mModelMtx, i * 0xDCF);
                     mDoMtx_concat(j3dSys.getViewMtx(), data->mModelMtx, data->mModelMtx);
                 }
+#if TARGET_PC
+                if (pcVegScale < 1.0f)
+                    pc_veg_scale_mtx(data->mModelMtx, pcVegScale);
+#endif
             }
         }
         data++;
