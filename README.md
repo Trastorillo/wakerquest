@@ -1,5 +1,22 @@
 # WakerQuest
 
+## En español
+
+WakerQuest lleva un juego de aventuras de GameCube de 2002 (disco GZLP01) a las Meta Quest 3, sin emulación: el juego
+compilado desde su decompilación, en una pantalla gigante, en 3D, como maqueta o como ventana en tu habitación.
+
+**No incluye nada de Nintendo; necesitas tu propia copia del disco europeo GZLP01.** Este repositorio y el APK
+solo traen código: ni la imagen del disco, ni gráficos, ni sonidos, ni textos del juego. El APK lee los datos
+de tu propia ISO cada vez que arranca.
+
+### Instalación en las Quest
+
+1. Saca la ISO de tu propio disco europeo (GZLP01, revisión 0) sin comprimir (`.iso`, no `.rvz` ni `.ciso`).
+2. Instala el APK de la sección *Releases* con SideQuest o con `adb install -r WakerQuest-<versión>.apk`.
+   Para actualizar usa siempre `install -r` y no desinstales: al desinstalar se borra tu partida.
+3. Copia la ISO a la carpeta `Download` de las gafas, abre WakerQuest y elígela en el selector.
+4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel *Realidad virtual*.
+
 WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
 native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,
 stereo, the room's ambience around the player. Its work lives in `android/` (the APK and the headset
