@@ -3,6 +3,7 @@
 #include "pc_internal.h"
 
 #include "pc/pc_qol.h"
+#include "pc/pc_settings.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -49,7 +50,10 @@ extern "C" {
 int pc_qol(PcQol which) {
     Option& o = sOptions[which];
     if (o.value < 0) {
+        // the environment (settings.ini's values are put there at start), else the menu's default (a
+        // fresh install: WakerQuest skips the opening legend by default, pc_menu.cpp)
         const char* v = getenv(o.key);
+        if (v == nullptr) v = pc_settings_get(o.key);
         o.value = parse(which, v);
         if (o.value != 0) {
             pc::writef(STDERR_FILENO, "[cos] qol: %s=%s\n", o.key, v);

@@ -16,6 +16,14 @@
 //   process ID), so one walking about the edge does not flicker.
 // - No fade-in: an alpha or scale fade would go through each actor's own materials or its scale (game
 //   logic); they appear as when the game's camera culling lets them in.
+// - The title screen (introCinematic; fase 2: before, 1.0.8, a new file's first event on Outset, which
+//   was not the one that stalled): its stage, sea_T (Outset behind the "Press Start" and the logo, the
+//   camera flying about the island, most of it loaded, the frames slow). While it is the stage the NPCs
+//   farther than kIntroUnits (40 m) from the game camera's eye are not drawn, event or not, Link or not,
+//   their execute always kept; the vegetation's cut follows it (pc_veg_distance.cpp), and the headset
+//   shows it on the flat giant screen (pc_vr_diorama.cpp, intro_2d). A narrower view than the game's
+//   usual 60 degrees (a close-up from afar) takes those distances out as far as it zooms in. Over when
+//   the stage changes (a file loaded, a new game).
 #include "pc/pc_vr.h"
 #include "pc_internal.h"
 
@@ -23,11 +31,13 @@
 #include "f_op/f_op_actor.h"
 #include "f_op/f_op_actor_mng.h"
 #include "f_pc/f_pc_name.h"
+#include "f_op/f_op_view.h"
 
 #if defined(__ANDROID__)
 #include "wq_xr.h"
 #endif
 
+#include <cmath>
 #include <cstring>
 #include <unistd.h>
 
@@ -53,6 +63,11 @@ signed char sIsNpc[fpcNm_MAX_NUM_e];  // 0 unknown, 1 no, 2 an NPC_* process
 unsigned sAsked = 0, sHidden = 0;
 float sLastLogged = -1.0f;
 uint64_t sLogFrame = 0;
+// the title screen: its stage (sea_T) with a camera
+constexpr float kIntroUnits = 4000.0f;
+bool sIntro = false;
+float sEye[3] = {0.0f, 0.0f, 0.0f};  // the game camera's eye, the last frame (the opening's centre)
+float sZoom = 1.0f;                  // its zoom against a 60-degree view (1 at it or wider)
 
 bool isNpc(fopAc_ac_c* ac) {
     if (fopAcM_GetGroup(ac) == fopAc_NPC_e) return true;
@@ -80,8 +95,19 @@ Slot* slotFor(uint32_t id) {
 } // namespace
 
 int pc_npc_distance_hidden(void* actor) {
-    if (sDistUnits <= 0.0f || sFirstPerson || dComIfGp_event_runCheck()) return 0;
     const fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    if (sIntro) {
+        // the title: from the game camera, its execute kept (Link or not)
+        fopAc_ac_c* ac = (fopAc_ac_c*)actor;
+        if (ac == player || !fopAcM_CheckStatus(ac, fopAcStts_CULL_e) || !isNpc(ac)) return 0;
+        const float dx = ac->current.pos.x - sEye[0], dy = ac->current.pos.y - sEye[1], dz = ac->current.pos.z - sEye[2];
+        sAsked++;
+        const float reach = kIntroUnits * sZoom;
+        if (dx * dx + dy * dy + dz * dz <= reach * reach) return 0;
+        sHidden++;
+        return 2;
+    }
+    if (sDistUnits <= 0.0f || sFirstPerson || dComIfGp_event_runCheck()) return 0;
     if (player == nullptr) return 0;
     fopAc_ac_c* ac = (fopAc_ac_c*)actor;
     if (ac == player || !fopAcM_CheckStatus(ac, fopAcStts_CULL_e) || !isNpc(ac)) return 0;
@@ -109,6 +135,13 @@ int pc_npc_distance_hidden(void* actor) {
 namespace pc {
 
 bool drawDistanceAllDrawn() { return sEvent || sFirstPerson; }
+
+bool introCinematic(float eye[3], float* zoom) {
+    if (sIntro && eye != nullptr) memcpy(eye, sEye, sizeof(sEye));
+    if (sIntro && zoom != nullptr) *zoom = sZoom;
+    return sIntro;
+}
+
 
 void npcDistanceFrame(unsigned int frames) {
     // the last frame's counts, logged every 5 s with the census or at a change of the distance
@@ -138,6 +171,24 @@ void npcDistanceFrame(unsigned int frames) {
                                                        daPyStts0_ROPE_AIM_e) != 0 ||
                     dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
     sFrame = frames + 1;  // never 0 (a free slot)
+#if defined(__ANDROID__)
+    // the title screen: on while its stage (sea_T) is loaded and has a camera, the whole of it
+    const view_class* view = dComIfGd_getView();
+    if (view != nullptr) {
+        sEye[0] = view->mLookat.mEye.x;
+        sEye[1] = view->mLookat.mEye.y;
+        sEye[2] = view->mLookat.mEye.z;
+        const float t = std::tan(view->mFovy * 0.5f * 3.14159265f / 180.0f);
+        sZoom = t > 1e-3f && t < 0.57735f ? 0.57735f / t : 1.0f;  // tan(30 degrees)
+    }
+    const char* stage = dComIfGp_getStartStageName();
+    const bool title = view != nullptr && stage != nullptr && strcmp(stage, "sea_T") == 0;
+    if (title != sIntro) {
+        writef(STDERR_FILENO, "[npc-distance] the title screen (sea_T): %s\n",
+               title ? "far NPCs and vegetation cut around the camera" : "over (left its stage)");
+        sIntro = title;
+    }
+#endif
 }
 
 } // namespace pc

@@ -507,6 +507,14 @@ struct Ambient {
     bool kingPlaced = false;
     float kingAt[3] = {0, 0, 0};
     float windYaw = 0.0f, k = 0.0f;
+    // the game camera's heading this frame (1.0.8: the particles, the characters and the Helmaroc King
+    // turned with it) and the hand's move, turn and size (ambient_move) about the anchor
+    float camYaw = 0.0f;
+    M4 moved;
+    // the wind lines' middle (their emitters'), smoothed
+    bool windMidValid = false;
+    float windMid[3] = {0, 0, 0};
+    uint64_t windMidNs = 0;
     float screenMid[3] = {0, 0, 0};
     float floorY = 0.0f;  // the room's floor (the runtime's, else 1.3 m below the eyes)
     uint64_t placeLogNs = 0;
@@ -610,6 +618,7 @@ int ambientEmitters(u16 id) {
 
 void ambientOff() {
     sAmbient.worldValid = false;  // its heading taken again when it starts
+    sAmbient.windMidValid = false;
     if (sAmbient.wasOn) {
         aurora_xr_set_ambient(false, 0, nullptr, nullptr, 0.0f, nullptr, 0.0f, 0.0f, 0.0f);
         pc::writef(STDERR_FILENO, "[vr] ambient off\n");
@@ -767,6 +776,8 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         // the crabs and small birds gather around the anchor (the field keeps its name)
         memcpy(sAmbient.screenMid, kWorldAnchor, sizeof(kWorldAnchor));
         sAmbient.windYaw = sAmbient.worldYaw;
+        sAmbient.camYaw = cameraYaw(view->mViewMtx);
+        sAmbient.moved = moved;
         sAmbient.k = kWorldK;
     } else {
         sAmbient.worldValid = false;
@@ -1086,10 +1097,11 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
         float tfhIn[12];
         for (int i = 0; i < 3; i++)
             for (int j = 0; j < 4; j++) tfhIn[i * 4 + j] = tableHead.m[i][j];
-        // what comes out is opaque up to a thin edge (window_fade) at the pop-out's front; with the
-        // pop-out off (window_popout_on 0) nothing in front of the window's plane is shown
-        float fade[4] = {table.windowFade / s.winHalfW, table.windowFade / s.winHalfH, std::max(table.windowFade, 0.005f),
-                         2.0f};
+        // the picture ends sharp at the window's rectangle, under its frame (1.0.8: no fade at its sides,
+        // the shader's least, 1e-3 of the half width); what comes out is opaque up to a thin edge
+        // (window_fade) at the pop-out's front; with the pop-out off (window_popout_on 0) nothing in
+        // front of the window's plane is shown
+        float fade[4] = {1e-3f, 1e-3f, std::max(table.windowFade, 0.005f), 2.0f};
         memcpy(tfh, tfhIn, sizeof(tfh));
         aurora_xr_set_diorama_mask(tfhIn, s.projTo, eyeShift, fade);
         aurora_xr_set_diorama_window(popout, table.windowDepth);
@@ -1212,13 +1224,26 @@ bool pc_vr_view_begin(view_class* view) {
         (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
                                             daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
          dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
-    const bool ownView = !specialScene && (firstPerson || (table.cineScreen && cutscene));
+    // The title screen (intro_2d, fase 2): while its stage (sea_T, Outset behind the logo) is loaded
+    // (pc_npc_distance.cpp's introCinematic), the giant screen, flat, whatever the mode, as cine_screen's
+    // cutscenes: the layer drops the 3D meanwhile (wq_xr_set_intro_flat), and no ambience. Nothing is
+    // written: the mode and the 3D as they were after it, even if the game ends during it.
+    const bool intro2d = table.intro2d && pc::introCinematic(nullptr, nullptr);
+    static bool sIntro2dWas = false;
+    if (intro2d != sIntro2dWas) {
+        pc::writef(STDERR_FILENO, "[vr] the title screen: %s\n",
+                   intro2d ? "on the giant screen, flat (intro_2d)" : "over: back to the mode and 3D of xr.ini");
+        sIntro2dWas = intro2d;
+    }
+    wq_xr_set_intro_flat(intro2d);
+    const bool ownView = !specialScene && (intro2d || firstPerson || (table.cineScreen && cutscene));
     const bool modeOn = table.diorama || table.window || special;
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
         if (s.wasOn) {
             pc::writef(STDERR_FILENO, "[vr] %s off (%s)\n", s.window ? "window" : "diorama",
                        !modeOn ? "mode" : view == nullptr ? "no camera" : player == nullptr ? "no Link"
+                       : intro2d ? "the title screen: the flat screen"
                        : firstPerson ? "telescope or first person: the screen"
                        : ownView ? "a cutscene: the screen" : "no head pose");
             aurora_xr_set_frame_info(0, false);
@@ -1235,7 +1260,10 @@ bool pc_vr_view_begin(view_class* view) {
         s.focusAmt = 0.0f;
         s.focusValid = false;
         wq_xr_set_talk(false);
-        if (!modeOn) {
+        // the stick as on the screen meanwhile (1.0.9): aiming in first person (the hookshot, the bow...)
+        // it keeps the game camera's own axes, not the model's last heading
+        wq_xr_set_camera_heading(0.0f, false, dComIfGp_getMesgStatus() != 0);
+        if (!modeOn && !intro2d) {
             ambientFrame(view, table, player);
         } else {
             ambientOff();
@@ -1402,6 +1430,7 @@ void pc_vr_sky_end(void) {
 }
 
 void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
+void pc_vr_reset_position(void) { wq_xr_reset_position(); }
 bool pc_vr_value(const char* key, char* out, int size) { return wq_xr_value(key, out, size); }
 const char* pc_vr_perf_preset(void) { return wq_xr_perf_preset(); }
 int pc_vr_resolution(int* base) { return wq_xr_resolution(base); }
@@ -1528,15 +1557,26 @@ void ambientDelta(const float p[3], const float d[3], Mtx out, float size = kAmb
     toMtx(mul(mul(mul(sAmbient.headStage, lift), sAmbient.stageWorld), sAmbient.worldView), out);
 }
 
-// Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
-// in the game is brought near, keeping its direction, so it stays within the ambience's range. The
-// seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
-// 1 m of the screen's middle, on the room's floor; the Helmaroc King 1.8 m in front of the head, a little
-// above the eyes, where the head looked when it showed (it keeps that place while the scene lasts).
-void ambientPlace(int kind, const float p[3], float d[3]) {
-    float r[3];
-    xform(sAmbient.stageWorld, p, r);
-    d[0] = d[1] = d[2] = 0.0f;
+// The game camera's axes now, scaled: its heading to the room's -z (1.0.8), sc metres per game unit
+M4 ambientCameraAxes(float sc) {
+    float r[3], u[3], b[3];
+    axes(sAmbient.camYaw, r, u, b);
+    M4 m = identity();
+    for (int col = 0; col < 3; col++) {
+        m.m[0][col] = r[col] * sc;
+        m.m[1][col] = u[col] * sc;
+        m.m[2][col] = b[col] * sc;
+    }
+    return m;
+}
+
+// The characters, the animals and the Helmaroc King (kinds 6 and 5), 1.0.8: turned as the game camera
+// sees them now (its heading the room's -z), so they face the player as they face the camera.
+// Where each stands (stage space): a character or an animal about the anchor as the camera sees it
+// about Link (its offset from him turned with the camera, at its own size, within 1.2 m), on the
+// room's floor, then the hand's move; the Helmaroc King 1.8 m in front of the head, a little above the
+// eyes, where the head looked when it showed (it keeps that place while the scene lasts).
+void ambientFacingAt(int kind, const float p[3], float at[3]) {
     if (kind == 5) {
         if (!sAmbient.kingPlaced) {
             const float* h = sAmbient.headPos;
@@ -1546,8 +1586,40 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
             sAmbient.kingAt[2] = h[2] + 1.8f * f[2];
             sAmbient.kingPlaced = true;
         }
-        for (int i = 0; i < 3; i++) d[i] = sAmbient.kingAt[i] - r[i];
-    } else if (kind == 0 || kind == 1) {
+        memcpy(at, sAmbient.kingAt, sizeof(sAmbient.kingAt));
+        return;
+    }
+    const float reach = 1.2f;
+    const M4 rot = ambientCameraAxes(kAmbientSize * sAmbient.k);
+    const float o[3] = {p[0] - sAmbient.link.x, 0.0f, p[2] - sAmbient.link.z};
+    float vx = rot.m[0][0] * o[0] + rot.m[0][2] * o[2], vz = rot.m[2][0] * o[0] + rot.m[2][2] * o[2];
+    const float l = std::sqrt(vx * vx + vz * vz);
+    if (l > reach) vx *= reach / l, vz *= reach / l;
+    const float* m = sAmbient.screenMid;
+    const float local[3] = {m[0] + vx, m[1], m[2] + vz};
+    xform(sAmbient.moved, local, at);
+    at[1] = sAmbient.floorY;
+}
+
+// Its view delta: the camera's axes at `size` of the anchored world's scale (with the hand's turn and
+// size), its origin p at `at`
+void ambientFacingDelta(const float p[3], const float at[3], Mtx out, float size) {
+    M4 m = mul(sAmbient.moved, ambientCameraAxes(size * sAmbient.k));
+    for (int row = 0; row < 3; row++)
+        m.m[row][3] = at[row] - (m.m[row][0] * p[0] + m.m[row][1] * p[1] + m.m[row][2] * p[2]);
+    toMtx(mul(mul(sAmbient.headStage, m), sAmbient.worldView), out);
+}
+
+// Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
+// in the game is brought near, keeping its direction, so it stays within the ambience's range. The
+// seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
+// 1 m of the screen's middle, on the room's floor (the characters, the animals and the Helmaroc King:
+// ambientFacingAt).
+void ambientPlace(int kind, const float p[3], float d[3]) {
+    float r[3];
+    xform(sAmbient.stageWorld, p, r);
+    d[0] = d[1] = d[2] = 0.0f;
+    if (kind == 0 || kind == 1) {
         const float* h = sAmbient.headPos;
         float vx = r[0] - h[0], vz = r[2] - h[2];
         const float l = std::sqrt(vx * vx + vz * vz);
@@ -1557,9 +1629,8 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
         d[0] = h[0] + vx * ring - r[0];
         d[1] = y - r[1];
         d[2] = h[2] + vz * ring - r[2];
-    } else if (kind == 2 || kind == 3 || kind == 6) {
-        // (the characters and animals within 1.2 m)
-        const float reach = kind == 6 ? 1.2f : 1.0f;
+    } else if (kind == 2 || kind == 3) {
+        const float reach = 1.0f;
         const float* m = sAmbient.screenMid;
         float vx = r[0] - m[0], vz = r[2] - m[2];
         const float l = std::sqrt(vx * vx + vz * vz);
@@ -1570,22 +1641,46 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
     }
 }
 
-// The wind lines (made around the game camera's eye) around the player: the camera's eye at the head,
-// the world's axes as anchored (so they blow with the game's wind), 1000 game units 2.5 m.
-void ambientWindDelta(Mtx out, float kw = 0.0025f, float lift = 0.0f) {
-    float r[3], u[3], b[3];
-    axes(sAmbient.windYaw, r, u, b);
-    M4 m = identity();
-    for (int col = 0; col < 3; col++) {
-        m.m[0][col] = r[col] * kw;
-        m.m[1][col] = u[col] * kw;
-        m.m[2][col] = b[col] * kw;
-    }
-    const float eye[3] = {sAmbient.worldView.m[0][3], sAmbient.worldView.m[1][3], sAmbient.worldView.m[2][3]};
+// The weather's particles around the player (1.0.8): their own middle (`mid`, the world) at the head
+// (lifted by `lift` metres), the game camera's axes now (its heading the room's -z, as the picture
+// shows them), kw metres per game unit.
+void ambientCenteredDelta(const float mid[3], Mtx out, float kw, float lift = 0.0f) {
+    M4 m = ambientCameraAxes(kw);
     for (int row = 0; row < 3; row++)
         m.m[row][3] = sAmbient.headPos[row] + (row == 1 ? lift : 0.0f) -
-                      (m.m[row][0] * eye[0] + m.m[row][1] * eye[1] + m.m[row][2] * eye[2]);
+                      (m.m[row][0] * mid[0] + m.m[row][1] * mid[1] + m.m[row][2] * mid[2]);
     toMtx(mul(mul(sAmbient.headStage, m), sAmbient.worldView), out);
+}
+
+// The wind lines' middle: their emitters' (the normal group), smoothed (half-life 0.5 s: one born or
+// gone moves it a little), else the camera's eye. The game makes them 40 m ahead of the camera, 10 m up,
+// moved upwind, so the camera's eye is not their middle.
+void ambientWindMid(const float eye[3], float out[3]) {
+    float sum[3] = {0.0f, 0.0f, 0.0f};
+    int n = 0;
+    if (JPAEmitterManager* mng = dPa_control_c::getEmitterManager())
+        for (JSULink<JPABaseEmitter>* l = mng->mEmtrGroup[0].getFirst(); l != nullptr; l = l->getNext()) {
+            JPABaseEmitter* e = l->getObject();
+            if (e->getPcUserID() != dPa_name::ID_AK_JN_WINDLINE00) continue;
+            JGeometry::TVec3<f32> t;
+            e->getGlobalTranslation(t);
+            sum[0] += t.x, sum[1] += t.y, sum[2] += t.z;
+            n++;
+        }
+    const uint64_t now = nowNs();
+    if (n == 0) {
+        if (!sAmbient.windMidValid) memcpy(sAmbient.windMid, eye, sizeof(sAmbient.windMid));
+    } else {
+        const float m[3] = {sum[0] / n, sum[1] / n, sum[2] / n};
+        const float dx = m[0] - sAmbient.windMid[0], dy = m[1] - sAmbient.windMid[1], dz = m[2] - sAmbient.windMid[2];
+        const float a = !sAmbient.windMidValid || dx * dx + dy * dy + dz * dz > kSnapDistance * kSnapDistance
+                            ? 1.0f
+                            : blend((now - sAmbient.windMidNs) * 1e-9, 0.5f);
+        for (int i = 0; i < 3; i++) sAmbient.windMid[i] += (m[i] - sAmbient.windMid[i]) * a;
+        sAmbient.windMidValid = true;
+    }
+    sAmbient.windMidNs = now;
+    memcpy(out, sAmbient.windMid, sizeof(sAmbient.windMid));
 }
 
 void pc_vr_ambient_draw(void) {
@@ -1615,9 +1710,13 @@ void pc_vr_ambient_draw(void) {
         sAmbient.placeLogNs = nowLog;
         for (int j = 0; j < sAmbient.nActors && j < 6; j++) {
             float r[3], mv[3];
-            xform(sAmbient.stageWorld, sAmbient.pos[j], r);
-            ambientPlace(sAmbient.kinds[j], sAmbient.pos[j], mv);
-            for (int c = 0; c < 3; c++) r[c] += mv[c];
+            if (sAmbient.kinds[j] == 5 || sAmbient.kinds[j] == 6) {
+                ambientFacingAt(sAmbient.kinds[j], sAmbient.pos[j], r);
+            } else {
+                xform(sAmbient.stageWorld, sAmbient.pos[j], r);
+                ambientPlace(sAmbient.kinds[j], sAmbient.pos[j], mv);
+                for (int c = 0; c < 3; c++) r[c] += mv[c];
+            }
             pc::writef(STDERR_FILENO,
                        "[vr] ambient place: kind %d at (%.2f, %.2f, %.2f) m from the head, %.2f m from the screen's "
                        "middle; %.4f m per unit" "\n",
@@ -1637,9 +1736,15 @@ void pc_vr_ambient_draw(void) {
             if (sAmbient.actors[j] == who) a = j;
         if (sAmbient.placed && a >= 0) {
             Mtx d;
-            float mv[3];
-            ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
-            ambientDelta(sAmbient.pos[a], mv, d, sAmbient.kinds[a] == 5 ? kHelmarocSize : kAmbientSize);
+            if (sAmbient.kinds[a] == 5 || sAmbient.kinds[a] == 6) {
+                float at[3];
+                ambientFacingAt(sAmbient.kinds[a], sAmbient.pos[a], at);
+                ambientFacingDelta(sAmbient.pos[a], at, d, sAmbient.kinds[a] == 5 ? kHelmarocSize : kAmbientSize);
+            } else {
+                float mv[3];
+                ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
+                ambientDelta(sAmbient.pos[a], mv, d);
+            }
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
             deltaActor = who;
         }
@@ -1659,20 +1764,32 @@ void pc_vr_ambient_draw(void) {
         JPADrawInfo info(view->mViewMtx, 45.0f, 1.218f);
         info.setFovy(view->mFovy);
         info.setAspect(view->mAspect);
-        // the weather's seagulls (made around the game camera too): around the head, 0.6 m over it
+        // the camera's eye, and where it looks (the game's own middle for its rain: 7 m ahead)
+        const float eye[3] = {sAmbient.worldView.m[0][3], sAmbient.worldView.m[1][3], sAmbient.worldView.m[2][3]};
+        float look[3] = {view->mLookat.mCenter.x - view->mLookat.mEye.x, view->mLookat.mCenter.y - view->mLookat.mEye.y,
+                         view->mLookat.mCenter.z - view->mLookat.mEye.z};
+        {
+            const float l = std::sqrt(look[0] * look[0] + look[1] * look[1] + look[2] * look[2]);
+            for (int i = 0; i < 3; i++)
+                look[i] = l > 1e-3f ? look[i] / l : -sAmbient.worldView.m[i][2];  // else the view's forward
+        }
+        // the weather's seagulls (made in a ring around the game camera's eye): around the head, 0.6 m
+        // over it
         if (sAmbient.placed) {
             Mtx d;
-            ambientWindDelta(d, 0.0012f * kAmbientSize, 0.6f);
+            ambientCenteredDelta(eye, d, 0.0012f * kAmbientSize, 0.6f);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
         } else {
             AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
         }
         pc_vr_ambient_jpa = dPa_name::ID_AK_JN_KAMOME00;
         dComIfGp_particle_draw(&info);
-        // the wind lines: around the player
+        // the wind lines: their middle at the player's head
         if (sAmbient.placed) {
             Mtx d;
-            ambientWindDelta(d, 0.0005f, -0.5f);
+            float mid[3];
+            ambientWindMid(eye, mid);
+            ambientCenteredDelta(mid, d, 0.0005f);
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
         }
         pc_vr_ambient_jpa = dPa_name::ID_AK_JN_WINDLINE00;
@@ -1684,13 +1801,19 @@ void pc_vr_ambient_draw(void) {
         const bool snow = g_env_light.mSnowCount > 0 && g_env_light.mpSnowPacket != nullptr;
         const bool housi = g_env_light.mHousiCount > 0 && g_env_light.mpHousiPacket != nullptr;
         if (sAmbient.placed && (rain || snow || housi)) {
-            Mtx d;
-            ambientWindDelta(d, 0.002f, -0.3f);
-            AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
-            j3dSys.reinitGX();
-            if (rain) g_env_light.mpRainPacket->draw();
-            if (snow) g_env_light.mpSnowPacket->draw();
-            if (housi) g_env_light.mpHousiPacket->draw();
+            // each its middle (dKy_set_eyevect_calc2's, as the game makes it: ahead of the camera's eye,
+            // the rain 7 m and 6 m along its pitch, the snow 5 m, the spores or ash 8 m) at the player's head
+            auto centred = [&](float ahead, float up) {
+                const float mid[3] = {view->mLookat.mEye.x + look[0] * ahead, view->mLookat.mEye.y + look[1] * up,
+                                      view->mLookat.mEye.z + look[2] * ahead};
+                Mtx d;
+                ambientCenteredDelta(mid, d, 0.002f);
+                AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
+                j3dSys.reinitGX();
+            };
+            if (rain) centred(700.0f, 600.0f), g_env_light.mpRainPacket->draw();
+            if (snow) centred(500.0f, 500.0f), g_env_light.mpSnowPacket->draw();
+            if (housi) centred(800.0f, 800.0f), g_env_light.mpHousiPacket->draw();
             j3dSys.reinitGX();
             GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
         }
@@ -1718,6 +1841,7 @@ void pc_vr_view_end(void) {}
 void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
+void pc_vr_reset_position(void) {}
 bool pc_vr_value(const char*, char*, int) { return false; }
 const char* pc_vr_perf_preset(void) { return ""; }
 int pc_vr_resolution(int*) { return -1; }

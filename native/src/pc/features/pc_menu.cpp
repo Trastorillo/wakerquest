@@ -403,6 +403,13 @@ constexpr bool kSwitch = true;
 #else
 constexpr bool kSwitch = false;
 #endif
+// WakerQuest (Meta Quest, fase 2): a few defaults of its own, the ones its player plays with (the camera's
+// horizontal axis inverted, the opening legend skipped); elsewhere the game's
+#if defined(__ANDROID__)
+constexpr bool kHeadset = true;
+#else
+constexpr bool kHeadset = false;
+#endif
 
 // The menu's language (pc_ui_spanish, as the shader loading screen): the Spanish text or the English one.
 const char* T(const char* es, const char* en) {
@@ -553,10 +560,8 @@ void syncVrPreset() {
 }
 void applyVrReset(const char*, const char* v, void*) {
     if (strcmp(v, "1") == 0) {
-        pc_vr_setting("bubble_x", "0");
-        pc_vr_setting("bubble_height", "0.3");
-        pc_vr_setting("bubble_distance", "1.0");
-        pc_vr_setting("bubble_yaw", "0");
+        // the model, the window and the screen where xr.ini's defaults put them (the headset panel's too)
+        pc_vr_reset_position();
     }
 }
 
@@ -607,16 +612,21 @@ const PcSettingChoice kHdStats[] = {{"0", "Desactivadas", "Off"}, {"150", "Cada 
 
 const PcSettingChoice kVrMode[] = {{"pantalla", "Pantalla gigante", "Giant screen"}, {"maqueta", "Burbuja (maqueta)", "Bubble (diorama)"}};
 const PcSettingChoice kVrShape[] = {{"esfera", "Esfera", "Sphere"}, {"caja", "Caja (mesa)", "Box (table)"}};
+// (fase 2: the xr.ini defaults among the choices, so syncVrRows shows them: 40 m, 82 cm, 45 cm, 19 cm...)
 const PcSettingChoice kVrSpan[] = {{"10", "10 m de juego"}, {"20", "20 m de juego"}, {"30", "30 m de juego"},
-                                   {"45", "45 m de juego"}, {"60", "60 m de juego"}, {"90", "90 m de juego"}};
-const PcSettingChoice kVrSize[] = {{"0.6", "60 cm"}, {"0.8", "80 cm"}, {"1.0", "1 m"},
+                                   {"40", "40 m de juego"}, {"45", "45 m de juego"}, {"60", "60 m de juego"},
+                                   {"90", "90 m de juego"}};
+const PcSettingChoice kVrSize[] = {{"0.6", "60 cm"}, {"0.8", "80 cm"}, {"0.82", "82 cm"}, {"1.0", "1 m"},
                                    {"1.2", "1,2 m"}, {"1.5", "1,5 m"}, {"2.0", "2 m"}};
-const PcSettingChoice kVrDistance[] = {{"0.6", "60 cm"}, {"0.8", "80 cm"}, {"1.0", "1 m"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}};
+const PcSettingChoice kVrDistance[] = {{"0.446", "45 cm"}, {"0.6", "60 cm"}, {"0.8", "80 cm"}, {"1.0", "1 m"},
+                                       {"1.3", "1,3 m"}, {"1.6", "1,6 m"}};
 const PcSettingChoice kVrHeight[] = {{"0.0", "A la altura de los ojos"}, {"0.15", "15 cm por debajo"},
-                                     {"0.3", "30 cm por debajo"}, {"0.45", "45 cm por debajo"}, {"0.6", "60 cm por debajo"}};
+                                     {"0.191", "19 cm por debajo"}, {"0.3", "30 cm por debajo"},
+                                     {"0.45", "45 cm por debajo"}, {"0.6", "60 cm por debajo"}};
 const PcSettingChoice kVrFade[] = {{"0.05", "5 cm"}, {"0.1", "10 cm"}, {"0.2", "20 cm"}, {"0.3", "30 cm"}};
 const PcSettingChoice kVrStereo[] = {{"0", "Desactivado", "Off"}, {"0.006", "Suave", "Soft"},
-                                     {"0.012", "Normal"}, {"0.02", "Intenso", "Strong"}};
+                                     {"0.012", "Normal"}, {"0.02", "Intenso", "Strong"},
+                                     {"0.088", "Muy intenso", "Very strong"}};
 // As GalaxyQuest's VR panel: a scale of the picture (1,00 = 1080 lines), with the lines it gives
 const PcSettingChoice kVrResolution[] = {
     {"540", "0,50  ·  540 líneas"},   {"648", "0,60  ·  648 líneas"},   {"756", "0,70  ·  756 líneas"},
@@ -627,9 +637,9 @@ const PcSettingChoice kVrResolution[] = {
 const PcSettingChoice kVrPreset[] = {{"ahorro", "Ahorro", "Saving"}, {"equilibrado", "Equilibrado", "Balanced"},
                                      {"maximo", "Máximo", "Maximum"}, {"personal", "Personal", "Custom"}};
 const PcSettingChoice kVrRefresh[] = {{"72", "72 Hz"}, {"80", "80 Hz"}, {"90", "90 Hz"}, {"120", "120 Hz"}};
-const PcSettingChoice kVrHud[] = {{"0.9", "90 cm"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}, {"2.0", "2 m"}};
+const PcSettingChoice kVrHud[] = {{"0.7", "70 cm"}, {"0.9", "90 cm"}, {"1.3", "1,3 m"}, {"1.6", "1,6 m"}, {"2.0", "2 m"}};
 const PcSettingChoice kVrAmbientScale[] = {{"0.25", "x0,25"}, {"0.5", "x0,5"}, {"0.75", "x0,75"}, {"1", "x1"},
-                                           {"1.5", "x1,5"},   {"2", "x2"},     {"3", "x3"}};
+                                           {"1.3", "x1,3"},   {"1.5", "x1,5"}, {"2", "x2"},     {"3", "x3"}};
 const PcSettingChoice kVrAmbientAnchor[] = {{"world", "En la habitación", "In the room"},
                                             {"camera", "Con la cámara", "With the camera"}};
 const PcSettingChoice kVrReset[] = {{"0", "—"}, {"1", "Restablecer ahora", "Reset now"}};
@@ -642,44 +652,45 @@ void applyVrStereo(const char*, const char* v, void*) {
 }
 
 const PcSettingDesc kBuiltins[] = {
-    // Realidad virtual (WakerQuest, pc_vr.h): xr.ini through pc_vr_setting
+    // Realidad virtual (WakerQuest, pc_vr.h): xr.ini through pc_vr_setting. Their defaults (fase 2): the
+    // ones Trasto plays with; the rows show xr.ini's values once the headset layer runs (syncVrRows)
     {"COS_VR_PRESET", "Rendimiento",
      "Frecuencia, GPU y CPU, resolución, 3D, mundo de la burbuja y horizonte de la ventana de una vez. Ahorro: "
      "menos calor y batería; Máximo: 90 Hz, más nitidez y 3D. Cambiar uno de ellos a mano lo deja en Personal.",
-     PC_SETTING_TAB_VR, PC_SETTING_NO_SAVE, CHOICES(kVrPreset), "equilibrado", applyVrPreset, nullptr, 0,
+     PC_SETTING_TAB_VR, PC_SETTING_NO_SAVE, CHOICES(kVrPreset), "personal", applyVrPreset, nullptr, 0,
      "Performance",
      "Refresh rate, GPU and CPU, resolution, 3D, the bubble's world and the window's horizon at once. Saving: "
      "less heat and battery; Maximum: 90 Hz, sharper, 3D. Changing one of them by hand makes it Custom."},
     {"COS_VR_MODE", "Modo", "Pantalla gigante delante de ti, o el mundo como una maqueta en tu habitación.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrMode), "pantalla", applyVr, (void*)"mode", 1, "Mode",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrMode), "maqueta", applyVr, (void*)"mode", 1, "Mode",
      "A giant screen in front of you, or the world as a diorama in your room."},
     {"COS_VR_SHAPE", "Forma de la maqueta", "Una burbuja esférica, o una mesa rectangular.",
      PC_SETTING_TAB_VR, 0, CHOICES(kVrShape), "esfera", applyVr, (void*)"shape", 2, "Diorama shape",
      "A spherical bubble, or a rectangular table."},
     {"COS_VR_SPAN", "Escala del mundo", "Cuántos metros del juego caben a lo ancho de la maqueta.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrSpan), "30", applyVr, (void*)"bubble_span", 3, "World scale",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrSpan), "40", applyVr, (void*)"bubble_span", 3, "World scale",
      "How many metres of the game fit across the diorama."},
     {"COS_VR_SIZE", "Tamaño de la burbuja", "El diámetro de la maqueta en tu habitación.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrSize), "1.0", applyVr, (void*)"bubble_size", 4, "Bubble size",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrSize), "0.82", applyVr, (void*)"bubble_size", 4, "Bubble size",
      "The diorama's diameter in your room."},
-    {"COS_VR_DISTANCE", "Distancia", "A qué distancia de ti está la maqueta (también con el grip derecho).",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrDistance), "1.0", applyVr, (void*)"bubble_distance", 5, "Distance",
-     "How far the diorama is from you (also with the right grip)."},
+    {"COS_VR_DISTANCE", "Distancia", "A qué distancia de ti está la maqueta (también con un grip).",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrDistance), "0.446", applyVr, (void*)"bubble_distance", 5, "Distance",
+     "How far the diorama is from you (also with a grip)."},
     {"COS_VR_HEIGHT", "Altura", "Cuánto por debajo de tus ojos está Link en la maqueta.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrHeight), "0.3", applyVr, (void*)"bubble_height", 6, "Height",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrHeight), "0.191", applyVr, (void*)"bubble_height", 6, "Height",
      "How far below your eyes Link is in the diorama."},
     {"COS_VR_FADE", "Fundido del borde", "Lo suave que se desvanece el borde de la maqueta.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrFade), "0.1", applyVr, (void*)"bubble_fade", 7, "Edge fade",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrFade), "0.05", applyVr, (void*)"bubble_fade", 7, "Edge fade",
      "How softly the diorama's edge fades out."},
     {"COS_VR_FOLLOW", "Seguir la cámara", "La maqueta gira con la cámara del juego (el stick sigue siendo intuitivo).",
-     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"table_follow_yaw", 8, "Follow the camera",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"table_follow_yaw", 8, "Follow the camera",
      "The diorama turns with the game's camera (the stick stays intuitive)."},
     {"COS_VR_VIEWREL", "Controles relativos a la vista",
      "En la maqueta, el stick mueve a Link según cómo la miras tú, no según la cámara del juego.",
      PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"view_relative", 9, "Controls relative to the view",
      "In the diorama, the stick moves Link by how you look at it, not by the game's camera."},
     {"COS_VR_STEREO", "3D en la pantalla gigante", "Profundidad del 3D en el modo pantalla.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrStereo), "0.012", applyVrStereo, nullptr, 9, "3D on the giant screen",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrStereo), "0.088", applyVrStereo, nullptr, 9, "3D on the giant screen",
      "Depth of the 3D in screen mode."},
     {"COS_VR_AMBIENT", "Ambiente",
      "En los modos pantalla y ventana: las gaviotas, cangrejos y pajarillos del juego salen también fuera del "
@@ -690,7 +701,7 @@ const PcSettingDesc kBuiltins[] = {
     {"COS_VR_AMBIENT_SCALE", "Tamaño del ambiente",
      "Modo pantalla: el tamaño de lo que sale de la pantalla, alrededor de su centro (también con los dos grips "
      "si Mover el ambiente está activado).",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrAmbientScale), "1", applyVr, (void*)"ambient_scale", 9, "Ambience size",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrAmbientScale), "1.3", applyVr, (void*)"ambient_scale", 9, "Ambience size",
      "Screen mode: the size of what comes out of the screen, about its middle (also with both grips while Move "
      "the ambience is on)."},
     {"COS_VR_AMBIENT_ANCHOR", "Ambiente anclado",
@@ -703,20 +714,20 @@ const PcSettingDesc kBuiltins[] = {
     {"COS_VR_AMBIENT_MOVE", "Mover el ambiente con los grips",
      "Modo pantalla: los grips agarran lo que sale de la pantalla en vez de la pantalla: muévelo y gíralo con "
      "uno, cambia su tamaño con los dos; el clic del stick derecho lo devuelve a su sitio. Se guarda al soltar.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"ambient_move", 9, "Move the ambience with the grips",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"ambient_move", 9, "Move the ambience with the grips",
      "Screen mode: the grips hold what comes out of the screen instead of the screen: move and turn it with "
      "one, size it with both; the right stick's click puts it back. Saved when you let go."},
     {"COS_VR_RESOLUTION", "Resolución", "Escala de la imagen del juego en las gafas (1,00 = 1080 líneas) en el modo actual: "
      "cada modo (pantalla, pantalla en 3D, burbuja, ventana) guarda la suya. Más alta = más nítida y más trabajo "
      "para la GPU. Se aplica al momento.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1080", applyVrResolution, nullptr, 10, "Resolution",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrResolution), "1620", applyVrResolution, nullptr, 10, "Resolution",
      "Scale of the game's picture in the headset (1.00 = 1080 lines) in the current mode: each mode (screen, "
      "screen in 3D, bubble, window) keeps its own. Higher = sharper and more GPU work. Applies at once."},
     {"COS_VR_DYNRES", "Resolución dinámica",
      "Baja la resolución del modo un escalón (una décima) si el juego se queda por debajo de 27 fps más de 3 s, "
      "y la vuelve a subir cuando aguanta los 30 fps; nunca por debajo del 70 % (xr.ini: dynres_low_fps, "
      "dynres_high_fps, dynres_min). Cada cambio da un tirón de un cuadro.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "0", applyVr, (void*)"dynres", 10, "Dynamic resolution",
+     PC_SETTING_TAB_VR, 0, CHOICES(kOnOff), "1", applyVr, (void*)"dynres", 10, "Dynamic resolution",
      "Lowers the mode's resolution one step (a tenth) when the game stays under 27 fps for over 3 s, and raises "
      "it again when it holds 30 fps; never under 70 % (xr.ini: dynres_low_fps, dynres_high_fps, dynres_min). "
      "Each change makes a one-frame hitch."},
@@ -724,11 +735,11 @@ const PcSettingDesc kBuiltins[] = {
      PC_SETTING_TAB_VR, 0, CHOICES(kVrRefresh), "72", applyVr, (void*)"refresh", 10, "Refresh rate",
      "The headset's refresh rate. 72 Hz runs cooler and saves battery; 90 Hz shows the game's 30 fps more evenly."},
     {"COS_VR_HUD", "Tamaño del HUD", "El ancho del panel con los corazones y los menús en el modo maqueta.",
-     PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "1.3", applyVr, (void*)"hud_width", 11, "HUD size",
+     PC_SETTING_TAB_VR, 0, CHOICES(kVrHud), "0.7", applyVr, (void*)"hud_width", 11, "HUD size",
      "The width of the panel with the hearts and menus in diorama mode."},
-    {"COS_VR_RESET", "Restablecer posición", "Devuelve la maqueta a su sitio (también: grip + clic del stick derecho).",
+    {"COS_VR_RESET", "Restablecer posición", "Devuelve la maqueta, la ventana y la pantalla a su sitio (también: grip + clic del stick derecho).",
      PC_SETTING_TAB_VR, PC_SETTING_NO_SAVE, CHOICES(kVrReset), "0", applyVrReset, nullptr, 12, "Reset position",
-     "Puts the diorama back in its place (also: grip + right stick click)."},
+     "Puts the diorama, the window and the screen back in their places (also: grip + right stick click)."},
     // Gráficos
     {"COS_FB_SCALE", "Resolución interna",
      "Resolución a la que se dibuja el juego antes de escalar a la pantalla. Más baja = más rápido.",
@@ -749,7 +760,7 @@ const PcSettingDesc kBuiltins[] = {
      "Blur of the distant scenery, as on the GameCube."},
     {"COS_CAMERA_INVERT_X", "Invertir cámara horizontal",
      "El stick C gira la cámara al revés en horizontal.",
-     PC_SETTING_TAB_GRAPHICS, 0, CHOICES(kOnOff), "0", applyCameraInvertX, nullptr, 90,
+     PC_SETTING_TAB_GRAPHICS, 0, CHOICES(kOnOff), kHeadset ? "1" : "0", applyCameraInvertX, nullptr, 90,
      "Invert camera horizontally",
      "The C stick turns the camera the other way horizontally."},
     {"COS_CAMERA_INVERT_Y", "Invertir cámara vertical",
@@ -858,7 +869,7 @@ const PcSettingDesc kBuiltins[] = {
      "(BetterWW)."},
     {"COS_QOL_SKIP_INTRO", "Saltar la introducción",
      "Una partida nueva empieza en Isla Initia, sin la leyenda del principio (BetterWW).",
-     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), "0", applyQol, nullptr, 75,
+     PC_SETTING_TAB_QOL, 0, CHOICES(kOnOff), kHeadset ? "1" : "0", applyQol, nullptr, 75,
      "Skip the intro",
      "A new game starts on Outset Island, without the opening legend (BetterWW)."},
     {"COS_QOL_REVEAL_CHART", "Carta náutica completa",

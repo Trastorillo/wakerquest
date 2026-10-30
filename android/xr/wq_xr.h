@@ -87,6 +87,8 @@ typedef struct WqXrTable {
     // (3 s) and that it must hold to go up (10 s), for 30 fps; the lowest fraction of the mode's lines
     bool dynres;
     float dynresLowFps, dynresHighFps, dynresMin;
+    // the title screen (xr.ini intro_2d): on the giant screen, flat, whatever the mode, while it shows
+    bool intro2d;
 } WqXrTable;
 
 // The latest head pose and frustum (false while the session does not run).
@@ -106,6 +108,9 @@ void wq_xr_set_frame_view(uint32_t tag, bool window, const float* tangents);
 // The options menu's "Realidad virtual" page (pc_menu.cpp): sets one xr.ini key (its line replaced,
 // or added) and has the layer read the file again. Any thread.
 void wq_xr_set(const char* key, const char* value);
+// The model, the window and the giant screen back where xr.ini's defaults put them (the options menu's
+// Restablecer posición, as the headset panel's Recolocar). Any thread.
+void wq_xr_reset_position(void);
 // The Rendimiento preset in effect (xr.ini's perf_preset: "ahorro", "equilibrado", "maximo" or
 // "personal"), or "" without the headset layer. Any thread.
 const char* wq_xr_perf_preset(void);
@@ -132,6 +137,10 @@ void wq_xr_set_special(bool special);
 // The game, every frame (pc_vr_diorama.cpp): the bubble closes in on who talks (a cutscene or a
 // dialogue, talk_zoom): the game's 2D on a larger panel beside it meanwhile (talk_screen).
 void wq_xr_set_talk(bool talk);
+// The game, every frame (pc_vr_diorama.cpp): the title screen shows on the giant screen, flat (intro_2d):
+// the layer shows the screen with no 3D meanwhile and the grips hold the screen; the mode in xr.ini stays
+// as it is (nothing is written), and comes back when it ends.
+void wq_xr_set_intro_flat(bool flat);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);

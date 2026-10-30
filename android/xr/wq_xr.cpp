@@ -12,12 +12,20 @@
 //     EGLImage and copies it to the screen's swapchain; when the copy has run it hands the buffer
 //     back (aurora_xr_present_done).
 //   - The screen is a quad layer in the LOCAL space, at the picture's aspect (16:9 in widescreen, Aurora
-//     patch 0032), by default 4.5 m wide and 5 m away, over the room (XR_FB_passthrough) when the
-//     headset has it, in a wooden frame (screen_frame, the window's too). The left grip moves and turns it, both grips
-//     scale it, as the window's (mode = ventana); the right grip alone stays the game's Z.
+//     patch 0032), where xr.ini puts it, over the room (XR_FB_passthrough) when the headset has it, in a
+//     frame (screen_frame, the window's too).
 //   - The controllers drive an SDL virtual gamepad, which Aurora sees as any other controller: left
 //     stick = control stick, right stick = C-stick, A/B/X/Y as labelled, triggers = L and R (analog),
-//     right grip = Z, the left controller's menu button = START. Aurora's rumble reaches both hands.
+//     the right stick's click = Z, the left controller's menu button = START. Aurora's rumble reaches
+//     both hands. The rest is the headset's own (fase 2), in every mode:
+//       - the left stick's click (L3): the settings panel (wq_panel.cpp) opened or closed; with the game's
+//         options menu open, that menu closed. Never the game's.
+//       - the grips: what they are on (the giant screen, the window, the model, the screen's ambience with
+//         ambient_move, the HUD's or the dialogues' panel, the settings panel while open): one moves it and
+//         turns it, both also size it; the right stick's click while holding puts it back (updateGrips).
+//       - a grip held and the right stick: the world's scale (the model's span, the window's scale, the
+//         screen's ambience, or the screen's width with no ambience); the stick is not the game's meanwhile.
+//     Whatever a grip or the stick changes is saved to xr.ini when the grips are let go.
 // Settings: <files>/user/xr.ini (distance, width, height, passthrough, refresh), read again when it
 // changes (checked every second). Every step goes to switchwaker.log as "[xr] ...".
 #include "wq_xr.h"
@@ -82,12 +90,14 @@ constexpr float kWindowMaxWidth = 2.2f;
 constexpr int kWindowMinLines = 648;
 constexpr int kWindowStep = 54;
 
+// The defaults (fase 2): the values Trasto plays with (his xr.ini of 1.0.8-fase1), the places included;
+// the file a fresh install writes (kDefaultSettings) holds the same. The resolutions' -1 stays (older files).
 struct Settings {
-    float distance = 5.0f;   // m in front of where the player looked at the start
-    float width = 4.5f;      // m; the height follows the picture (16:9 widescreen, 4:3 without)
-    float height = 0.0f;     // m above eye height
-    float screenX = 0.0f;    // m to the right (the left grip moves it, as the window's)
-    float screenYaw = 0.0f;  // degrees, turned to the left (the left grip turns it)
+    float distance = 1.508f; // m in front of where the player looked at the start
+    float width = 0.85f;     // m; the height follows the picture (16:9 widescreen, 4:3 without)
+    float height = -0.084f;  // m above eye height
+    float screenX = 0.017f;  // m to the right (a grip moves it, as the window's)
+    float screenYaw = -2.2f; // degrees, turned to the left (a grip turns it)
     bool screenFrame = true; // the wooden frame around it (drawn here, procedurally)
     bool passthrough = true; // the room around the screen instead of black
     // the Rendimiento preset last chosen (kPresetKeys): 0 personal (the values by hand), 1 ahorro,
@@ -98,82 +108,85 @@ struct Settings {
     bool gpuBoost = false;   // XR_EXT_performance_settings: the GPU at its sustained high level (heat)
     bool cpuLow = false;     // the CPU at its sustained low level (Ahorro); else the CPU is left as it is
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
-    bool stereo = false;  // off by default: twice the drawing, and the flat screen's only stutters
-    float stereoStrength = 0.012f;  // how far the distance moves per eye, in half picture widths
-    float stereoFocus = 600.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
+    bool stereo = true;             // twice the drawing (stereo_resolution has fewer lines for it)
+    float stereoStrength = 0.088f;  // how far the distance moves per eye, in half picture widths
+    float stereoFocus = 50.0f;      // the depth (game units) that stays on the screen; nearer comes out of it
     bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
-    float hudWidth = 1.3f;          // the diorama's HUD panel, metres across (behind the model)
+    float hudWidth = 0.7f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = lines / 480), one per mode
     // (activeResolution): resolution for the flat giant screen, diorama_resolution for the bubble,
     // stereo_resolution for the giant screen in 3D, window_resolution for the window. Applied at start and again when the mode or
     // the 3D changes (pc_menu.cpp syncVrResolution); 0 = the headset window's own (4128x2208, too much).
-    // -1 (a file without the key, older ones): resolution's.
-    int resolution = 1080;        // 1.00 of 1080 lines (the menu's scale)
+    // -1 (a file without the key, older ones): resolution's. A fresh install's file has each (972, 918,
+    // 864 and 1620: the bubble sharper than the screen).
+    int resolution = 972;         // 0.90 of 1080 lines (the menu's scale)
     int stereoResolution = -1;    // the 3D draws every frame twice: 918 (0.85) by default
     int windowResolution = -1;    // the window draws a wider view per eye: 864 (0.80) by default
     int dioramaResolution = -1;   // the bubble's own (resolution's while the file has none)
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
-    bool diorama = false;
+    bool diorama = true;                         // the default mode: maqueta
     bool sphere = true;
-    float tableWidth = 1.0f, tableDepth = 0.7f;  // m: the bubble's diameter, or the table's width and depth
-    float tableSpan = 30.0f;                     // m of the game's world across it (more: more to draw)
-    float tableDistance = 1.0f;                  // m, its middle in front of the eyes
-    float tableHeight = 0.3f;                    // m, Link (the table's top) below the eyes
-    float tableFade = 0.1f;                      // m, the edges' fade
-    bool tableFollowYaw = true;                  // the world turns with the game camera
+    float tableWidth = 0.82f, tableDepth = 0.7f; // m: the bubble's diameter, or the table's width and depth
+    float tableSpan = 40.0f;                     // m of the game's world across it (more: more to draw)
+    float tableDistance = 0.446f;                // m, its middle in front of the eyes
+    float tableHeight = 0.191f;                  // m, Link (the table's top) below the eyes
+    float tableFade = 0.05f;                     // m, the edges' fade
+    bool tableFollowYaw = false;                 // the world turns with the game camera
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
     bool windowHudOn = true;                     // the window: the HUD and dialogues over it (else on panels)
     bool cineScreen = false;                     // and cutscenes (else the talk zoom, in the bubble)
+    bool intro2d = true;                         // the title screen on the giant screen, flat, any mode
     // the talk zoom (pc_vr_diorama.cpp): during cutscenes and dialogues the bubble closes in on who
     // talks (talk_zoom of its span) and the game's 2D (the dialogue box) shows on a panel beside it
     bool talkZoomOn = true;
-    float talkZoom = 0.5f;
+    float talkZoom = 0.6f;
     bool talkScreen = true;
     // see Link through what stands in front of him (Aurora patch 0031): a hole this many of the game's
     // metres around him
     bool seeThroughOn = true;
-    float seeThroughRadius = 1.2f;
+    float seeThroughRadius = 0.8f;
     bool birdsFree = true;                       // the flying birds around the room, outside the bubble
-    float birdRange = 3.0f;                      // how far, in the bubble's radii
+    float birdRange = 2.5f;                      // how far, in the bubble's radii
     // the room's ambience (mode = pantalla, pc_vr_ambient.cpp): the game's own seagulls, crabs, small
     // birds, wind lines and rain drawn again outside the giant screen, fading with the distance from it
     bool ambient = true;        // on since 1.0.5 (tried live)
-    float ambientRange = 4.0f;  // m from the screen's edge where it has faded out
+    float ambientRange = 1.5f;  // m from the screen's edge where it has faded out
     bool ambientTestLink = false;  // the test's actor: Link instead of the nearest seagull
     bool ambientMask = true;       // hidden where the screen is (0: drawn over it too, for the tests)
     // the giant screen's ambience moved and sized by hand (ambient_move: the grips hold it instead of
     // the screen): metres in the room, degrees about the vertical through the screen's middle, a scale
-    bool ambientMove = false;
+    bool ambientMove = true;
     bool ambientWorld = true;  // anchored in the room (the world's, around Link); false: the game camera's view
-    float ambientX = 0.0f, ambientY = 0.0f, ambientZ = 0.0f, ambientYaw = 0.0f, ambientScale = 1.0f;
-    float tableX = 0.0f;                         // m, to the right of straight ahead (the grip moves it)
-    float tableYaw = 0.0f;                       // degrees, the world turned by the grip
+    float ambientX = 0.236f, ambientY = 0.394f, ambientZ = -0.244f, ambientYaw = -26.3f, ambientScale = 1.3f;
+    float tableX = 0.096f;                       // m, to the right of straight ahead (the grip moves it)
+    float tableYaw = -19.0f;                     // degrees, the world turned by the grip (-180..180)
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
     // the HUD's panel, fixed in the room (m in the LOCAL space, and its yaw in degrees): moved only by
     // a grip on it, not with the model
-    float hudPose[4] = {-0.03f, -0.22f, -1.39f, 0.0f};
+    float hudPose[4] = {0.313f, 0.054f, -0.278f, -46.2f};
     // m, the dialogues' panel moved by hand (a grip on it) from its place above the model; it moves with it
     float dialogueOffset[3] = {0, 0, 0};
     // m, the settings panel from the eyes when it opens (right, up, and ahead negative, in the head's
     // heading); a grip moves it (wq_panel.cpp)
-    float panelOffset[3] = {0.0f, -0.12f, -0.9f};
+    float panelOffset[3] = {0.224f, 0.469f, -1.558f};
+    int language = 0;  // the settings panel's (language = es, en or fr): 0 Spanish, 1 English, 2 French
     // the window (mode = ventana, pc_vr_diorama.cpp): the world at its own scale through a rectangle in
     // the room (16:9), the game camera's eye window_depth in front of it looking through it (what it sees
     // nearer than that comes out, up to window_popout); each eye looks through it from
     // where it is, and what is near comes out of it toward the player (window_popout)
     bool window = false;
-    float windowWidth = 1.6f;     // m across, up to kWindowMaxWidth
-    float windowDistance = 2.0f;  // m, its middle in front of the eyes
-    float windowHeight = 0.0f;    // m above eye height
-    float windowX = 0.0f;         // m to the right (a grip moves it)
-    float windowYaw = 0.0f;       // degrees, turned to the left (a grip turns it)
-    float windowScale = 1.0f;     // the game's metres per metre of the room (more: the world smaller)
-    float windowDepth = 0.5f;     // m, the game camera's eye in front of the window (caps the pop-out)
-    bool windowPopoutOn = false;  // near things come out of the window (off: cut at its plane)
-    float windowPopout = 0.45f;    // m, how far
-    float windowDrawDistance = 300.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
+    float windowWidth = 0.95f;    // m across, up to kWindowMaxWidth
+    float windowDistance = 0.705f;  // m, its middle in front of the eyes
+    float windowHeight = -0.002f; // m above eye height
+    float windowX = 0.138f;       // m to the right (a grip moves it)
+    float windowYaw = -1.5f;      // degrees, turned to the left (a grip turns it)
+    float windowScale = 3.0f;     // the game's metres per metre of the room (more: the world smaller)
+    float windowDepth = 0.1f;     // m, the game camera's eye in front of the window (caps the pop-out)
+    bool windowPopoutOn = true;   // near things come out of the window (off: cut at its plane)
+    float windowPopout = 0.1f;     // m, how far
+    float windowDrawDistance = 200.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
     float npcDrawDistance = 10.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
                                     // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
@@ -184,7 +197,7 @@ struct Settings {
     bool vegAdaptive = true;
     float vegMin = 20.0f;   // the game's metres
     float vegMax = 120.0f;  // the distance with no load (all drawn within the game's own culling)
-    float palmDrawDistance = 60.0f;  // the palms (Obj_Lpalm) always within this many of the game's metres
+    float palmDrawDistance = 40.0f;  // the palms (Obj_Lpalm) always within this many of the game's metres
                                      // from Link, fading at the edge (the game draws them 2.4 times its far
                                      // plane); 0 = as the game
     // the dynamic resolution (pc_vr_dynres.cpp, on by default): the second step after the vegetation's
@@ -205,72 +218,99 @@ struct Settings {
     float specialZoom = 0.5f;
     float windowDepthSpecial = 2.0f;   // m
     float windowPopoutSpecial = 1.8f;  // m
-    float windowFade = 0.03f;     // m, the edges' fade
+    float windowFade = 0.03f;     // m, the pop-out front's fade (the sides end sharp at the frame: 1.0.8)
     bool windowVignette = false;  // a comfort vignette when the camera moves fast (not done yet)
 };
 
 const char kDefaultSettings[] =
     "# WakerQuest: the screen in the headset. Read again while playing.\n"
+    "# The controllers: the left stick's click opens and closes the settings panel (and closes the game's\n"
+    "# options menu); a grip holds what it is on (the screen, the window, the model, the ambience, a panel):\n"
+    "# one moves and turns it, both also size it; with a grip held, the right stick scales the world (the\n"
+    "# model's bubble_span, the window's window_scale, the screen's ambience's ambient_scale, or the screen's\n"
+    "# width without ambience) and its click puts what is held back in its place; the right stick's click\n"
+    "# alone is the game's Z. Saved here when let go.\n"
     "# distance and width in metres, height in metres above the eyes,\n"
     "# passthrough 1 = the room around the screen, 0 = black; refresh in Hz (72, 80, 90, 120).\n"
-    "distance = 5.0\n"
-    "width = 4.5\n"
-    "height = 0.0\n"
-    "# screen_x (m to the right) and screen_yaw (degrees): the left grip moves and turns the screen, both\n"
-    "# grips change its width (saved here); screen_frame 1 = a red wooden frame around it.\n"
-    "screen_x = 0.0\n"
-    "screen_yaw = 0.0\n"
+    "distance = 1.508\n"
+    "width = 0.85\n"
+    "height = -0.084\n"
+    "# screen_x (m to the right) and screen_yaw (degrees): a grip moves and turns the screen, both\n"
+    "# grips change its width (saved here); screen_frame 1 = a frame around it.\n"
+    "screen_x = 0.017\n"
+    "screen_yaw = -2.2\n"
     "screen_frame = 1\n"
     "passthrough = 1\n"
+    "# language = es, en or fr: the settings panel's.\n"
+    "language = es\n"
     "# perf_preset = ahorro, equilibrado, maximo or personal: the settings panel's Rendimiento, which sets\n"
     "# refresh, gpu_boost, cpu_low, the resolutions, stereo, cine_3d, bubble_span, window_draw_distance and\n"
     "# npc_draw_distance\n"
     "# when chosen (changing one of those by hand makes it personal); the values below always win at start.\n"
     "# gpu_boost 1 = the GPU at its sustained high level; cpu_low 1 = the CPU at its sustained low one.\n"
-    "perf_preset = equilibrado\n"
+    "perf_preset = personal\n"
     "refresh = 72\n"
     "gpu_boost = 0\n"
     "cpu_low = 0\n"
-    "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.03),\n"
-    "# stereo_focus = the distance in the game that stays on the screen (100-3000).\n"
-    "stereo = 0\n"
-    "stereo_strength = 0.012\n"
-    "stereo_focus = 600\n"
+    "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.1),\n"
+    "# stereo_focus = the distance in the game that stays on the screen (50-2500); cine_3d 1 = more in cutscenes.\n"
+    "stereo = 1\n"
+    "stereo_strength = 0.088\n"
+    "stereo_focus = 50\n"
+    "cine_3d = 1\n"
     "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
     "# the 3D changes: resolution = the giant screen, diorama_resolution = the bubble (resolution's while\n"
     "# it is not here), stereo_resolution = the giant screen in 3D, window_resolution = the window. The\n"
     "# options menu's Resolucion sets the current mode's.\n"
     "# The window up to 2.2 m wide; past 1.6 m it draws with fewer lines (as 1.6 / width, down to 648).\n"
-    "resolution = 1080\n"
+    "resolution = 972\n"
     "stereo_resolution = 918\n"
     "window_resolution = 864\n"
+    "diorama_resolution = 1620\n"
     "# mode = pantalla (a giant screen), maqueta (the world as a model in the room) or ventana (a window).\n"
-    "mode = pantalla\n"
+    "mode = maqueta\n"
+    "# intro_2d 1 = the title screen (Outset behind the logo, sea_T) on the giant screen, flat, whatever\n"
+    "# the mode; the mode and the 3D as they were when it ends (this file is not changed).\n"
+    "intro_2d = 1\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
     "# in m (the table's width), bubble_span = metres of the game across it, bubble_distance and\n"
-    "# bubble_height (Link below the eyes) in m, bubble_fade = the edge's fade in m; table_depth (cm) for\n"
-    "# the box; table_follow_yaw 1 = the world turns with the game camera. Also in the options menu.\n"
+    "# bubble_height (Link below the eyes) in m, bubble_x (m to the right) and bubble_yaw (degrees) where a\n"
+    "# grip put it, bubble_fade = the edge's fade in m; table_depth (cm) for the box; table_follow_yaw 1 =\n"
+    "# the world turns with the game camera. Also in the options menu.\n"
     "shape = esfera\n"
-    "bubble_size = 1.0\n"
-    "bubble_span = 30\n"
-    "bubble_distance = 1.0\n"
-    "bubble_height = 0.3\n"
-    "bubble_fade = 0.1\n"
+    "bubble_size = 0.82\n"
+    "bubble_span = 40\n"
+    "bubble_distance = 0.446\n"
+    "bubble_height = 0.191\n"
+    "bubble_x = 0.096\n"
+    "bubble_yaw = -19.0\n"
+    "bubble_fade = 0.05\n"
     "table_depth = 70\n"
-    "table_follow_yaw = 1\n"
+    "table_follow_yaw = 0\n"
+    "# the model's panels: hud_width (m) and hud_pose (x, y, z in m, yaw in degrees: where a grip put the HUD);\n"
+    "# bird_range = how far the birds fly around the bubble, in its radii.\n"
+    "hud_width = 0.7\n"
+    "hud_pose = 0.313,0.054,-0.278,-46.2\n"
+    "bird_range = 2.5\n"
+    "# panel_offset = the settings panel from the eyes when it opens (m: right, up, ahead negative).\n"
+    "panel_offset = 0.224,0.469,-1.558\n"
     "# mode = ventana: the world at its own size through a window in the room. window_width (m, 16:9),\n"
     "# window_distance, window_height (above the eyes), window_x in m; window_yaw in degrees;\n"
     "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera in front\n"
     "# of the window (m); window_popout_on 1 = near things come out of it, up to window_popout m (and\n"
-    "# never past the camera); window_draw_distance = the game's metres drawn (at scale 1), the horizon.\n"
-    "window_width = 1.6\n"
-    "window_distance = 2.0\n"
-    "window_height = 0.0\n"
-    "window_scale = 1.0\n"
-    "window_depth = 0.5\n"
-    "window_popout_on = 0\n"
-    "window_popout = 0.45\n"
-    "window_draw_distance = 300\n"
+    "# never past the camera); window_draw_distance = the game's metres drawn (at scale 1), the horizon;\n"
+    "# window_hud_on 1 = the HUD over the window (else on panels below and above it).\n"
+    "window_width = 0.95\n"
+    "window_distance = 0.705\n"
+    "window_height = -0.002\n"
+    "window_x = 0.138\n"
+    "window_yaw = -1.5\n"
+    "window_scale = 3\n"
+    "window_depth = 0.1\n"
+    "window_popout_on = 1\n"
+    "window_popout = 0.1\n"
+    "window_draw_distance = 200\n"
+    "window_hud_on = 1\n"
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
     "npc_draw_distance = 10\n"
@@ -282,7 +322,7 @@ const char kDefaultSettings[] =
     "vegetation_max = 120\n"
     "# palm_draw_distance = the game's metres from Link within which the palms are drawn, always (they shrink\n"
     "# away at the edge); 0 = as far as the game draws them.\n"
-    "palm_draw_distance = 60\n"
+    "palm_draw_distance = 40\n"
     "# dynres 1 = the resolution follows the frame rate, after the vegetation (with vegetation_adaptive, only\n"
     "# once that is at vegetation_min): one step down (a tenth of the\n"
     "# mode's lines) when the game stays under dynres_low_fps for 3 s, one up when it holds\n"
@@ -296,12 +336,12 @@ const char kDefaultSettings[] =
     "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
     "# cutscenes on the giant screen instead.\n"
     "talk_zoom_on = 1\n"
-    "talk_zoom = 0.5\n"
+    "talk_zoom = 0.6\n"
     "talk_screen = 1\n"
     "cine_screen = 0\n"
     "# seethrough_on 1 = Link seen through what stands in front of him, a hole seethrough_radius m around him.\n"
     "seethrough_on = 1\n"
-    "seethrough_radius = 1.2\n"
+    "seethrough_radius = 0.8\n"
     "# special_scenes 1 = some cutscenes (the Helmaroc King on Outset): the bubble closes in on the bird\n"
     "# (special_zoom of its span); special_window 1 = through the window in any mode instead, at real size,\n"
     "# the camera window_depth_special m in front of it, window_popout_special m coming out.\n"
@@ -313,18 +353,18 @@ const char kDefaultSettings[] =
     "# mode = pantalla: ambient 1 = the game's own seagulls, crabs, birds, wind lines and rain also\n"
     "# outside the screen, in the room, fading out ambient_range m from its edge.\n"
     "ambient = 1\n"
-    "ambient_range = 4\n"
+    "ambient_range = 1.5\n"
     "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
     "ambient_test = seagull\n"
     "ambient_mask = 1\n"
     "# the ambience moved (metres, degrees) and sized from where the screen puts it; ambient_move 1 = the grips\n"
     "# hold it instead of the screen (both: its size; the right stick's click: back in its place).\n"
-    "ambient_x = 0\n"
-    "ambient_y = 0\n"
-    "ambient_z = 0\n"
-    "ambient_yaw = 0\n"
-    "ambient_scale = 1\n"
-    "ambient_move = 0\n"
+    "ambient_x = 0.236\n"
+    "ambient_y = 0.394\n"
+    "ambient_z = -0.244\n"
+    "ambient_yaw = -26.3\n"
+    "ambient_scale = 1.30\n"
+    "ambient_move = 1\n"
     "# ambient_anchor = world: anchored in the room around Link, not turning with the game camera; camera: as\n"
     "# the camera sees it (lined up with the screen's picture, moving with the camera).\n"
     "ambient_anchor = world\n";
@@ -400,7 +440,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "bubble_fade") || !strcmp(key, "table_fade")) s.tableFade = clampf(f, 0.0f, 1.0f);
     else if (!strcmp(key, "view_relative")) s.viewRelative = on;
     else if (!strcmp(key, "bubble_x")) s.tableX = clampf(f, -5.0f, 5.0f);
-    else if (!strcmp(key, "bubble_yaw")) s.tableYaw = f;
+    else if (!strcmp(key, "bubble_yaw")) s.tableYaw = std::remainder(f, 360.0f);  // -180..180
     else if (!strcmp(key, "table_width")) s.tableWidth = clampf(f, 20.0f, 400.0f) / 100.0f;
     else if (!strcmp(key, "table_depth")) s.tableDepth = clampf(f, 20.0f, 400.0f) / 100.0f;
     else if (!strcmp(key, "table_follow_yaw")) s.tableFollowYaw = on;
@@ -409,6 +449,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
     else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
+    else if (!strcmp(key, "intro_2d")) s.intro2d = on;
+    else if (!strcmp(key, "language")) s.language = !strcmp(v, "en") ? 1 : !strcmp(v, "fr") ? 2 : 0;
     else if (!strcmp(key, "talk_zoom_on")) s.talkZoomOn = on;
     else if (!strcmp(key, "talk_zoom")) s.talkZoom = clampf(f, 0.1f, 1.0f);
     else if (!strcmp(key, "talk_screen")) s.talkScreen = on;
@@ -501,7 +543,10 @@ int windowLines(int base, float width, int current) {
 }
 
 // The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
+std::atomic_bool s_introFlat{false};  // wq_xr_set_intro_flat: the title on the flat giant screen
 const char* activeResolutionKey(const Settings& s) {
+    // the title screen (intro_2d): the flat giant screen's, whatever the mode (the scene that ran slow)
+    if (s_introFlat.load()) return "resolution";
     return s.window ? "window_resolution" : s.diorama ? "diorama_resolution" : s.stereo ? "stereo_resolution" : "resolution";
 }
 int resolutionOf(const Settings& s, const char* key) {
@@ -535,6 +580,8 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
+    if (!strcmp(key, "intro_2d")) return flag(s.intro2d);
+    if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
     if (!strcmp(key, "talk_zoom")) return num(s.talkZoom);
     if (!strcmp(key, "talk_screen")) return flag(s.talkScreen);
@@ -661,7 +708,8 @@ struct Xr {
     XrActionSet actionSet = XR_NULL_HANDLE;
     XrAction move = XR_NULL_HANDLE, camera = XR_NULL_HANDLE;
     XrAction a = XR_NULL_HANDLE, b = XR_NULL_HANDLE, x = XR_NULL_HANDLE, y = XR_NULL_HANDLE;
-    XrAction z = XR_NULL_HANDLE, start = XR_NULL_HANDLE;
+    XrAction gripR = XR_NULL_HANDLE, start = XR_NULL_HANDLE;
+    XrAction menuClick = XR_NULL_HANDLE;  // the left stick's click: the settings panel
     XrAction trigL = XR_NULL_HANDLE, trigR = XR_NULL_HANDLE;
     XrAction rumble = XR_NULL_HANDLE;
     XrAction handPose = XR_NULL_HANDLE, stickClick = XR_NULL_HANDLE;  // the diorama's grip drag
@@ -700,9 +748,14 @@ struct Xr {
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
     float dragSpan = 0.0f, dragSize = 0.0f, tickSize = 0.0f;  // both hands: their distance, the size then
     uint64_t sizeShownUntil = 0;                             // the size's label (ms, SDL_GetTicks)
-    // the giant screen (mode = pantalla): the right grip joins the left one's hold (both hands scale
-    // the screen) only when pressed while the left holds it; otherwise it is the game's Z
-    bool rightJoined = false, zWas = false;
+    // the right stick with a grip held (updateGrips): what it scales (0 none, 1 the model's span, 2 the
+    // window's scale, 3 the ambience, 4 the screen's width), its value at the last tick; and what the
+    // label shows (0 the size both hands give, else the stick's)
+    int stickScale = 0, labelWhat = 0;
+    float stickTick = 0.0f;
+    bool flatWas = false;  // the title's flat screen, as the grips last saw it
+    // the right stick's click: the game's Z when pressed with no grip held (a grip's: back in its place)
+    bool r3Was = false, r3Z = false;
     XrSwapchain frameSwapchain = XR_NULL_HANDLE;  // the screen's wooden frame, drawn once
     bool clickWas = false;
     // the panels where they are shown this frame (for the grips and the rays)
@@ -711,7 +764,10 @@ struct Xr {
     XrExtent2Df hudSize{}, dialogueSize{};
     // the settings panel
     bool panelReady = false;
-    bool comboWas = false, comboHeld = false;  // both triggers + the right grip
+    // the left stick's click (L3) opens and closes it; once it closes, the controller is not the game's
+    // until every trigger, grip and face button is let go
+    bool menuClickWas = false, comboHeld = false;
+    uint64_t menuCloseUntil = 0;  // ns: the game's options menu closed by L3 (its L+R+Z held until then)
     bool hasPerf = false;
     int perfApplied = -1;
     // the GPU's load (pollGpuBusy): the runtime's counter (XR_META_performance_metrics), else kgsl's
@@ -1238,7 +1294,8 @@ bool initActions() {
     s.b = makeAction("b", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     s.x = makeAction("x", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     s.y = makeAction("y", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
-    s.z = makeAction("z", XR_ACTION_TYPE_FLOAT_INPUT, false);
+    s.gripR = makeAction("grip_r", XR_ACTION_TYPE_FLOAT_INPUT, false);
+    s.menuClick = makeAction("menu_click", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     s.start = makeAction("start", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     s.trigL = makeAction("trigger_l", XR_ACTION_TYPE_FLOAT_INPUT, false);
     s.trigR = makeAction("trigger_r", XR_ACTION_TYPE_FLOAT_INPUT, false);
@@ -1259,7 +1316,8 @@ bool initActions() {
         {s.b, "/user/hand/right/input/b/click"},
         {s.x, "/user/hand/left/input/x/click"},
         {s.y, "/user/hand/left/input/y/click"},
-        {s.z, "/user/hand/right/input/squeeze/value"},
+        {s.gripR, "/user/hand/right/input/squeeze/value"},
+        {s.menuClick, "/user/hand/left/input/thumbstick/click"},
         {s.start, "/user/hand/left/input/menu/click"},
         {s.trigL, "/user/hand/left/input/trigger/value"},
         {s.trigR, "/user/hand/right/input/trigger/value"},
@@ -1534,7 +1592,7 @@ void publishSettings() {
     s_sharedSettings = s.settings;
 }
 
-void updateGrips(float gripL, float gripR, bool click);
+void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick);
 void togglePanel();
 void updatePanelGrab(float gripL, float gripR);
 void pointerHaptic(int hand, float amplitude);
@@ -1555,34 +1613,63 @@ void updatePad() {
             c = getVec2(s.camera);
             l = getFloat(s.trigL);
             r = getFloat(s.trigR);
-            z = getFloat(s.z);
             a = getBool(s.a);
             b = getBool(s.b);
             x = getBool(s.x);
             y = getBool(s.y);
             start = getBool(s.start);
+            timespec ts{};
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            const uint64_t now = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+            {
+                // the menu button (START): the runtime may show its press for a single frame of the
+                // headset's (72-120 Hz), which the game, reading the pad at 30 fps, mostly missed (the
+                // title, the intro): each press held at least kStartHoldNs
+                constexpr uint64_t kStartHoldNs = 150000000ull;
+                static uint64_t startUntil = 0;
+                if (start) startUntil = now + kStartHoldNs;
+                start = start || now < startUntil;
+            }
             s.trig[0] = l;
             s.trig[1] = r;
-            const float gripL = getFloat(s.gripL);
+            const float gripL = getFloat(s.gripL), gripR = getFloat(s.gripR);
+            const bool stickClick = getBool(s.stickClick);
             const bool menu = s_menuOpen.load();
-            // both triggers and the right grip: the settings panel, opened or closed (the game's own
-            // options menu, open, keeps the combination: it closes it)
-            const bool combo = !menu && l > 0.5f && r > 0.5f && z > 0.6f;
-            if (combo && !s.comboWas) togglePanel();
-            s.comboWas = combo;
-            static bool panelWas = false;
+            // the left stick's click (L3): the settings panel opened or closed; with the game's options
+            // menu open, that menu closed instead (its own L+R+Z, held kMenuCloseNs or until it closes)
+            constexpr uint64_t kMenuCloseNs = 300000000ull;
+            const bool l3 = getBool(s.menuClick);
+            if (l3 && !s.menuClickWas) {
+                if (menu) {
+                    s.menuCloseUntil = now + kMenuCloseNs;
+                    xrlog("L3: closing the game's options menu");
+                } else {
+                    togglePanel();
+                }
+            }
+            s.menuClickWas = l3;
+            static bool panelWas = false, menuWas = false;
             const bool panel = wqp::isOpen();
-            // from the combination, or the panel closing, until every trigger and grip is let go: not
-            // the game's
-            if (combo || (panelWas && !panel)) s.comboHeld = true;
-            if (s.comboHeld && l < 0.2f && r < 0.2f && z < 0.2f) s.comboHeld = false;
+            // the panel or the game's menu closing: until every trigger, grip and face button is let go,
+            // not the game's (the B or the trigger that closed it)
+            if ((panelWas && !panel) || (menuWas && !menu)) s.comboHeld = true;
+            if (s.comboHeld && l < 0.2f && r < 0.2f && gripL < 0.2f && gripR < 0.2f && !a && !b) s.comboHeld = false;
             panelWas = panel;
+            menuWas = menu;
+            if (!menu) s.menuCloseUntil = 0;
+            // the right stick's click alone (no grip held) is the game's Z; with a grip it puts what is
+            // held back in its place (updateGrips)
+            const bool gripping = gripL > 0.6f || gripR > 0.6f || s.gripDown[0] || s.gripDown[1];
+            if (stickClick && !s.r3Was) s.r3Z = !gripping;
+            if (!stickClick) s.r3Z = false;
+            s.r3Was = stickClick;
+            z = s.r3Z ? 1.0f : 0.0f;
             if (panel) {
                 bool tick = false;
                 wqp::nav(m.x, m.y, c.x, a, b, &tick);
                 if (tick) pointerHaptic(s.activeHand, 0.15f);
-                // a grip takes the panel (not the one still held from the combination that opened it)
-                updatePanelGrab(s.comboHeld ? 0.0f : gripL, s.comboHeld ? 0.0f : z);
+                // a grip takes the panel
+                updatePanelGrab(gripL, gripR);
             } else {
                 s.panelGrabHand = -1;
                 s.panelGrip[0] = s.panelGrip[1] = false;
@@ -1592,23 +1679,15 @@ void updatePad() {
                 l = r = z = 0.0f;
                 a = b = x = y = start = false;
             } else if (menu) {
-                // the options menu: the triggers are the laser pointer's clicks, not L and R
+                // the options menu: the triggers are the laser pointer's clicks, not L and R; L3 closes it
                 l = r = 0.0f;
                 z = 0.0f;
-            } else if ((s.settings.diorama && !s_special.load()) || s.settings.window) {
-                // the diorama: the grips move the model or a panel (not the game's Z); the window: the
-                // window. Not the model while a special scene shows the window instead
-                updateGrips(gripL, z, getBool(s.stickClick));
-                z = 0.0f;
-            } else if (!s.settings.diorama) {
-                // the giant screen: the left grip takes it; the right grip pressed while the left holds
-                // joins (both hands scale it) and is not Z until let go; pressed alone it is Z
-                const bool zDown = z > (s.zWas ? 0.4f : 0.6f);
-                if (zDown && !s.zWas && s.gripDown[0]) s.rightJoined = true;
-                if (!zDown) s.rightJoined = false;
-                s.zWas = zDown;
-                updateGrips(gripL, s.rightJoined ? z : 0.0f, getBool(s.stickClick));
-                if (s.rightJoined) z = 0.0f;
+                if (now < s.menuCloseUntil) l = r = z = 1.0f;
+            } else if (!(s.settings.diorama && !s.settings.window && s_special.load() && !s_introFlat.load())) {
+                // every mode: the grips hold what they are on, and with one held the right stick scales
+                // the world (not the C-stick meanwhile). Not the model while a special scene shows the
+                // window instead
+                updateGrips(gripL, gripR, stickClick, &c);
             }
         }
     }
@@ -2160,7 +2239,7 @@ void saveModel() {
     wq_xr_set("bubble_height", v);
     snprintf(v, sizeof v, "%.3f", st.tableDistance);
     wq_xr_set("bubble_distance", v);
-    snprintf(v, sizeof v, "%.1f", st.tableYaw);
+    snprintf(v, sizeof v, "%.1f", std::remainder(st.tableYaw, 360.0f));
     wq_xr_set("bubble_yaw", v);
     snprintf(v, sizeof v, "%.2f", st.tableWidth);
     wq_xr_set("bubble_size", v);
@@ -2240,12 +2319,14 @@ void saveScreen() {
     wq_xr_set("width", v);
 }
 
-// The diorama's grips. Pressed with the hand's ray (or the hand) on the HUD's or the dialogues' panel:
-// the panel follows the hand (the HUD turned to face the player), saved on release. Otherwise on the
-// model: one hand moves it and turns it about the vertical (the right stick's click while holding
-// puts it back); both hands move, turn and scale it (its size, the world inside the same), with a
-// tick every 10% and its size shown. Saved to xr.ini on release.
-void updateGrips(float gripL, float gripR, bool click) {
+// The grips, in every mode (fase 2). Pressed with the hand's ray (or the hand) on the HUD's or the
+// dialogues' panel (the diorama): the panel follows the hand (the HUD turned to face the player), saved
+// on release. Otherwise on what the mode shows (the model, the window, the giant screen, or the screen's
+// ambience with ambient_move): one hand moves it and turns it about the vertical (the right stick's click
+// while holding puts it back); both hands move, turn and scale it, with a tick every 10% and its size
+// shown. With a grip held the right stick scales the world (stickScale). Saved to xr.ini on release.
+// During the title's flat screen (intro_2d) the grips hold the screen whatever the mode.
+void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick) {
     XrSpaceLocation loc[2] = {{XR_TYPE_SPACE_LOCATION}, {XR_TYPE_SPACE_LOCATION}};
     const XrSpace spaces[2] = {s.handSpaceL, s.handSpace};
     bool valid[2];
@@ -2255,10 +2336,25 @@ void updateGrips(float gripL, float gripR, bool click) {
                    (loc[h].locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT);
     }
     Settings& st = s.settings;
+    // the mode shown: the title's flat screen is the giant screen, with no ambience
+    const bool flat = s_introFlat.load();
+    const bool window = st.window && !flat, diorama = st.diorama && !flat, ambient = st.ambient && !flat;
+    if (flat != s.flatWas) {
+        // the title began or ended with a grip held: what was held is no longer shown; the drag stops
+        // unsaved (xr.ini read again: no values of the one mixed into the other's) and starts afresh
+        s.flatWas = flat;
+        if (s.dragHands || s.dragAmbient || s.stickScale) {
+            s.dragHands = 0;
+            s.dragging = s.dragAmbient = false;
+            s.stickScale = 0;
+            s_settingsDirty = true;
+            xrlog("grip: the drag cut (the title's flat screen %s)", flat ? "began" : "ended");
+        }
+    }
     const float g[2] = {gripL, gripR};
     for (int h = 0; h < 2; h++) {
         const bool down = valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
-        if (down && !s.gripDown[h]) {
+        if (down && !s.gripDown[h] && diorama) {
             const int panel = panelUnderHand(h, loc[h].pose.position);
             if (panel) {
                 s.grabbed[h] = panel;
@@ -2294,15 +2390,70 @@ void updateGrips(float gripL, float gripR, bool click) {
             publishSettings();
         }
     }
-    // the model: the hands that hold no panel
+    const bool ambientHeld = !window && !diorama && ambient && st.ambientMove;
+    // With a grip held, the right stick scales the world (not the game's camera meanwhile): the model's
+    // span (bubble_span), the window's scale (window_scale), the screen's ambience (ambient_scale), or
+    // the screen's width when it has none. Forward makes the world larger, smoothly (twice or half as
+    // large in a second at full tilt), with a soft tick every 10%; saved when the grips are let go.
+    const bool held = s.gripDown[0] || s.gripDown[1];
+    if (held && stick != nullptr) {
+        const float y = stick->y;
+        *stick = {0.0f, 0.0f};
+        if (std::fabs(y) > 0.25f) {
+            const int what = diorama ? 1 : window ? 2 : ambient ? 3 : 4;
+            float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale : &st.width;
+            const float lo = what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.5f;
+            const float hi = what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 40.0f;
+            if (s.stickScale != what) {
+                s.stickScale = what;
+                s.stickTick = *v;
+                xrlog("grip: the right stick scales %s", what == 1 ? "the model's world" : what == 2 ? "the window's world"
+                                                         : what == 3 ? "the ambience" : "the screen");
+            }
+            const float dt = st.refresh > 0 ? 1.0f / float(st.refresh) : 1.0f / 72.0f;
+            const float k = std::exp2((std::fabs(y) - 0.25f) / 0.75f * dt * (y > 0.0f ? 1.0f : -1.0f));
+            const float before = *v;
+            // the span and the window's scale are the game's metres per metre: fewer, the world larger
+            *v = clampf(what <= 2 ? *v / k : *v * k, lo, hi);
+            // both hands sizing the same thing go on from it
+            if (s.dragging && s.dragSize > 0.0f && before > 0.0f &&
+                (what == 4 || (what == 3 && (ambientHeld || s.dragAmbient))))
+                s.dragSize *= *v / before;
+            if (std::fabs(*v / s.stickTick - 1.0f) >= 0.1f) {
+                s.stickTick = *v;
+                pointerHaptic(0, 0.15f);
+                pointerHaptic(1, 0.15f);
+            }
+            s.sizeShownUntil = SDL_GetTicks() + 1500;
+            s.labelWhat = what;
+            publishSettings();
+        }
+    }
+    if (!held && s.stickScale) {
+        char v[32];
+        if (s.stickScale == 1) {
+            snprintf(v, sizeof v, "%.1f", st.tableSpan);
+            wq_xr_set("bubble_span", v);
+        } else if (s.stickScale == 2) {
+            snprintf(v, sizeof v, "%.2f", st.windowScale);
+            wq_xr_set("window_scale", v);
+        } else if (s.stickScale == 3) {
+            snprintf(v, sizeof v, "%.2f", st.ambientScale);
+            wq_xr_set("ambient_scale", v);
+        } else {
+            snprintf(v, sizeof v, "%.2f", st.width);
+            wq_xr_set("width", v);
+        }
+        s.stickScale = 0;
+    }
+    // what the mode shows: the hands that hold no panel
     const int hands = (s.gripDown[0] && !s.grabbed[0] ? 1 : 0) | (s.gripDown[1] && !s.grabbed[1] ? 2 : 0);
     if (hands != s.dragHands) {
-        const bool ambientHeld = !st.window && !st.diorama && st.ambient && st.ambientMove;
         // both hands with neither ray on the screen (or the window): they size the ambience instead
         bool sizing = false;
-        if (hands == 3 && !st.diorama && st.ambient && !ambientHeld) {
-            const XrPosef frame = st.window ? windowPose(st) : screenPose(st);
-            const float w = (st.window ? st.windowWidth : st.width) * 1.2f;  // a little beyond its edges
+        if (hands == 3 && !diorama && ambient && !ambientHeld) {
+            const XrPosef frame = window ? windowPose(st) : screenPose(st);
+            const float w = (window ? st.windowWidth : st.width) * 1.2f;  // a little beyond its edges
             const XrExtent2Df size{w, w * 9.0f / 16.0f};
             bool on = false;
             for (int h = 0; h < 2; h++) {
@@ -2316,10 +2467,10 @@ void updateGrips(float gripL, float gripR, bool click) {
         if (sizing && !s.dragAmbient) xrlog("grip: both hands on the ambience (its size)");
         s.dragAmbient = sizing;
         if (s.dragHands && !hands && !s.dragAmbient)
-            st.window ? saveWindow() : st.diorama ? saveModel() : ambientHeld ? saveAmbient() : saveScreen();
+            window ? saveWindow() : diorama ? saveModel() : ambientHeld ? saveAmbient() : saveScreen();
         if (hands)
-            xrlog("grip: %s", st.window ? (hands == 3 ? "both hands on the window" : "moving the window")
-                              : !st.diorama ? (hands == 3 ? "both hands on the screen" : "moving the screen")
+            xrlog("grip: %s", window ? (hands == 3 ? "both hands on the window" : "moving the window")
+                              : !diorama ? (hands == 3 ? "both hands on the screen" : "moving the screen")
                               : hands == 3 ? "both hands on the model" : "moving the model");
         s.dragHands = hands;
         s.dragging = false;  // starts again from the hands as they are
@@ -2341,6 +2492,11 @@ void updateGrips(float gripL, float gripR, bool click) {
         at = pose.position;
         heading = headingOf(pose.orientation);
     }
+    // the size's label while both hands scale (the stick's takes it over while it scales)
+    auto sizeLabel = [&]() {
+        s.sizeShownUntil = SDL_GetTicks() + 1500;
+        s.labelWhat = 0;
+    };
     if (s.dragAmbient) {
         // the ambience sized by both hands, apart and together (Tamaño del ambiente, saved when let go)
         if (!s.dragging) {
@@ -2360,7 +2516,7 @@ void updateGrips(float gripL, float gripR, bool click) {
         s.clickWas = click;
         return;
     }
-    if (st.window) {
+    if (window) {
         // the window: one hand moves it and turns it about the vertical (the right stick's click while
         // holding puts it back), both hands also change its width
         if (!s.dragging) {
@@ -2374,7 +2530,7 @@ void updateGrips(float gripL, float gripR, bool click) {
             s.dragSpan = span;
             s.dragSize = s.tickSize = st.windowWidth;
         }
-        if (hands == 2 && click && !s.clickWas) {
+        if (hands != 3 && click && !s.clickWas) {
             const Settings defaults;
             st.windowX = defaults.windowX;
             st.windowHeight = defaults.windowHeight;
@@ -2394,14 +2550,14 @@ void updateGrips(float gripL, float gripR, bool click) {
                     pointerHaptic(0, 0.25f);
                     pointerHaptic(1, 0.25f);
                 }
-                s.sizeShownUntil = SDL_GetTicks() + 1500;
+                sizeLabel();
             }
         }
         publishSettings();
         s.clickWas = click;
         return;
     }
-    if (!st.diorama && st.ambient && st.ambientMove) {
+    if (ambientHeld) {
         // the giant screen's ambience (ambient_move): as the screen, one hand moves it and turns it, both
         // also size it, the right stick's click puts it back
         if (!s.dragging) {
@@ -2438,7 +2594,7 @@ void updateGrips(float gripL, float gripR, bool click) {
         s.clickWas = click;
         return;
     }
-    if (!st.diorama) {
+    if (!diorama) {
         // the giant screen, as the window: one hand moves it and turns it about the vertical (the
         // right stick's click while holding puts it back), both hands also change its width
         if (!s.dragging) {
@@ -2472,7 +2628,7 @@ void updateGrips(float gripL, float gripR, bool click) {
                     pointerHaptic(0, 0.25f);
                     pointerHaptic(1, 0.25f);
                 }
-                s.sizeShownUntil = SDL_GetTicks() + 1500;
+                sizeLabel();
             }
         }
         publishSettings();
@@ -2490,11 +2646,12 @@ void updateGrips(float gripL, float gripR, bool click) {
         s.dragSpan = span;
         s.dragSize = s.tickSize = st.tableWidth;
     }
-    if (hands == 2 && click && !s.clickWas) {
-        st.tableX = 0.0f;
-        st.tableHeight = 0.3f;
-        st.tableDistance = 1.0f;
-        st.tableYaw = 0.0f;
+    if (hands != 3 && click && !s.clickWas) {
+        const Settings defaults;
+        st.tableX = defaults.tableX;
+        st.tableHeight = defaults.tableHeight;
+        st.tableDistance = defaults.tableDistance;
+        st.tableYaw = defaults.tableYaw;
         s.dragging = false;
         xrlog("grip: the model back in its place");
     } else {
@@ -2509,7 +2666,7 @@ void updateGrips(float gripL, float gripR, bool click) {
                 pointerHaptic(0, 0.25f);
                 pointerHaptic(1, 0.25f);
             }
-            s.sizeShownUntil = SDL_GetTicks() + 1500;
+            sizeLabel();
         }
     }
     publishSettings();
@@ -2557,6 +2714,9 @@ void togglePanel() {
     const float* o = s.settings.panelOffset;
     const XrVector3f at{head.x + right.x * o[0] - f.x * o[2], head.y + o[1], head.z + right.z * o[0] - f.z * o[2]};
     wqp::open(panelFacing(at, head));
+    // a grip held as it opens does not take it (updatePanelGrab: only a new press does)
+    s.panelGrip[0] = s.panelGrip[1] = true;
+    s.panelGrabHand = -1;
 }
 
 // The settings panel's grips (1.0.5): either hand's grip takes it, wherever the hand is, and it follows
@@ -2601,32 +2761,39 @@ void hostSet(const char* key, const char* value) {
     publishSettings();
     wq_xr_set(key, value);
 }
-void hostResetPosition() {
-    hostSet("bubble_x", "0");
-    hostSet("bubble_height", "0.3");
-    hostSet("bubble_distance", "1.0");
-    hostSet("bubble_yaw", "0");
-    // and the window
+// The model, the window and the giant screen (its width stays) where the defaults put them, through
+// `set`: the panel's hostSet (applied at once) or wq_xr_set (the options menu's: wq_xr_reset_position)
+void resetPositions(void (*set)(const char*, const char*)) {
     const Settings defaults;
     char v[32];
+    snprintf(v, sizeof v, "%g", defaults.tableX);
+    set("bubble_x", v);
+    snprintf(v, sizeof v, "%g", defaults.tableHeight);
+    set("bubble_height", v);
+    snprintf(v, sizeof v, "%g", defaults.tableDistance);
+    set("bubble_distance", v);
+    snprintf(v, sizeof v, "%g", defaults.tableYaw);
+    set("bubble_yaw", v);
+    // and the window
     snprintf(v, sizeof v, "%g", defaults.windowX);
-    hostSet("window_x", v);
+    set("window_x", v);
     snprintf(v, sizeof v, "%g", defaults.windowHeight);
-    hostSet("window_height", v);
+    set("window_height", v);
     snprintf(v, sizeof v, "%g", defaults.windowDistance);
-    hostSet("window_distance", v);
+    set("window_distance", v);
     snprintf(v, sizeof v, "%g", defaults.windowYaw);
-    hostSet("window_yaw", v);
-    // and the giant screen (its width stays)
+    set("window_yaw", v);
+    // and the giant screen
     snprintf(v, sizeof v, "%g", defaults.screenX);
-    hostSet("screen_x", v);
+    set("screen_x", v);
     snprintf(v, sizeof v, "%g", defaults.height);
-    hostSet("height", v);
+    set("height", v);
     snprintf(v, sizeof v, "%g", defaults.distance);
-    hostSet("distance", v);
+    set("distance", v);
     snprintf(v, sizeof v, "%g", defaults.screenYaw);
-    hostSet("screen_yaw", v);
+    set("screen_yaw", v);
 }
+void hostResetPosition() { resetPositions(hostSet); }
 void hostResetPanels() {
     const Settings defaults;
     char v[64];
@@ -2634,6 +2801,77 @@ void hostResetPanels() {
              defaults.hudPose[3]);
     hostSet("hud_pose", v);
     hostSet("dialogue_offset", "0,0,0");
+}
+
+// The Acerca de tab (wq_panel.cpp): the APK's version and the update check, both WakerQuestActivity's
+// (Java: the request to GitHub on a thread of its own; it only reads, nothing is downloaded). On the
+// layer's thread, attached to the VM (threadMain).
+std::string activityString(const char* method) {
+    JNIEnv* env = nullptr;
+    if (!s.vm || !s.activity || s.vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK || !env) return std::string();
+    jclass cls = env->GetObjectClass(s.activity);
+    const jmethodID m = env->GetMethodID(cls, method, "()Ljava/lang/String;");
+    env->DeleteLocalRef(cls);
+    if (!m) {
+        env->ExceptionClear();
+        return std::string();
+    }
+    jstring js = (jstring)env->CallObjectMethod(s.activity, m);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return std::string();
+    }
+    std::string out;
+    if (js) {
+        if (const char* c = env->GetStringUTFChars(js, nullptr)) {
+            out = c;
+            env->ReleaseStringUTFChars(js, c);
+        }
+        env->DeleteLocalRef(js);
+    }
+    return out;
+}
+std::string hostInfo(const char* key) {
+    if (!strcmp(key, "version")) {
+        static std::string version;
+        if (version.empty()) version = activityString("versionName");
+        return version;
+    }
+    if (!strcmp(key, "update")) {
+        // the check's state, asked at most every quarter second ("" none yet, "busy", "latest", "new" or
+        // "error" with its versions or message after tabs, WakerQuestActivity.updateStatus)
+        static std::string status;
+        static uint64_t askedMs = 0;
+        const uint64_t now = SDL_GetTicks();
+        if (askedMs == 0 || now - askedMs >= 250) {
+            askedMs = now;
+            std::string st = activityString("updateStatus");
+            if (st != status && !st.empty()) {
+                std::string shown = st;
+                for (char& c : shown)
+                    if (c == '\t') c = ' ';
+                xrlog("update check: %s", shown.c_str());
+            }
+            status = st;
+        }
+        return status;
+    }
+    return std::string();
+}
+void hostCheckUpdate() {
+    JNIEnv* env = nullptr;
+    if (!s.vm || !s.activity || s.vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK || !env) return;
+    jclass cls = env->GetObjectClass(s.activity);
+    const jmethodID m = env->GetMethodID(cls, "checkForUpdate", "()V");
+    env->DeleteLocalRef(cls);
+    if (!m) {
+        env->ExceptionClear();
+        xrlog("update check: not in this APK");
+        return;
+    }
+    env->CallVoidMethod(s.activity, m);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    xrlog("update check: asked (GitHub, Trastorillo/wakerquest)");
 }
 
 // ---- Head poses (the diorama) ----------------------------------------------------------------------
@@ -2795,7 +3033,8 @@ XrQuaternionf facingPlayer(XrVector3f at) {
 
 // The giant screen's 3D (the diorama sets its own eye shift every frame, pc_vr_diorama.cpp): the
 // settings', with more depth behind the screen (x1.6, the same plane) during
-// cutscenes (cine_3d), faded in and out over half a second.
+// cutscenes (cine_3d), faded in and out over half a second. None during the title's flat screen
+// (intro_2d), whatever stereo says.
 void updateScreenStereo() {
     const Settings& st = s.settings;
     if ((st.diorama || st.window || s_special.load()) && s.dioramaFrame) {
@@ -2807,14 +3046,15 @@ void updateScreenStereo() {
     s_cineRamp += clampf(want - s_cineRamp, -dt / 0.5f, dt / 0.5f);
     const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.10f);
     const float focus = clampf(st.stereoFocus, 1.0f, 2500.0f);  // the same plane: more depth behind it
-    const float on = st.stereo ? 1.0f : 0.0f;
+    const bool stereo = st.stereo && !s_introFlat.load();
+    const float on = stereo ? 1.0f : 0.0f;
     if (on == s_stereoApplied[0] && std::fabs(strength - s_stereoApplied[1]) < 1e-5f &&
         std::fabs(focus - s_stereoApplied[2]) < 0.5f)
         return;
     s_stereoApplied[0] = on;
     s_stereoApplied[1] = strength;
     s_stereoApplied[2] = focus;
-    aurora_xr_set_stereo(st.stereo, strength, focus);
+    aurora_xr_set_stereo(stereo, strength, focus);
 }
 
 void runFrame() {
@@ -3095,9 +3335,11 @@ void runFrame() {
         const int pl = updatePanelRays(pointerQuads);
         for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
     }
-    // the model's (or the window's, or the screen's) size while both hands scale it, above it
+    // the model's (or the window's, or the screen's) size while both hands scale it, above it; or the
+    // world's scale while the right stick changes it (a grip held)
     if (SDL_GetTicks() < s.sizeShownUntil) {
-        const Settings& st = s.settings;
+        Settings st = s.settings;
+        if (s_introFlat.load()) st.diorama = st.window = false;  // the title: the screen
         const bool flat = !st.diorama && !st.window;
         const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;
         const float midY = st.sphere ? -st.tableHeight + 0.35f * r : -st.tableHeight + 0.1f;
@@ -3110,14 +3352,27 @@ void runFrame() {
         at.orientation = facingPlayer(at.position);
         char text[64];
         const int lines = s_windowLines.load();
-        if (st.window && lines > 0)
+        const int lang = st.language;  // the settings panel's language: es, en, fr
+        static const char* const kWorld[] = {"Mundo", "World", "Monde"};
+        static const char* const kScale[] = {"Escala", "Scale", "\xc3\x89" "chelle"};
+        static const char* const kAmbience[] = {"Ambiente", "Ambience", "Ambiance"};
+        static const char* const kMax[] = {"m\xc3\xa1x", "max", "max"};
+        if (s.labelWhat == 1)
+            snprintf(text, sizeof text, "%s %.0f m", kWorld[lang], st.tableSpan);
+        else if (s.labelWhat == 2)
+            snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.windowScale);
+        else if (s.labelWhat == 3)
+            snprintf(text, sizeof text, "%s x%.2f", kAmbience[lang], st.ambientScale);
+        else if (st.window && lines > 0)
             // the window: its resolution (windowLines) and its limit
-            snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 m\xc3\xa1x %.1f m", st.windowWidth,
-                     lines / 1080.0f, kWindowMaxWidth);
+            snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 %s %.1f m", st.windowWidth,
+                     lines / 1080.0f, kMax[lang], kWindowMaxWidth);
         else
             snprintf(text, sizeof text, "%.2f m", st.window ? st.windowWidth : flat ? st.width : st.tableWidth);
-        for (char* c = text; *c; c++)
-            if (*c == '.') *c = ',';
+        if (lang != 1) {  // a decimal comma in Spanish and French
+            for (char* c = text; *c; c++)
+                if (*c == '.') *c = ',';
+        }
         if (wqp::label(text, at, s.space, &labelQuad)) {
             // the screen's far away: the label as large to the eye as the window's at 2 m
             if (flat) {
@@ -3144,7 +3399,7 @@ void threadMain() {
         aurora_xr_present_enable(false);
         return;
     }
-    wqp::init({hostGet, hostSet, hostResetPosition, hostResetPanels}, s.session, s.srgb);
+    wqp::init({hostGet, hostSet, hostResetPosition, hostResetPanels, hostInfo, hostCheckUpdate}, s.session, s.srgb);
     s.panelReady = true;
     xrlog("headset layer ready; waiting for the session");
     while (!s.exiting) {
@@ -3257,7 +3512,7 @@ extern "C" int wq_xr_resolution(int* base) {
     const Settings& st = s_sharedSettings;
     const int lines = activeResolution(st);
     if (base != nullptr) *base = lines;
-    if (!st.window) {
+    if (!st.window || s_introFlat.load()) {  // (the title: the flat screen's lines, whole)
         s_windowLines.store(0);
         return lines;
     }
@@ -3293,6 +3548,17 @@ extern "C" void wq_xr_set_special(bool special) {
 
 extern "C" void wq_xr_set_talk(bool talk) {
     s_talk.store(talk);  // logged by the game ("[vr] talk zoom")
+}
+
+extern "C" void wq_xr_reset_position(void) {
+    if (s.settingsPath[0] == '\0') return;
+    resetPositions(wq_xr_set);
+}
+
+extern "C" void wq_xr_set_intro_flat(bool flat) {
+    if (s_introFlat.exchange(flat) != flat)
+        xrlog("the title screen: %s", flat ? "the flat giant screen, no 3D (intro_2d; xr.ini unchanged)"
+                                                 : "over, the mode and the 3D as they were");
 }
 
 extern "C" void wq_xr_menu_state(bool open, float width, float height, bool hovered) {
@@ -3383,6 +3649,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->windowDepthSpecial = st.windowDepthSpecial;
     out->windowPopoutSpecial = st.windowPopoutSpecial;
     out->windowFade = st.windowFade;
+    out->intro2d = st.intro2d;
 }
 
 extern "C" float wq_xr_gpu_busy(void) { return s_gpuBusy.load(std::memory_order_relaxed); }

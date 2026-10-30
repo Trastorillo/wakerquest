@@ -3,6 +3,7 @@
 #include "pc_internal.h"
 
 #include "pc/pc_controls.h"
+#include "pc/pc_settings.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -16,7 +17,10 @@ int sShake = -1;
 int sHeatHaze = -1;
 
 int readFlag(const char* name) {
+    // the environment (settings.ini's values are put there at start), else the menu's default (a fresh
+    // install: WakerQuest inverts the horizontal axis by default, pc_menu.cpp)
     const char* v = getenv(name);
+    if (v == nullptr) v = pc_settings_get(name);
     const int on = v != nullptr && strcmp(v, "1") == 0;
     if (on) {
         pc::writef(STDERR_FILENO, "[cos] %s=1: camera axis inverted\n", name);

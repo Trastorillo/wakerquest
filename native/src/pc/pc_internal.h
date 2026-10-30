@@ -373,6 +373,10 @@ const char* censusProcName(int name);
 void npcDistanceFrame(unsigned int frames);
 // Its event and first-person checks, for the next frame: everything drawn (the vegetation's too).
 bool drawDistanceAllDrawn();
+// The title screen (its stage, sea_T; fase 2), for the next frame: its far NPCs and vegetation cut around
+// the game camera's eye (given when true), the distances times its zoom (narrower than 60 degrees); the
+// headset's flat screen meanwhile (pc_vr_diorama.cpp, intro_2d). Link or not.
+bool introCinematic(float eye[3], float* zoom);
 // The vegetation's adaptive draw distance (pc_veg_distance.cpp): the load read and the distance set
 // for the next frame's draws (after npcDistanceFrame).
 void vegDistanceFrame(unsigned int frames);

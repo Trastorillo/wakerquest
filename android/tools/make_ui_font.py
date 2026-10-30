@@ -5,8 +5,8 @@
   make_ui_font.py <font.ttf> <output.h>
 
 Needs Pillow.  WakerQuest uses DejaVu Sans Bold (DejaVuSans-Bold.ttf, the
-Bitstream Vera / DejaVu licence).  Printable ASCII, the Spanish letters and a
-few symbols are rendered at each size in SIZES as 4-bit coverage, packed into one
+Bitstream Vera / DejaVu licence).  Printable ASCII, the Spanish and French letters
+and a few symbols are rendered at each size in SIZES as 4-bit coverage, packed into one
 atlas per size and stored base64-encoded.
 """
 import base64
@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 SIZES = (40, 28)
 CHARS = [chr(c) for c in range(32, 127)] + list('−·áéíóúüñÁÉÍÓÚÜÑ¿¡ºª…')  # minus sign, middle dot, Spanish
+CHARS += list('àâçèêëîïôùûÿœæÀÂÇÈÊËÎÏÔÙÛŒÆ«»’')  # French (the settings panel's third language)
 ATLAS_W = 512
 
 

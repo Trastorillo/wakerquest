@@ -15,6 +15,10 @@ struct Host {
     void (*xrSet)(const char* key, const char* value);
     void (*resetPosition)();                // the model back in front of the player
     void (*resetPanels)();                  // the HUD and the dialogues back in their places
+    // the Acerca de tab: "version" (the APK's versionName) and "update" (the check's state: "" none yet,
+    // "busy", "latest\t<local>\t<published>", "new\t<published>\t<local>" or "error\t<why>")
+    std::string (*info)(const char* key);
+    void (*checkUpdate)();                  // asks GitHub for the latest version, in the background
 };
 
 void init(const Host& host, XrSession session, bool srgb);

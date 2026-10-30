@@ -24,6 +24,10 @@
 //   box, aiming): everything drawn, as pc_npc_distance.cpp does for the characters.
 // - pc_veg_distance_saturated: at vegetation_min and still overloaded (or the adaptive cut off), for
 //   the dynamic resolution (pc_vr_dynres.cpp), the second step: it goes down only then.
+// - The title screen (pc_npc_distance.cpp's introCinematic: its stage, sea_T, Outset behind the logo;
+//   fase 2, before 1.0.8's opening event on Outset), event or not, Link or not, adaptive cut or not: the
+//   plants farther than kIntroVegUnits (25 m) and the palms farther than kIntroPalmUnits (45 m) from the
+//   game camera's eye are left out, as above (farther as the camera zooms in).
 #include "pc/pc_vr.h"
 #include "pc_internal.h"
 
@@ -51,12 +55,14 @@ constexpr unsigned kTopWindows = 60;     // the last step up, to the top: 30 s r
 constexpr uint64_t kUnstableNs = 10000000000ull;
 constexpr uint64_t kStableNs = 60000000000ull;
 constexpr float kSizeRatio = 160.0f;     // a radius of 0.3 m: 48 m (about 3 pixels across at 540 lines)
+constexpr float kIntroVegUnits = 2500.0f, kIntroPalmUnits = 4500.0f;  // the opening, from the camera
 
 bool sOn = false;
 float sDist = 0.0f;           // metres; at the top (sMax) the cut is off
 float sMin = 20.0f, sMax = 120.0f;
 bool sActive = false;         // this frame: plants are cut (the distance under the top, no event)
 bool sPalmOn = false;         // this frame: the palms' own distance (palm_draw_distance, no event)
+bool sIntro = false;          // this frame: the opening on Outset (the palms by their own distance alone)
 float sPalmUnits = 0.0f;
 float sOuterUnits = 0.0f, sBandUnits = 0.0f;
 float sLinkX = 0.0f, sLinkY = 0.0f, sLinkZ = 0.0f;
@@ -97,7 +103,7 @@ float pc_veg_draw_scale(float x, float y, float z, float radius) {
 float pc_veg_far_scale(float gameScale) { return sActive ? 1.0f : gameScale; }
 
 float pc_veg_palm_scale(float x, float y, float z) {
-    float s = pc_veg_draw_scale(x, y, z, 650.0f);
+    float s = sIntro ? 1.0f : pc_veg_draw_scale(x, y, z, 650.0f);
     if (!sPalmOn || s <= 0.0f) return s;
     const float dx = x - sLinkX, dy = y - sLinkY, dz = z - sLinkZ;
     const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
@@ -206,7 +212,18 @@ void vegDistanceFrame(unsigned int frames) {
     sActive = sOn && sDist < sMax && !allDrawn;
     sPalmOn = table.palmDrawDistance > 0.0f && !allDrawn;
     sPalmUnits = table.palmDrawDistance * 100.0f;
-    if (sActive || sPalmOn) {
+    float eye[3], zoom = 1.0f;
+    sIntro = introCinematic(eye, &zoom);
+    if (sIntro) {
+        // the title: around the game camera (sLink* its eye meanwhile), Link or not
+        sActive = sPalmOn = true;
+        sLinkX = eye[0];
+        sLinkY = eye[1];
+        sLinkZ = eye[2];
+        sOuterUnits = kIntroVegUnits * zoom;
+        sBandUnits = sOuterUnits * 0.15f > 300.0f ? sOuterUnits * 0.15f : 300.0f;
+        if (sPalmUnits <= 0.0f || sPalmUnits > kIntroPalmUnits * zoom) sPalmUnits = kIntroPalmUnits * zoom;
+    } else if ((sActive || sPalmOn) && player != nullptr) {
         sLinkX = player->current.pos.x;
         sLinkY = player->current.pos.y;
         sLinkZ = player->current.pos.z;

@@ -15,7 +15,26 @@ de tu propia ISO cada vez que arranca.
 2. Instala el APK de la sección *Releases* con SideQuest o con `adb install -r WakerQuest-<versión>.apk`.
    Para actualizar usa siempre `install -r` y no desinstales: al desinstalar se borra tu partida.
 3. Copia la ISO a la carpeta `Download` de las gafas, abre WakerQuest y elígela en el selector.
-4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel *Realidad virtual*.
+4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
+   abre y se cierra apretando el stick izquierdo (L3).
+
+### Novedades de la 1.1
+
+- **Mandos:** L3 abre y cierra el panel de ajustes (y cierra el menú de opciones del juego); ≡ del mando
+  izquierdo es START. Los grips, en todos los modos, mueven y giran lo que agarras (pantalla, ventana, maqueta,
+  ambiente o paneles) y los dos a la vez lo escalan; grip + clic del stick derecho lo devuelve a su sitio;
+  grip + stick derecho cambia la escala del mundo. El Z del juego está en el clic del stick derecho.
+- **Panel de ajustes** en nueve pestañas (General, Pantalla, Maqueta, Ventana, Ambiente, Escenas, Rendimiento,
+  Mandos y Acerca de), en español, inglés y francés. En *Acerca de*, el botón *Buscar actualización* compara tu
+  versión con la última publicada aquí (solo consulta, no descarga nada).
+- **Pantalla de título** en pantalla plana 2D y con la vegetación y los personajes lejanos recortados, para que
+  vaya fluida; al pulsar Start vuelve tu modo (*Título en 2D*, en General).
+- **Ambiente en la habitación:** las partículas (viento, lluvia, nieve) centradas en ti y giradas como las ve la
+  cámara del juego; los personajes, los cerdos y el Helmaroc orientados como en la imagen de la cámara.
+- **Modo ventana:** la imagen termina justo en el marco, sin fundido en los bordes.
+- **Maqueta:** al apuntar en primera persona (gancho, arco, catalejo...) el stick sigue la cámara del juego.
+- **Valores por defecto nuevos:** arranca en maqueta (con más resolución que la pantalla), con la cámara
+  invertida en horizontal y la intro saltada.
 
 WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
 native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,

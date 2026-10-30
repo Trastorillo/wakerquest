@@ -13,6 +13,9 @@
     <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- The settings panel's "Buscar actualización" (WakerQuestActivity.checkForUpdate): it reads the
+         latest version on GitHub, nothing else (Borealis's libraries ask for it too). -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"
