@@ -1,0 +1,237 @@
+XR diorama: each eye's scene scissored to the table, and each frame's own mask
+
+For WakerQuest's diorama (mode maqueta, pc_vr_diorama.cpp) and window (patches 0026, 0030, 0033):
+- The table's scissor: in the diorama's frames (the mask's fade[3] 0, the box, or 1, the bubble) the
+  scene's passes in each eye get a scissor, as the window's (patch 0033), to the bounds of what the mask
+  can show: the box (x and z within +-1, from the cut at y -1 to 2 m above the top) or the bubble's
+  cube, and the free spheres' cubes, clipped at the eye's near plane, with the same margin. The rest of
+  the room's or the island's geometry around the table (a large model crossing it is drawn whole by the
+  per-object culling) is no longer shaded where the mask would hide it. Logged every 600 frames: how
+  much of the eye it keeps.
+- Each frame's own mask: gfx::end_frame (game thread) takes the diorama mask the frame was recorded
+  with and the render worker latches it (stereo::latch_mask) before the right eye, the masks and the
+  HUD. Until then (the left eye's passes, encoded as recorded) the mask in effect is read as before.
+  The game thread sets the next frame's mask (its head pose) at that frame's start, while the worker
+  may still encode this one: the masks and the scissors were then a frame's head move off the picture
+  (the table's and the window's edges trembling with the head).
+
+diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
+index 7ce83b3..46d3b31 100644
+--- a/lib/gfx/frame.cpp
++++ b/lib/gfx/frame.cpp
+@@ -705,8 +705,13 @@ void end_frame(EndFrameCallback callback) {
+   // Patch 0024: whether the present wants this frame in stereo (nothing over it must be alike in both eyes).
+   const bool stereoRequested = stereo::take_request();
+   const bool ambientRequested = stereo::take_ambient_request();  // patch 0034
++  // Patch 0035: the diorama mask this frame was recorded with (the game thread sets the next frame's
++  // before the worker has encoded this one's masks)
++  webgpu::xr_present::DioramaMask frameMask{};
++  const bool frameMaskValid = webgpu::xr_present::diorama_mask(frameMask);
+   render_worker::enqueue_end_frame(frameId, [frameSlot, stagingSlot, stereoRequested, ambientRequested,
+-                                             callback = std::move(callback)]() mutable {
++                                             frameMask, frameMaskValid, callback = std::move(callback)]() mutable {
++    stereo::latch_mask(frameMaskValid, frameMask);
+     auto& packet = g_framePackets[frameSlot];
+     g_stagingBuffers[stagingSlot].Unmap();
+     g_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+index fe25633..0e1c94a 100644
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -5,6 +5,7 @@
+ #include "../gx/gx.hpp"
+ #include "../webgpu/gpu.hpp"
+ #include "../webgpu/xr_present.hpp"
++#include "../internal.hpp"
+ 
+ #include <algorithm>
+ #include <array>
+@@ -13,6 +14,7 @@
+ 
+ namespace aurora::gfx::stereo {
+ namespace {
++Module Log("aurora::gfx::stereo");  // patch 0035
+ // Render worker state
+ int g_eye = 0;               // 0 mono, -1 left, +1 right
+ bool g_frameActive = false;  // this frame's left eye was shifted
+@@ -42,9 +44,21 @@ wgpu::Buffer g_maskUniform[2];
+ std::atomic_bool g_request{false};
+ 
+ // patch 0033: the window's rectangle in this eye's NDC (x0, y0, x1, y1; y up), for this pass
++// (patch 0035: or the diorama's table)
+ bool g_winValid = false;
+ float g_winNdc[4] = {};
+ void window_scissor_begin() noexcept;
++// patch 0035: the frame's own mask, latched at its end (latch_mask); before that, the one in effect
++bool g_maskLatched = false;
++bool g_latchedValid = false;
++webgpu::xr_present::DioramaMask g_latchedMask{};
++bool frame_mask(webgpu::xr_present::DioramaMask& out) noexcept {
++  if (!g_maskLatched) {
++    return webgpu::xr_present::diorama_mask(out);
++  }
++  out = g_latchedMask;
++  return g_latchedValid;
++}
+ 
+ int16_t snorm16(float v) { return static_cast<int16_t>(std::lround(std::clamp(v, -1.f, 1.f) * 32767.f)); }
+ 
+@@ -70,6 +84,13 @@ void begin_frame() noexcept {
+   g_frameDiorama = g_frameActive && webgpu::xr_present::diorama_wanted();
+   g_hudReplay = false;
+   g_ambientReplay = false;
++  g_maskLatched = false;  // patch 0035
++}
++
++void latch_mask(bool valid, const webgpu::xr_present::DioramaMask& mask) noexcept {
++  g_latchedValid = valid;
++  g_latchedMask = mask;
++  g_maskLatched = true;
+ }
+ 
+ bool frame_diorama() noexcept { return g_frameDiorama; }
+@@ -411,9 +432,15 @@ M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
+ // Patch 0033: the window's rectangle in the table's space (x, y within +-1 at z 0) and what may come
+ // out of it (the rectangle narrowing toward the camera's eye, up to the pop-out), into this eye's clip
+ // space; its NDC bounds, or nothing when a corner is at or behind the eye.
++void table_scissor_begin(const webgpu::xr_present::DioramaMask& mk) noexcept;
++
+ void window_scissor_begin() noexcept {
+   webgpu::xr_present::DioramaMask mk;
+-  if (g_eye == 0 || !webgpu::xr_present::diorama_mask(mk) || mk.fade[3] <= 1.5f) {
++  if (g_eye == 0 || !frame_mask(mk)) {
++    return;
++  }
++  if (mk.fade[3] <= 1.5f) {
++    table_scissor_begin(mk);  // patch 0035: the diorama's table (or bubble)
+     return;
+   }
+   const M4 clipFromTable = inverse(table_from_clip(mk, g_eye < 0 ? 0 : 1));
+@@ -466,6 +493,93 @@ void window_scissor_begin() noexcept {
+   g_winNdc[3] = hi[1] + kMargin;
+   g_winValid = true;
+ }
++
++// Patch 0035: the diorama's table into this eye, as the window's (patch 0033): each eye's scene kept by
++// a scissor to the bounds of what the mask can show, so the pixels it hides (the room around the table:
++// the rest of the room's or the island's geometry, drawn whole by the per-object culling when a large
++// model crosses the table) are not shaded. The volume, in the table's space: the box (x and z within
++// +-1, from the cut at y -1 up to kTopMetres above the top: the mask keeps everything above the table,
++// this caps it where nothing of the model reaches), or the bubble's cube (radius 1), and the free
++// spheres' cubes (the birds about the room). Clipped at the eye's near plane (w > 0), so a table that
++// reaches past the eyes, beside or behind the player, still gives the part of it in view; nothing in
++// front of the eye: no scissor.
++void table_scissor_begin(const webgpu::xr_present::DioramaMask& mk) noexcept {
++  const M4 clipFromTable = inverse(table_from_clip(mk, g_eye < 0 ? 0 : 1));
++  // the table's units per metre up (its y row's scale) for the cap above the top
++  constexpr float kTopMetres = 2.f;
++  const float* r1 = &mk.tableFromHead[4];
++  const float yPerMetre = std::sqrt(r1[0] * r1[0] + r1[1] * r1[1] + r1[2] * r1[2]);
++  const bool bubble = mk.fade[3] > 0.5f;
++  const float top = bubble ? 1.f : std::max(0.f, kTopMetres * yPerMetre);
++  float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
++  bool any = false;
++  // one box (min, max in the table's space): its corners in front of the eye, and where its edges cross
++  // the near plane w = kNearW
++  constexpr float kNearW = 1e-3f;
++  const auto addBox = [&](const float mn[3], const float mx[3]) {
++    float c[8][4];
++    for (int i = 0; i < 8; i++) {
++      const float p[4] = {(i & 1) ? mx[0] : mn[0], (i & 2) ? mx[1] : mn[1], (i & 4) ? mx[2] : mn[2], 1.f};
++      for (int r = 0; r < 4; r++) {
++        c[i][r] = 0.f;
++        for (int k = 0; k < 4; k++) c[i][r] += clipFromTable.m[r][k] * p[k];
++      }
++    }
++    const auto add = [&](const float* q) {
++      for (int a = 0; a < 2; a++) {
++        lo[a] = std::min(lo[a], q[a] / q[3]);
++        hi[a] = std::max(hi[a], q[a] / q[3]);
++      }
++      any = true;
++    };
++    for (int i = 0; i < 8; i++) {
++      if (c[i][3] > kNearW) add(c[i]);
++    }
++    // the 12 edges: corners differing in one bit
++    for (int i = 0; i < 8; i++) {
++      for (int bit = 1; bit < 8; bit <<= 1) {
++        const int j = i | bit;
++        if (j == i) continue;
++        const float wi = c[i][3], wj = c[j][3];
++        if ((wi > kNearW) == (wj > kNearW)) continue;
++        const float t = (kNearW - wi) / (wj - wi);
++        float q[4];
++        for (int r = 0; r < 4; r++) q[r] = c[i][r] + (c[j][r] - c[i][r]) * t;
++        q[3] = kNearW;
++        add(q);
++      }
++    }
++  };
++  {
++    const float mn[3] = {-1.f, -1.f, -1.f};
++    const float mx[3] = {1.f, top, 1.f};
++    addBox(mn, mx);
++  }
++  const int spheres = std::clamp(mk.freeCount, 0, 16);
++  for (int i = 0; i < spheres; i++) {
++    const float* f = mk.free[i];
++    const float mn[3] = {f[0] - f[3], f[1] - f[3], f[2] - f[3]};
++    const float mx[3] = {f[0] + f[3], f[1] + f[3], f[2] + f[3]};
++    addBox(mn, mx);
++  }
++  if (!any) {
++    return;  // nothing in front of the eye: as before (no scissor)
++  }
++  // a margin for the head's move between the mask's pose and this frame's (5% of the picture a side)
++  constexpr float kMargin = 0.1f;
++  g_winNdc[0] = lo[0] - kMargin;
++  g_winNdc[1] = lo[1] - kMargin;
++  g_winNdc[2] = hi[0] + kMargin;
++  g_winNdc[3] = hi[1] + kMargin;
++  g_winValid = true;
++  // how much of the eye the scissor keeps, every 600 frames (the left eye's first scene pass)
++  static uint32_t s_count = 0;
++  if (g_eye < 0 && s_count++ % 600 == 0) {
++    const float w = std::clamp(g_winNdc[2], -1.f, 1.f) - std::clamp(g_winNdc[0], -1.f, 1.f);
++    const float h = std::clamp(g_winNdc[3], -1.f, 1.f) - std::clamp(g_winNdc[1], -1.f, 1.f);
++    Log.info("XR diorama: the table's scissor keeps {:.0f}% of the eye", std::max(0.f, w * h) * 25.f);
++  }
++}
+ } // namespace
+ 
+ bool window_scissor(float left, float top, float width, float height, uint32_t& x0, uint32_t& y0, uint32_t& x1,
+@@ -510,7 +624,7 @@ void clear_efb(wgpu::CommandEncoder& cmd) {
+ 
+ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+   webgpu::xr_present::DioramaMask mk;
+-  if (!webgpu::xr_present::diorama_mask(mk)) {
++  if (!frame_mask(mk)) {
+     return;
+   }
+   if (!g_maskPipeline) {
+diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
+index b5e0909..b74b84c 100644
+--- a/lib/gfx/stereo.hpp
++++ b/lib/gfx/stereo.hpp
+@@ -9,6 +9,7 @@
+ // whole EFB carry the eye's shift in their immediates (DrawImmediateData::_pad, read by the GX
+ // vertex shader); everything else is drawn as recorded. All of this runs on the render worker.
+ 
++#include "../webgpu/xr_present.hpp"
+ #include <cstdint>
+ 
+ namespace wgpu {
+@@ -45,6 +46,12 @@ uint32_t draw_word() noexcept;
+ // pixels, clamped to the viewport given: left, top, width, height) while it applies.
+ bool window_scissor(float left, float top, float width, float height, uint32_t& x0, uint32_t& y0, uint32_t& x1,
+                     uint32_t& y1) noexcept;
++// Patch 0035, render worker, at the start of a frame's end (before the right eye, the masks and the
++// HUD): the diorama mask as the game thread left it when it ended that frame (gfx::end_frame), so the
++// frame's masks and scissors use its own head pose and table, never the next frame's (the game thread
++// sets the next one while the worker still encodes this one). Until then (the left eye's passes, encoded
++// as they are recorded) the mask in effect is read as before.
++void latch_mask(bool valid, const webgpu::xr_present::DioramaMask& mask) noexcept;
+ 
+ // Game thread (or the GX FIFO worker), before gfx::end_frame: whether this frame may be shown in
+ // stereo (nothing is drawn over it that has to be in both eyes alike, such as ImGui).

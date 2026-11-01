@@ -4,16 +4,21 @@
 // goes down one step when the game's frame rate stays low and up one when it holds, through the same
 // path as a mode change (pc_menu.cpp syncVrResolution -> setVrScale -> VISetFrameBufferScale).
 //
-// - The rate: game frames over the wall time between pc_menu.cpp's frames (one per game frame),
-//   counted over windows of 1 s. Not the compositor's 72/90 Hz: it reprojects whatever the game hands
-//   it, so only the game's own rate says whether it keeps up (30 fps, 60 with the 60 fps mode).
-// - Down one step (a tenth of the mode's lines) after 3 windows in a row under dynres_low_fps (27);
-//   up one after 10 windows in a row at dynres_high_fps (29.5) or more. Between the two, nothing.
+// - The rate: the lower of the game's frames (over the wall time between pc_menu.cpp's frames, one per
+//   game frame) and the frames the headset showed (wq_xr_frames_shown: Aurora's frames the XR layer
+//   copied once its GPU had finished them), over windows of 1 s. Not the compositor's 72/90 Hz: it
+//   reprojects whatever the game hands it. 1.1.1: the game's own rate alone stayed at 30 under a
+//   GPU-bound scene (the game thread records ahead; the GPU finished a frame in three, the rest
+//   replaced before shown), so dynres went back up while the headset showed 10 fps.
+// - Down one step (a tenth of the mode's lines) after 3 windows in a row under dynres_low_fps (27),
+//   two steps when the rate is under 60% of it; up one after 10 windows in a row at dynres_high_fps
+//   (29.5) or more. Between the two, nothing.
 // - A step up that drops again within 20 s doubles the next wait to go up (10, 20, 40... 120 s); 60 s
 //   at a level without a step down resets it. At 30 fps the game paces itself, so its rate cannot
 //   show headroom: going up is a probe, and this keeps it from flipping every few seconds.
-// - A step down that did not raise the rate by 1 fps (the CPU is the limit, not the GPU: many
-//   characters, Windfall) holds further steps down for 30 s: lower lines would not help.
+// - A step down that did not raise the rate by 1 fps while the GPU was not busy (under 90%, or no
+//   reading: the CPU is the limit, many characters, Windfall) holds further steps down for 30 s: lower
+//   lines would not help. With the GPU at its limit it goes on down to dynres_min.
 // - Never under dynres_min (0.7) of the mode's lines, nor over them: xr.ini's resolutions are the top.
 // - The second step after the vegetation's adaptive distance (pc_veg_distance.cpp): with it on, a step
 //   down only once it is at vegetation_min and the GPU still does not keep up (fewer plants first).
@@ -26,6 +31,7 @@
 #include "pc/pc_vr.h"
 #include "pc_internal.h"
 
+#include <algorithm>
 #include <cmath>
 #include <unistd.h>
 
@@ -57,6 +63,8 @@ struct State {
     uint64_t lastNs = 0;  // the previous frame (0: none counted)
     uint64_t winNs = 0;
     unsigned winFrames = 0;
+    uint64_t winStartNs = 0;      // the window's wall start, and the headset's frames shown then
+    uint32_t winShownStart = 0;
     unsigned low = 0, high = 0;  // windows in a row under / over the thresholds
     unsigned upWait = kUpWindows;
     uint64_t changeNs = 0;       // the last step
@@ -70,6 +78,7 @@ void resetCount() {
     s.lastNs = 0;
     s.winNs = 0;
     s.winFrames = 0;
+    s.winStartNs = 0;
     s.low = s.high = 0;
 }
 
@@ -89,7 +98,8 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
     wq_xr_table(&table);
     if (table.dynres != s.on) {
         s.on = table.dynres;
-        pc::writef(STDERR_FILENO, "[vr] dynres: %s (down under %.1f fps for 3 s, up at %.1f for 10 s, down to %.2f)\n",
+        pc::writef(STDERR_FILENO, "[vr] dynres: %s (the frames the headset shows: down under %.1f fps for 3 s, up "
+                   "at %.1f for 10 s, down to %.2f)\n",
                    s.on ? "on" : "off", table.dynresLowFps, table.dynresHighFps, table.dynresMin);
         s.level = 0;
         s.upWait = kUpWindows;
@@ -128,26 +138,37 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
         // a load or a hitch: the window starts over (the counts in a row stay)
         s.winNs = 0;
         s.winFrames = 0;
+        s.winStartNs = 0;
         return linesAt(lines, s.level);
+    }
+    if (s.winStartNs == 0) {
+        s.winStartNs = now;
+        s.winShownStart = wq_xr_frames_shown();
     }
     s.winNs += dt;
     s.winFrames++;
     if (s.winNs < kSecondNs) {
         return linesAt(lines, s.level);
     }
-    const float fps = (float)(s.winFrames * 1e9 / (double)s.winNs);
+    const float gameFps = (float)(s.winFrames * 1e9 / (double)s.winNs);
+    const uint32_t shownNow = wq_xr_frames_shown();
+    const float shownFps = now > s.winStartNs ? (float)((shownNow - s.winShownStart) * 1e9 / (double)(now - s.winStartNs))
+                                              : gameFps;
+    const float fps = std::min(gameFps, shownFps);
     s.winNs = 0;
     s.winFrames = 0;
+    s.winStartNs = 0;
     s.lastFps = fps;
+    const float busy = wq_xr_gpu_busy();  // percent, -1 unknown
     const float scale = pc_fps60_test() != 0 ? 2.0f : 1.0f;
     const float lowFps = table.dynresLowFps * scale, highFps = table.dynresHighFps * scale;
 
     // the first window after a step down: did it help?
     if (s.fpsBeforeDown > 0.0f) {
-        if (fps < s.fpsBeforeDown + 1.0f && fps < lowFps) {
+        if (fps < s.fpsBeforeDown + 1.0f && fps < lowFps && busy < 90.0f) {
             s.holdDownUntil = now + kNoGainHoldNs;
-            pc::writef(STDERR_FILENO, "[vr] dynres: %.1f fps after the step down (%.1f before): not the GPU; no "
-                       "further step down for 30 s\n", fps, s.fpsBeforeDown);
+            pc::writef(STDERR_FILENO, "[vr] dynres: %.1f fps after the step down (%.1f before), GPU %.0f%%: not the "
+                       "GPU; no further step down for 30 s\n", fps, s.fpsBeforeDown, busy);
         }
         s.fpsBeforeDown = 0.0f;
     }
@@ -167,7 +188,8 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
     int next = s.level;
     const char* why = nullptr;
     if (s.low >= kDownWindows && s.level < floorLevel && now >= s.holdDownUntil && pc_veg_distance_saturated()) {
-        next = s.level + 1;
+        // far under (a GPU-bound scene at 10-15 fps): two steps at once
+        next = std::min(floorLevel, s.level + (fps < 0.6f * lowFps ? 2 : 1));
         why = "low";
         if (s.upNs != 0 && now - s.upNs < kUnstableNs) {
             s.upWait = s.upWait * 2 > kUpWindowsMax ? kUpWindowsMax : s.upWait * 2;
@@ -179,7 +201,8 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
         s.upNs = now;
     }
     if (next != s.level) {
-        pc::writef(STDERR_FILENO, "[vr] dynres: %.1f fps (%s): %d -> %d lines (%.2f of %d)%s\n", fps, why,
+        pc::writef(STDERR_FILENO, "[vr] dynres: %.1f fps (%s; game %.1f, shown %.1f, GPU %.0f%%): %d -> %d lines "
+                   "(%.2f of %d)%s\n", fps, why, gameFps, shownFps, busy,
                    linesAt(lines, s.level), linesAt(lines, next), kFactors[next], lines,
                    next < s.level ? "" : s.upWait > kUpWindows ? "; next step up after a longer wait" : "");
         s.level = next;
