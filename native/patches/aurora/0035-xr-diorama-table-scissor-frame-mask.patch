@@ -1,20 +1,48 @@
-XR diorama: each eye's scene scissored to the table, and each frame's own mask
+XR diorama: each eye's scene scissored to the table, and each frame's own head pose and mask
 
-For WakerQuest's diorama (mode maqueta, pc_vr_diorama.cpp) and window (patches 0026, 0030, 0033):
+For WakerQuest's diorama (mode maqueta, pc_vr_diorama.cpp) and window (patches 0025, 0026, 0030, 0033):
 - The table's scissor: in the diorama's frames (the mask's fade[3] 0, the box, or 1, the bubble) the
   scene's passes in each eye get a scissor, as the window's (patch 0033), to the bounds of what the mask
-  can show: the box (x and z within +-1, from the cut at y -1 to 2 m above the top) or the bubble's
-  cube, and the free spheres' cubes, clipped at the eye's near plane, with the same margin. The rest of
-  the room's or the island's geometry around the table (a large model crossing it is drawn whole by the
-  per-object culling) is no longer shaded where the mask would hide it. Logged every 600 frames: how
-  much of the eye it keeps.
-- Each frame's own mask: gfx::end_frame (game thread) takes the diorama mask the frame was recorded
-  with and the render worker latches it (stereo::latch_mask) before the right eye, the masks and the
-  HUD. Until then (the left eye's passes, encoded as recorded) the mask in effect is read as before.
-  The game thread sets the next frame's mask (its head pose) at that frame's start, while the worker
-  may still encode this one: the masks and the scissors were then a frame's head move off the picture
-  (the table's and the window's edges trembling with the head).
+  can show: the box (x and z within +-1, from the cut at y -1 up without a cap, as the mask keeps all
+  above the table) or the bubble's cube, and the free spheres' cubes, clipped at the eye's near plane.
+  The rest of the room's or the island's geometry around the table (a large model crossing it is drawn
+  whole by the per-object culling) is no longer shaded where the mask would hide it. Logged every 600
+  frames: how much of the eye it keeps.
+- Each frame's own head pose and mask: aurora::end_frame (the game thread) snapshots the frame's tag
+  (aurora_xr_set_frame_info) and diorama mask (xr_present::snapshot_frame); with the async end of
+  frame (patch 0018) the GX FIFO worker presents the frame with that snapshot (use_snapshot), as the
+  game thread already sets the next frame's meanwhile: the picture was published with the next
+  frame's head pose and mask. gfx::end_frame hands the mask to the render worker, which latches it
+  (stereo::latch_mask) before the right eye, the masks and the HUD.
+- The left eye's passes are encoded as they are recorded, with the mask in effect then (possibly the
+  next frame's): their scissors (the window's and the table's) take a margin of 12.5% of the picture a
+  side instead of 5%.
 
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index 25fcb40..e2db996 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -307,14 +307,19 @@ void end_frame() noexcept {
+     // Async end of frame (patch 0018): what needs the frame's commands processed (the texture caches, the
+     // last render pass, the frame handed to the render worker) runs on the GX FIFO worker once it gets
+     // there; the game thread goes on (fifo.hpp).
+-    gx::fifo::end_frame_async([imguiDrawData = std::move(imguiDrawData)]() mutable {
++    // Patch 0035: the frame's head pose tag and diorama mask as the game thread leaves them now; the
++    // worker presents the frame later, when the game thread has set the next frame's
++    gx::fifo::end_frame_async([imguiDrawData = std::move(imguiDrawData),
++                               snapshot = webgpu::xr_present::snapshot_frame()]() mutable {
+       if (!g_frameBegun) {
+         return;
+       }
+       g_frameBegun = false;
+       gx::texture::end_frame();
+       gfx::finish();
++      webgpu::xr_present::use_snapshot(&snapshot);
+       present_frame(std::move(imguiDrawData));
++      webgpu::xr_present::use_snapshot(nullptr);
+     });
+     return;
+   }
 diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
 index 7ce83b3..46d3b31 100644
 --- a/lib/gfx/frame.cpp
@@ -35,7 +63,7 @@ index 7ce83b3..46d3b31 100644
      g_stagingBuffers[stagingSlot].Unmap();
      g_mappingStates[stagingSlot].store(BufferMapState::Unmapped, std::memory_order_release);
 diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
-index fe25633..0e1c94a 100644
+index fe25633..fc7325e 100644
 --- a/lib/gfx/stereo.cpp
 +++ b/lib/gfx/stereo.cpp
 @@ -5,6 +5,7 @@
@@ -90,11 +118,17 @@ index fe25633..0e1c94a 100644
  }
  
  bool frame_diorama() noexcept { return g_frameDiorama; }
-@@ -411,9 +432,15 @@ M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
+@@ -411,9 +432,21 @@ M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
  // Patch 0033: the window's rectangle in the table's space (x, y within +-1 at z 0) and what may come
  // out of it (the rectangle narrowing toward the camera's eye, up to the pop-out), into this eye's clip
  // space; its NDC bounds, or nothing when a corner is at or behind the eye.
 +void table_scissor_begin(const webgpu::xr_present::DioramaMask& mk) noexcept;
++
++// Patch 0035: the scissors' margin (NDC, a side). The right eye's passes run after the frame's own mask
++// is latched: the head pose they were drawn with, 0.1 (5% of the picture) for the head's move until it
++// is shown. The left eye's are encoded as they are recorded, with the mask in effect then, which may
++// already be the next frame's (a frame or two of the head's move ahead): 0.25 (12.5%, some 12 degrees).
++float scissor_margin() noexcept { return g_maskLatched ? 0.1f : 0.25f; }
 +
  void window_scissor_begin() noexcept {
    webgpu::xr_present::DioramaMask mk;
@@ -107,28 +141,38 @@ index fe25633..0e1c94a 100644
      return;
    }
    const M4 clipFromTable = inverse(table_from_clip(mk, g_eye < 0 ? 0 : 1));
-@@ -466,6 +493,93 @@ void window_scissor_begin() noexcept {
-   g_winNdc[3] = hi[1] + kMargin;
-   g_winValid = true;
- }
+@@ -458,13 +491,99 @@ void window_scissor_begin() noexcept {
+       hi[a] = std::max(hi[a], c[a] / c[3]);
+     }
+   }
+-  // a margin for the head's move between the mask's pose and this frame's (5% of the picture a side)
+-  constexpr float kMargin = 0.1f;
++  // a margin for the head's move between the mask's pose and this frame's (5% of the picture a side;
++  // patch 0035: 12.5% before the frame's own mask is latched, see scissor_margin)
++  const float kMargin = scissor_margin();
++  g_winNdc[0] = lo[0] - kMargin;
++  g_winNdc[1] = lo[1] - kMargin;
++  g_winNdc[2] = hi[0] + kMargin;
++  g_winNdc[3] = hi[1] + kMargin;
++  g_winValid = true;
++}
 +
 +// Patch 0035: the diorama's table into this eye, as the window's (patch 0033): each eye's scene kept by
 +// a scissor to the bounds of what the mask can show, so the pixels it hides (the room around the table:
 +// the rest of the room's or the island's geometry, drawn whole by the per-object culling when a large
 +// model crosses the table) are not shaded. The volume, in the table's space: the box (x and z within
-+// +-1, from the cut at y -1 up to kTopMetres above the top: the mask keeps everything above the table,
-+// this caps it where nothing of the model reaches), or the bubble's cube (radius 1), and the free
-+// spheres' cubes (the birds about the room). Clipped at the eye's near plane (w > 0), so a table that
++// +-1, from the cut at y -1 up without a cap, as the mask keeps everything above the table), or the
++// bubble's cube (radius 1), and the free spheres' cubes (the birds about the room). Clipped at the
++// eye's near plane (w > 0), so a table that
 +// reaches past the eyes, beside or behind the player, still gives the part of it in view; nothing in
 +// front of the eye: no scissor.
 +void table_scissor_begin(const webgpu::xr_present::DioramaMask& mk) noexcept {
 +  const M4 clipFromTable = inverse(table_from_clip(mk, g_eye < 0 ? 0 : 1));
-+  // the table's units per metre up (its y row's scale) for the cap above the top
-+  constexpr float kTopMetres = 2.f;
-+  const float* r1 = &mk.tableFromHead[4];
-+  const float yPerMetre = std::sqrt(r1[0] * r1[0] + r1[1] * r1[1] + r1[2] * r1[2]);
++  // the box: no cap above its top (a tall tower or a tree is kept whole), its top far enough that its
++  // corners project at the vertical's vanishing point (or are clipped behind the eye)
++  constexpr float kNoTop = 1e4f;
 +  const bool bubble = mk.fade[3] > 0.5f;
-+  const float top = bubble ? 1.f : std::max(0.f, kTopMetres * yPerMetre);
++  const float top = bubble ? 1.f : kNoTop;
 +  float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
 +  bool any = false;
 +  // one box (min, max in the table's space): its corners in front of the eye, and where its edges cross
@@ -183,13 +227,12 @@ index fe25633..0e1c94a 100644
 +  if (!any) {
 +    return;  // nothing in front of the eye: as before (no scissor)
 +  }
-+  // a margin for the head's move between the mask's pose and this frame's (5% of the picture a side)
-+  constexpr float kMargin = 0.1f;
-+  g_winNdc[0] = lo[0] - kMargin;
-+  g_winNdc[1] = lo[1] - kMargin;
-+  g_winNdc[2] = hi[0] + kMargin;
-+  g_winNdc[3] = hi[1] + kMargin;
-+  g_winValid = true;
++  const float kMargin = scissor_margin();
+   g_winNdc[0] = lo[0] - kMargin;
+   g_winNdc[1] = lo[1] - kMargin;
+   g_winNdc[2] = hi[0] + kMargin;
+   g_winNdc[3] = hi[1] + kMargin;
+   g_winValid = true;
 +  // how much of the eye the scissor keeps, every 600 frames (the left eye's first scene pass)
 +  static uint32_t s_count = 0;
 +  if (g_eye < 0 && s_count++ % 600 == 0) {
@@ -197,11 +240,10 @@ index fe25633..0e1c94a 100644
 +    const float h = std::clamp(g_winNdc[3], -1.f, 1.f) - std::clamp(g_winNdc[1], -1.f, 1.f);
 +    Log.info("XR diorama: the table's scissor keeps {:.0f}% of the eye", std::max(0.f, w * h) * 25.f);
 +  }
-+}
+ }
  } // namespace
  
- bool window_scissor(float left, float top, float width, float height, uint32_t& x0, uint32_t& y0, uint32_t& x1,
-@@ -510,7 +624,7 @@ void clear_efb(wgpu::CommandEncoder& cmd) {
+@@ -510,7 +629,7 @@ void clear_efb(wgpu::CommandEncoder& cmd) {
  
  void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
    webgpu::xr_present::DioramaMask mk;
@@ -235,3 +277,70 @@ index b5e0909..b74b84c 100644
  
  // Game thread (or the GX FIFO worker), before gfx::end_frame: whether this frame may be shown in
  // stereo (nothing is drawn over it that has to be in both eyes alike, such as ImGui).
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+index cac591a..b8b244e 100644
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -234,14 +234,38 @@ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag, bool ambient)
+ #endif
+ }
+ 
++// patch 0035: the snapshot of the frame this thread is ending (use_snapshot), if any
++thread_local const FrameSnapshot* t_snapshot = nullptr;
++
+ void take_frame_info(uint32_t& tag, bool& diorama) noexcept {
++  if (t_snapshot != nullptr) {
++    tag = t_snapshot->tag;
++    diorama = t_snapshot->diorama;
++    return;
++  }
+   tag = g_frameTag.load(std::memory_order_relaxed);
+   diorama = g_frameDiorama.load(std::memory_order_relaxed);
+ }
+ 
++FrameSnapshot snapshot_frame() noexcept {
++  FrameSnapshot s;
++  s.tag = g_frameTag.load(std::memory_order_relaxed);
++  s.diorama = g_frameDiorama.load(std::memory_order_relaxed);
++  std::lock_guard lock{g_maskMutex};
++  s.mask = g_mask;
++  s.maskValid = g_maskValid;
++  return s;
++}
++
++void use_snapshot(const FrameSnapshot* snapshot) noexcept { t_snapshot = snapshot; }
++
+ bool diorama_wanted() noexcept { return g_frameDiorama.load(std::memory_order_relaxed) && active(); }
+ 
+ bool diorama_mask(DioramaMask& out) noexcept {
++  if (t_snapshot != nullptr) {  // patch 0035
++    out = t_snapshot->mask;
++    return t_snapshot->maskValid;
++  }
+   std::lock_guard lock{g_maskMutex};
+   out = g_mask;
+   return g_maskValid;
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+index 707bb53..58b1595 100644
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -47,6 +47,19 @@ struct DioramaMask {
+   float window[2];         // patch 0030: the window's pop-out and the camera's eye in front of it (metres)
+ };
+ bool diorama_mask(DioramaMask& out) noexcept;
++// Patch 0035: what the game thread set for a frame (aurora_xr_set_frame_info's tag, the diorama mask),
++// taken as it ends the frame (aurora::end_frame). With the async end of frame (patch 0018) the frame's
++// present and gfx::end_frame run later on the GX FIFO worker, while the game thread already sets the
++// next frame's: there, around them, use_snapshot makes take_frame_info and diorama_mask answer the
++// snapshot (on that thread only; nullptr: the live values again).
++struct FrameSnapshot {
++  uint32_t tag = 0;
++  bool diorama = false;
++  bool maskValid = false;
++  DioramaMask mask{};
++};
++FrameSnapshot snapshot_frame() noexcept;
++void use_snapshot(const FrameSnapshot* snapshot) noexcept;
+ 
+ // Patch 0034: the room's ambience around the giant screen (aurora_xr_set_ambient), while active().
+ struct AmbientMask {
