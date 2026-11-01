@@ -770,6 +770,8 @@ struct Xr {
     uint64_t menuCloseUntil = 0;  // ns: the game's options menu closed by L3 (its L+R+Z held until then)
     bool hasPerf = false;
     int perfApplied = -1;
+    // the controllers' profiles the runtime lists (1.1.1): Quest 3 / 3S's Touch Plus, the Touch Pro
+    bool hasTouchPlus = false, hasTouchPro = false;
     // the GPU's load (pollGpuBusy): the runtime's counter (XR_META_performance_metrics), else kgsl's
     bool hasPerfMetrics = false;
     XrPath gpuUtilPath = XR_NULL_PATH;
@@ -965,6 +967,12 @@ bool initInstance() {
     if (s.hasPerf) enable.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     s.hasPerfMetrics = hasExtension(exts, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
     if (s.hasPerfMetrics) enable.push_back(XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
+    // the controllers' own profiles (1.1.1), asked for only when listed: Quest 3 and 3S's Touch Plus
+    // (/interaction_profiles/meta/touch_controller_plus) and the Touch Pro
+    s.hasTouchPlus = hasExtension(exts, XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME);
+    if (s.hasTouchPlus) enable.push_back(XR_META_TOUCH_CONTROLLER_PLUS_EXTENSION_NAME);
+    s.hasTouchPro = hasExtension(exts, XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME);
+    if (s.hasTouchPro) enable.push_back(XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME);
 
     XrInstanceCreateInfoAndroidKHR android{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     android.applicationVM = s.vm;
@@ -984,8 +992,9 @@ bool initInstance() {
     if (!ok(xrGetSystem(s.instance, &sys, &s.system), "xrGetSystem")) return false;
     XrSystemProperties props{XR_TYPE_SYSTEM_PROPERTIES};
     xrGetSystemProperties(s.instance, s.system, &props);
-    xrlog("instance: %s (refresh rate %s, passthrough %s)", props.systemName, s.hasRefreshRate ? "yes" : "no",
-          s.hasPassthrough ? "yes" : "no");
+    xrlog("instance: %s (refresh rate %s, passthrough %s, Touch Plus profile %s, Touch Pro profile %s)",
+          props.systemName, s.hasRefreshRate ? "yes" : "no", s.hasPassthrough ? "yes" : "no",
+          s.hasTouchPlus ? "yes" : "no", s.hasTouchPro ? "yes" : "no");
     return true;
 }
 
@@ -1330,14 +1339,62 @@ bool initActions() {
         {s.gripL, "/user/hand/left/input/squeeze/value"},
         {s.handPoseL, "/user/hand/left/input/grip/pose"},
     };
+    // The same bindings for each Touch profile the runtime may pick (1.1.1): the Quest 2's Touch,
+    // Quest 3 and 3S's Touch Plus, the Touch Pro (the last two with their extensions); the simple
+    // controller as a fallback (the triggers as select, the menu, the poses, the haptics). A profile
+    // the runtime refuses is skipped; only none at all stops the controls.
     std::vector<XrActionSuggestedBinding> suggested;
     for (const auto& bnd : binds) suggested.push_back({bnd.act, toPath(bnd.path)});
-    XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
-    sb.interactionProfile = toPath("/interaction_profiles/oculus/touch_controller");
-    sb.countSuggestedBindings = uint32_t(suggested.size());
-    sb.suggestedBindings = suggested.data();
-    if (!ok(xrSuggestInteractionProfileBindings(s.instance, &sb), "xrSuggestInteractionProfileBindings"))
+    struct Profile {
+        const char* path;
+        bool use;
+    };
+    const Profile touchProfiles[] = {
+        {"/interaction_profiles/oculus/touch_controller", true},
+        {"/interaction_profiles/meta/touch_controller_plus", s.hasTouchPlus},
+        {"/interaction_profiles/facebook/touch_controller_pro", s.hasTouchPro},
+    };
+    int profiles = 0;
+    for (const Profile& pr : touchProfiles) {
+        if (!pr.use) continue;
+        XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+        sb.interactionProfile = toPath(pr.path);
+        sb.countSuggestedBindings = uint32_t(suggested.size());
+        sb.suggestedBindings = suggested.data();
+        const XrResult r = xrSuggestInteractionProfileBindings(s.instance, &sb);
+        if (XR_SUCCEEDED(r)) profiles++;
+        else xrlog("bindings for %s refused (%d); skipped", pr.path, int(r));
+    }
+    {
+        // the simple controller: the triggers' click as the game's A (right) and the L trigger (left),
+        // the menu as START, the poses and the haptics
+        const struct {
+            XrAction act;
+            const char* path;
+        } simple[] = {
+            {s.a, "/user/hand/right/input/select/click"},
+            {s.start, "/user/hand/left/input/menu/click"},
+            {s.rumble, "/user/hand/left/output/haptic"},
+            {s.rumble, "/user/hand/right/output/haptic"},
+            {s.handPose, "/user/hand/right/input/grip/pose"},
+            {s.handPoseL, "/user/hand/left/input/grip/pose"},
+            {s.aimPose, "/user/hand/left/input/aim/pose"},
+            {s.aimPose, "/user/hand/right/input/aim/pose"},
+        };
+        std::vector<XrActionSuggestedBinding> sv;
+        for (const auto& bnd : simple) sv.push_back({bnd.act, toPath(bnd.path)});
+        XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+        sb.interactionProfile = toPath("/interaction_profiles/khr/simple_controller");
+        sb.countSuggestedBindings = uint32_t(sv.size());
+        sb.suggestedBindings = sv.data();
+        const XrResult r = xrSuggestInteractionProfileBindings(s.instance, &sb);
+        if (XR_SUCCEEDED(r)) profiles++;
+        else xrlog("bindings for /interaction_profiles/khr/simple_controller refused (%d); skipped", int(r));
+    }
+    if (profiles == 0) {
+        xrlog("no controller profile accepted");
         return false;
+    }
     XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
     ai.countActionSets = 1;
     ai.actionSets = &s.actionSet;
@@ -1355,7 +1412,7 @@ bool initActions() {
         aim.poseInActionSpace.orientation.w = 1.0f;
         ok(xrCreateActionSpace(s.session, &aim, &s.aimSpace[h]), "xrCreateActionSpace (aim)");
     }
-    xrlog("Touch controller bindings ready");
+    xrlog("Touch controller bindings ready (%d profiles)", profiles);
     return true;
 }
 
@@ -1477,6 +1534,21 @@ bool updatePassthrough() {
     return want;
 }
 
+// The profile the runtime chose for each hand (after XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED):
+// which controllers it sees, or none (hands, or the controllers asleep).
+void logInteractionProfiles() {
+    for (int h = 0; h < 2; h++) {
+        XrInteractionProfileState st{XR_TYPE_INTERACTION_PROFILE_STATE};
+        char name[XR_MAX_PATH_LENGTH] = "none";
+        if (XR_SUCCEEDED(xrGetCurrentInteractionProfile(s.session, s.hands[h], &st)) &&
+            st.interactionProfile != XR_NULL_PATH) {
+            uint32_t n = 0;
+            if (XR_FAILED(xrPathToString(s.instance, st.interactionProfile, sizeof name, &n, name))) strcpy(name, "?");
+        }
+        xrlog("controller profile, %s hand: %s", h == 0 ? "left" : "right", name);
+    }
+}
+
 void pollEvents() {
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(s.instance, &ev) == XR_SUCCESS) {
@@ -1518,6 +1590,8 @@ void pollEvents() {
                 break;
             }
             s.focused = sc.state == XR_SESSION_STATE_FOCUSED;
+        } else if (ev.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED) {
+            logInteractionProfiles();
         } else if (ev.type == XR_TYPE_EVENT_DATA_PERF_SETTINGS_EXT) {
             onPerfNotification(*reinterpret_cast<XrEventDataPerfSettingsEXT*>(&ev));
         } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
