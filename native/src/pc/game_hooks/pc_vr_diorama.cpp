@@ -1686,6 +1686,8 @@ void ambientWindMid(const float eye[3], float out[3]) {
     memcpy(out, sAmbient.windMid, sizeof(sAmbient.windMid));
 }
 
+constexpr float kHousiSize = 3.0f;  // the spores in the room: their quads this many times as large
+
 void pc_vr_ambient_draw(void) {
     // the painter runs after the game frame's counter has moved on (fapGm_Execute): the packets taken
     // in this frame's actor draws are one count behind
@@ -1816,7 +1818,21 @@ void pc_vr_ambient_draw(void) {
             };
             if (rain) centred(700.0f, 600.0f), g_env_light.mpRainPacket->draw();
             if (snow) centred(500.0f, 500.0f), g_env_light.mpSnowPacket->draw();
-            if (housi) centred(800.0f, 800.0f), g_env_light.mpHousiPacket->draw();
+            if (housi) {
+                // the spores (the Forbidden Woods' green and blue motes, kytag00's housi): the game's
+                // quads are 6 units across, 12 mm at the room's scale, too small to be seen around the
+                // player: drawn kHousiSize times as large, without their shadows on the ground (1.1.1)
+                static bool sHousiLogged = false;
+                if (!sHousiLogged) {
+                    sHousiLogged = true;
+                    pc::writef(STDERR_FILENO, "[vr] ambient: the spores (%d) in the room, %.0f times as large\n",
+                               g_env_light.mHousiCount, kHousiSize);
+                }
+                centred(800.0f, 800.0f);
+                pc_vr_housi_size = kHousiSize;
+                g_env_light.mpHousiPacket->draw();
+                pc_vr_housi_size = 1.0f;
+            }
             j3dSys.reinitGX();
             GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
         }

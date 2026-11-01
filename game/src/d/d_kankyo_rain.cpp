@@ -7,6 +7,9 @@
 #include "d/d_kankyo_rain.h"
 #if TARGET_PC
 #include "pc/game_hooks.h"
+#if TARGET_PC
+#include "pc/pc_vr.h"
+#endif
 #endif
 #include "d/d_bg_s_gnd_chk.h"
 #include "d/d_bg_s_roof_chk.h"
@@ -4438,6 +4441,13 @@ void dKyr_drawHousi(Mtx drawMtx, u8** pImg) {
 
     f32 var_f25 = 255.0f;
     f32 var_f27 = 3.0f;
+#if TARGET_PC
+    // WakerQuest: the room's ambience draws them again larger, without their shadows (pc_vr.h)
+    var_f27 *= pc_vr_housi_size;
+    const int passes = pc_vr_housi_size != 1.0f ? 1 : 2;
+#else
+    const int passes = 2;
+#endif
 
     GXColor color_reg0;
     color_reg0.r = 0xE5;
@@ -4458,7 +4468,7 @@ void dKyr_drawHousi(Mtx drawMtx, u8** pImg) {
     }
 
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < passes; i++) {
         dKyr_set_btitex(&spDC, (ResTIMG*)pImg[0]);
         GXSetNumChans(0);
         GXSetTevColor(GX_TEVREG0, color_reg0);

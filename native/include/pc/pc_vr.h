@@ -102,6 +102,9 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket);
    user id (the weather's seagulls, then its wind lines), each placed in the room its own way. */
 extern int pc_vr_ambient_jpa;
 int pc_vr_ambient_jpa_kept(unsigned short userId);
+/* The weather's spores (the Forbidden Woods' green and blue motes, dKyr_drawHousi): their size times
+   this, and no shadows on the ground, while the painter draws them again for the room (1 elsewhere). */
+extern float pc_vr_housi_size;
 void pc_vr_ambient_draw(void);
 
 class J3DModel;
