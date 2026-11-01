@@ -9,7 +9,10 @@
 //   copied once its GPU had finished them), over windows of 1 s. Not the compositor's 72/90 Hz: it
 //   reprojects whatever the game hands it. 1.1.1: the game's own rate alone stayed at 30 under a
 //   GPU-bound scene (the game thread records ahead; the GPU finished a frame in three, the rest
-//   replaced before shown), so dynres went back up while the headset showed 10 fps.
+//   replaced before shown), so dynres went back up while the headset showed 10 fps. The shown rate
+//   with a tolerance (10% and a frame: the window's edge, the 60 fps mode's beat against 72 Hz); going
+//   up also needs the headset to show 80% of the game's frames. A window with nothing shown (the
+//   headset not rendering) is not counted.
 // - Down one step (a tenth of the mode's lines) after 3 windows in a row under dynres_low_fps (27),
 //   two steps when the rate is under 60% of it; up one after 10 windows in a row at dynres_high_fps
 //   (29.5) or more. Between the two, nothing.
@@ -152,12 +155,25 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
     }
     const float gameFps = (float)(s.winFrames * 1e9 / (double)s.winNs);
     const uint32_t shownNow = wq_xr_frames_shown();
+    const bool noneShown = shownNow == s.winShownStart;
     const float shownFps = now > s.winStartNs ? (float)((shownNow - s.winShownStart) * 1e9 / (double)(now - s.winStartNs))
                                               : gameFps;
-    const float fps = std::min(gameFps, shownFps);
     s.winNs = 0;
     s.winFrames = 0;
     s.winStartNs = 0;
+    if (noneShown) {
+        // nothing shown for a second while the game runs: the headset is not rendering (taken off, the
+        // system's menu over it), not a slow GPU; the window is not counted
+        s.low = s.high = 0;
+        return linesAt(lines, s.level);
+    }
+    // The shown rate with a tolerance: a frame of the window's edge, and a tenth for the 60 fps mode's
+    // beat against the headset's 72 Hz (a frame now and then replaced before the layer takes it). A
+    // GPU-bound scene shows a third to a half of the game's frames, far under it either way.
+    const float shownTol = shownFps * 1.1f + 1.0f;
+    // down on the lower of the two; up on the game's rate, with the headset showing most of its frames
+    const float fps = std::min(gameFps, shownTol);
+    const bool showsMost = shownFps >= 0.8f * gameFps;
     s.lastFps = fps;
     const float busy = wq_xr_gpu_busy();  // percent, -1 unknown
     const float scale = pc_fps60_test() != 0 ? 2.0f : 1.0f;
@@ -175,7 +191,7 @@ int pc_vr_dynres_lines(int lines, int base, bool idle) {
     if (fps < lowFps) {
         s.high = 0;
         s.low++;
-    } else if (fps >= highFps) {
+    } else if (fps >= highFps && showsMost) {
         s.low = 0;
         s.high++;
     } else {
