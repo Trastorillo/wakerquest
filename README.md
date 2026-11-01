@@ -18,6 +18,22 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra apretando el stick izquierdo (L3).
 
+### Novedades de la 1.1.1
+
+- **Sin vibración ni tirones:** la imagen de las gafas ya no espera a que el juego termine de pintar; aunque el
+  juego vaya cargado, la cabeza, los mandos y los paneles siguen a la frecuencia del visor.
+- **Resolución dinámica** con los frames que se ven de verdad: baja hasta el mínimo cuando hace falta y no
+  oscila.
+- **Maqueta:** lo que queda fuera de la mesa ya no se pinta, así que zonas grandes como el Bosque Prohibido
+  van mucho más ligeras.
+- **Mandos de Quest 3 y Quest 3S:** perfiles Touch, Touch Plus y Touch Pro, con el mando simple de respaldo;
+  si uno no está disponible se salta sin romper nada.
+- **Modo ventana:** con los grips pulsados, el stick izquierdo arriba o abajo sube o baja la cámara dentro de
+  la ventana, para que no se vea el suelo recortado bajo Link. Se guarda (`window_lift`) y está en la pestaña
+  Ventana.
+- **Pantalla de título** siempre en 2D; la opción *Título en 2D* desaparece del panel.
+- **Ambiente:** las esporas del Bosque Prohibido se ven en la habitación.
+
 ### Novedades de la 1.1
 
 - **Mandos:** L3 abre y cierra el panel de ajustes (y cierra el menú de opciones del juego); ≡ del mando
@@ -39,7 +55,7 @@ de tu propia ISO cada vez que arranca.
 WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
 native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,
 stereo, the room's ambience around the player. Its work lives in `android/` (the APK and the headset
-layer, `android/xr/`), Aurora patches 0023-0034 in `native/patches/aurora/`, and a few hooks under
+layer, `android/xr/`), Aurora patches 0023-0035 in `native/patches/aurora/`, and a few hooks under
 `native/src/pc/`; see [android/README.md](android/README.md) to build it.
 
 It keeps SwitchWaker's history and license (MIT, `LICENSE`; third-party terms in `THIRD_PARTY.md`).
