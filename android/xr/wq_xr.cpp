@@ -87,6 +87,7 @@ float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v
 // the default 864 lines (0.80): 1.6 * 0.80 / 0.60 = 2.13 m.
 constexpr float kWindowRefWidth = 1.6f;
 constexpr float kWindowMaxWidth = 2.2f;
+constexpr float kWindowLiftMax = 1.0f;  // window_lift: the game camera raised or lowered at most this (m)
 constexpr int kWindowMinLines = 648;
 constexpr int kWindowStep = 54;
 
@@ -185,6 +186,7 @@ struct Settings {
     float windowX = 0.138f;       // m to the right (a grip moves it)
     float windowYaw = -1.5f;      // degrees, turned to the left (a grip turns it)
     float windowScale = 3.0f;     // the game's metres per metre of the room (more: the world smaller)
+    float windowLift = 0.0f;      // the game camera raised in the window (m of the room; grips + left stick)
     float windowDepth = 0.1f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window (off: cut at its plane)
     float windowPopout = 0.1f;     // m, how far
@@ -298,13 +300,15 @@ const char kDefaultSettings[] =
     "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera in front\n"
     "# of the window (m); window_popout_on 1 = near things come out of it, up to window_popout m (and\n"
     "# never past the camera); window_draw_distance = the game's metres drawn (at scale 1), the horizon;\n"
-    "# window_hud_on 1 = the HUD over the window (else on panels below and above it).\n"
+    "# window_hud_on 1 = the HUD over the window (else on panels below and above it); window_lift = the\n"
+    "# game camera raised in the window (m of the room, under 0 lowered; grips held + the left stick).\n"
     "window_width = 0.95\n"
     "window_distance = 0.705\n"
     "window_height = -0.002\n"
     "window_x = 0.138\n"
     "window_yaw = -1.5\n"
     "window_scale = 3\n"
+    "window_lift = 0\n"
     "window_depth = 0.1\n"
     "window_popout_on = 1\n"
     "window_popout = 0.1\n"
@@ -486,6 +490,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_x")) s.windowX = clampf(f, -5.0f, 5.0f);
     else if (!strcmp(key, "window_yaw")) s.windowYaw = std::remainder(f, 360.0f);  // -180..180
     else if (!strcmp(key, "window_scale")) s.windowScale = clampf(f, 0.1f, 100.0f);
+    else if (!strcmp(key, "window_lift")) s.windowLift = clampf(f, -kWindowLiftMax, kWindowLiftMax);
     else if (!strcmp(key, "window_depth")) s.windowDepth = clampf(f, 0.05f, 5.0f);
     else if (!strcmp(key, "window_popout_on")) s.windowPopoutOn = on;
     else if (!strcmp(key, "window_popout")) s.windowPopout = clampf(f, 0.0f, 3.0f);
@@ -633,6 +638,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "window_distance")) return num(s.windowDistance);
     if (!strcmp(key, "window_height")) return num(s.windowHeight);
     if (!strcmp(key, "window_scale")) return num(s.windowScale);
+    if (!strcmp(key, "window_lift")) return num(s.windowLift);
     if (!strcmp(key, "window_depth")) return num(s.windowDepth);
     if (!strcmp(key, "window_popout_on")) return flag(s.windowPopoutOn);
     if (!strcmp(key, "window_popout")) return num(s.windowPopout);
@@ -748,7 +754,8 @@ struct Xr {
     // the right stick with a grip held (updateGrips): what it scales (0 none, 1 the model's span, 2 the
     // window's scale, 3 the ambience, 4 the screen's width), its value at the last tick; and what the
     // label shows (0 the size both hands give, else the stick's)
-    int stickScale = 0, labelWhat = 0;
+    int stickScale = 0, labelWhat = 0;  // labelWhat 5: the window's camera raised (window_lift)
+    bool stickLift = false;             // the left stick raised or lowered the window's camera (unsaved)
     float stickTick = 0.0f;
     bool flatWas = false;  // the title's flat screen, as the grips last saw it
     // the right stick's click: the game's Z when pressed with no grip held (a grip's: back in its place)
@@ -1663,7 +1670,7 @@ void publishSettings() {
     s_sharedSettings = s.settings;
 }
 
-void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick);
+void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVector2f* moveStick);
 void togglePanel();
 void updatePanelGrab(float gripL, float gripR);
 void pointerHaptic(int hand, float amplitude);
@@ -1758,7 +1765,7 @@ void updatePad() {
                 // every mode: the grips hold what they are on, and with one held the right stick scales
                 // the world (not the C-stick meanwhile). Not the model while a special scene shows the
                 // window instead
-                updateGrips(gripL, gripR, stickClick, &c);
+                updateGrips(gripL, gripR, stickClick, &c, &m);
             }
         }
     }
@@ -2395,9 +2402,10 @@ void saveScreen() {
 // on release. Otherwise on what the mode shows (the model, the window, the giant screen, or the screen's
 // ambience with ambient_move): one hand moves it and turns it about the vertical (the right stick's click
 // while holding puts it back); both hands move, turn and scale it, with a tick every 10% and its size
-// shown. With a grip held the right stick scales the world (stickScale). Saved to xr.ini on release.
+// shown. With a grip held the right stick scales the world (stickScale), and in the window the left stick
+// up or down raises or lowers the game camera in it (window_lift, 1.1.1). Saved to xr.ini on release.
 // During the title's flat screen (intro_2d) the grips hold the screen whatever the mode.
-void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick) {
+void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVector2f* moveStick) {
     XrSpaceLocation loc[2] = {{XR_TYPE_SPACE_LOCATION}, {XR_TYPE_SPACE_LOCATION}};
     const XrSpace spaces[2] = {s.handSpaceL, s.handSpace};
     bool valid[2];
@@ -2499,6 +2507,36 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick) {
             s.labelWhat = what;
             publishSettings();
         }
+    }
+    // The window (1.1.1): with a grip held, the left stick up or down raises or lowers the game camera in
+    // it (window_lift; Link does not move meanwhile), 0.1 m of the room a second at full tilt, a soft
+    // tick every 5 cm; saved when the grips are let go
+    if (held && window && moveStick != nullptr) {
+        const float y = moveStick->y;
+        *moveStick = {0.0f, 0.0f};
+        if (std::fabs(y) > 0.25f) {
+            if (!s.stickLift) {
+                s.stickLift = true;
+                xrlog("grip: the left stick raises and lowers the window's camera");
+            }
+            const float dt = st.refresh > 0 ? 1.0f / float(st.refresh) : 1.0f / 72.0f;
+            const float before = st.windowLift;
+            const float speed = (std::fabs(y) - 0.25f) / 0.75f * (y > 0.0f ? 0.1f : -0.1f);
+            st.windowLift = clampf(st.windowLift + speed * dt, -kWindowLiftMax, kWindowLiftMax);
+            if (std::floor(before / 0.05f + 0.5f) != std::floor(st.windowLift / 0.05f + 0.5f)) {
+                pointerHaptic(0, 0.15f);
+                pointerHaptic(1, 0.15f);
+            }
+            s.sizeShownUntil = SDL_GetTicks() + 1500;
+            s.labelWhat = 5;
+            publishSettings();
+        }
+    }
+    if (!held && s.stickLift) {
+        char v[32];
+        snprintf(v, sizeof v, "%.3f", st.windowLift);
+        wq_xr_set("window_lift", v);
+        s.stickLift = false;
     }
     if (!held && s.stickScale) {
         char v[32];
@@ -3428,12 +3466,15 @@ void runFrame() {
         static const char* const kScale[] = {"Escala", "Scale", "\xc3\x89" "chelle"};
         static const char* const kAmbience[] = {"Ambiente", "Ambience", "Ambiance"};
         static const char* const kMax[] = {"m\xc3\xa1x", "max", "max"};
+        static const char* const kCamera[] = {"C\xc3\xa1mara", "Camera", "Cam\xc3\xa9ra"};
         if (s.labelWhat == 1)
             snprintf(text, sizeof text, "%s %.0f m", kWorld[lang], st.tableSpan);
         else if (s.labelWhat == 2)
             snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.windowScale);
         else if (s.labelWhat == 3)
             snprintf(text, sizeof text, "%s x%.2f", kAmbience[lang], st.ambientScale);
+        else if (s.labelWhat == 5)
+            snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.windowLift);
         else if (st.window && lines > 0)
             // the window: its resolution (windowLines) and its limit
             snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 %s %.1f m", st.windowWidth,
@@ -3699,6 +3740,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->windowDistance = st.windowDistance;
     out->windowYaw = st.windowYaw * 0.0174532925f;
     out->windowScale = st.windowScale;
+    out->windowLift = st.windowLift;
     out->windowDepth = st.windowDepth;
     out->windowPopout = st.windowPopoutOn ? st.windowPopout : 0.0f;
     out->specialScenes = st.specialScenes;

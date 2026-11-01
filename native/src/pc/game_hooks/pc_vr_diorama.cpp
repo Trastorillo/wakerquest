@@ -354,8 +354,11 @@ M4 roomFromWindow(const WqXrTable& t) {
     return m;
 }
 
+// window_lift (1.1.1, grips + left stick): the game camera raised by that many metres of the room, along
+// the window's up: the world drawn lower in it by as much (the window stays where it is).
 M4 roomFromCameraView(const WqXrTable& t, float k) {
     M4 back = identity();
+    back.m[1][3] = -t.windowLift;
     back.m[2][3] = t.windowDepth;
     M4 scale = identity();
     scale.m[0][0] = scale.m[1][1] = scale.m[2][2] = k;

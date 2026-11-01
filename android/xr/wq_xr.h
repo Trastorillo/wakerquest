@@ -63,6 +63,7 @@ typedef struct WqXrTable {
     float windowDistance;             // in front of the eyes at the start
     float windowYaw;                  // radians, turned about the vertical (positive to the left)
     float windowScale;                // the game's metres per metre of the room (1 = real size)
+    float windowLift;                 // the game camera raised in the window (metres of the room; < 0 lowered)
     float windowDepth;                // the game camera's eye this far in front of the window (metres)
     float windowPopout;               // what may come out toward the player (metres; 0 = nothing)
     float windowFade;                 // the edges' fade (metres)
