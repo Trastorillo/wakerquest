@@ -705,6 +705,7 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         scr.windowYaw = table.screenYaw;
         scr.windowWidth = table.screenWidth;
         scr.windowHeight = table.screenWidth * p00 / p11;
+        scr.windowLift = 0.0f;  // the window's camera height (window_lift) is not the screen's
     }
     // the point in front of the screen whose view of it is the camera's frustum, and the scale that
     // puts ambient_focus game units on its plane
@@ -1296,6 +1297,7 @@ bool pc_vr_view_begin(view_class* view) {
             w.windowScale = 1.0f;
             w.windowDepth = table.windowDepthSpecial;
             w.windowPopout = table.windowPopoutSpecial;
+            if (!table.window) w.windowLift = 0.0f;  // the window's camera height only in the window mode
             return windowBegin(view, w, head, player);
         }
         return windowBegin(view, table, head, player);
