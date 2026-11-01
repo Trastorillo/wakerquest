@@ -137,7 +137,9 @@ struct Settings {
     bool autoScreen = true;                      // first-person views on the giant screen
     bool windowHudOn = true;                     // the window: the HUD and dialogues over it (else on panels)
     bool cineScreen = false;                     // and cutscenes (else the talk zoom, in the bubble)
-    bool intro2d = true;                         // the title screen on the giant screen, flat, any mode
+    // the title screen on the giant screen, flat, whatever the mode: always (1.1.1; an old intro_2d key in
+    // xr.ini is ignored)
+    bool intro2d = true;
     // the talk zoom (pc_vr_diorama.cpp): during cutscenes and dialogues the bubble closes in on who
     // talks (talk_zoom of its span) and the game's 2D (the dialogue box) shows on a panel beside it
     bool talkZoomOn = true;
@@ -269,9 +271,6 @@ const char kDefaultSettings[] =
     "diorama_resolution = 1620\n"
     "# mode = pantalla (a giant screen), maqueta (the world as a model in the room) or ventana (a window).\n"
     "mode = maqueta\n"
-    "# intro_2d 1 = the title screen (Outset behind the logo, sea_T) on the giant screen, flat, whatever\n"
-    "# the mode; the mode and the 3D as they were when it ends (this file is not changed).\n"
-    "intro_2d = 1\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
     "# in m (the table's width), bubble_span = metres of the game across it, bubble_distance and\n"
     "# bubble_height (Link below the eyes) in m, bubble_x (m to the right) and bubble_yaw (degrees) where a\n"
@@ -449,7 +448,6 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
     else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
-    else if (!strcmp(key, "intro_2d")) s.intro2d = on;
     else if (!strcmp(key, "language")) s.language = !strcmp(v, "en") ? 1 : !strcmp(v, "fr") ? 2 : 0;
     else if (!strcmp(key, "talk_zoom_on")) s.talkZoomOn = on;
     else if (!strcmp(key, "talk_zoom")) s.talkZoom = clampf(f, 0.1f, 1.0f);
@@ -580,7 +578,6 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
-    if (!strcmp(key, "intro_2d")) return flag(s.intro2d);
     if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
     if (!strcmp(key, "talk_zoom")) return num(s.talkZoom);
