@@ -3104,6 +3104,10 @@ bool copyNewestFrame() {
     }
     if (!s.held) {
         if (!aurora_xr_present_take(&s.heldFrame)) return s.haveScreen;
+        // our own reference while it is held: a size change makes Aurora drop its slots (and their
+        // buffers) whatever it hands out; released once the copy is submitted (textureFor and the
+        // EGL image hold theirs)
+        AHardwareBuffer_acquire(s.heldFrame.buffer);
         s.held = true;
         s.heldSinceNs = monotonicNs();
     }
@@ -3162,6 +3166,7 @@ bool copyNewestFrame() {
     }
     s.pendingRead = s.createSync(s.display, EGL_SYNC_FENCE_KHR, nullptr);
     glFlush();
+    AHardwareBuffer_release(f.buffer);  // the hold's reference (above)
     if (s.pendingRead == EGL_NO_SYNC_KHR) {
         glFinish();
         aurora_xr_present_done();
