@@ -52,6 +52,7 @@ extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/stat.h>
 #include <string>
 #include <thread>
@@ -701,6 +702,12 @@ struct Xr {
     uint32_t frames = 0;
     uint32_t framesWithoutFence = 0;  // Aurora published them without a sync file: read unsynchronized
     uint32_t lastSerial = 0, skipped = 0;  // Aurora frames never taken (replaced by a newer one first)
+    // 1.1.1: a frame taken while Aurora's GPU still draws it, copied once its fence signals; the headset
+    // frames that found it still drawing, and the time frames waited so (copyNewestFrame)
+    bool held = false;
+    AuroraXrFrame heldFrame{};
+    uint64_t heldSinceNs = 0, heldWaitNs = 0;
+    uint32_t framesHeld = 0;
 
     // passthrough
     bool passthroughRunning = false;
@@ -857,6 +864,13 @@ std::atomic_bool s_special{false};         // wq_xr_set_special: a special scene
 std::atomic_bool s_talk{false};            // wq_xr_set_talk: the bubble closes in on who talks
 std::atomic<float> s_gpuBusy{-1.0f};        // wq_xr_gpu_busy (pollGpuBusy)
 std::atomic<uint32_t> s_framesLost{0};      // wq_xr_frames_lost (copyNewestFrame's skipped)
+std::atomic<uint32_t> s_framesShown{0};     // wq_xr_frames_shown (copyNewestFrame's copies)
+
+uint64_t monotonicNs() {
+    timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+}
 float s_stereoApplied[3] = {-1.0f, 0.0f, 0.0f};  // the screen's 3D as last given to Aurora: on, strength, focus
 float s_cineRamp = 0.0f;                   // 0..1, the cutscenes' 3D faded in and out
 bool s_refreshDirty = false;               // the refresh rate changed while running
@@ -1026,8 +1040,21 @@ bool initEgl() {
         xrlog("EGL: no RGBA8 ES 3 config");
         return false;
     }
+    // 1.1.1: a high priority when the driver offers it (EGL_IMG_context_priority, a hint), so the
+    // layer's copies and panels are not queued behind a long Aurora frame on the GPU
+    const char* eglExts = eglQueryString(s.display, EGL_EXTENSIONS);
+    const bool priority = eglExts != nullptr && strstr(eglExts, "EGL_IMG_context_priority") != nullptr;
+    const EGLint highAttr[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_CONTEXT_PRIORITY_LEVEL_IMG,
+                               EGL_CONTEXT_PRIORITY_HIGH_IMG, EGL_NONE};
     const EGLint contextAttr[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
-    s.context = eglCreateContext(s.display, s.config, EGL_NO_CONTEXT, contextAttr);
+    s.context = priority ? eglCreateContext(s.display, s.config, EGL_NO_CONTEXT, highAttr) : EGL_NO_CONTEXT;
+    if (s.context != EGL_NO_CONTEXT) {
+        EGLint level = 0;
+        eglQueryContext(s.display, s.context, EGL_CONTEXT_PRIORITY_LEVEL_IMG, &level);
+        xrlog("EGL: context priority %s", level == EGL_CONTEXT_PRIORITY_HIGH_IMG ? "high" : "as the driver gives");
+    } else {
+        s.context = eglCreateContext(s.display, s.config, EGL_NO_CONTEXT, contextAttr);
+    }
     const EGLint pbufferAttr[] = {EGL_WIDTH, 16, EGL_HEIGHT, 16, EGL_NONE};
     s.pbuffer = eglCreatePbufferSurface(s.display, s.config, pbufferAttr);
     if (s.context == EGL_NO_CONTEXT || s.pbuffer == EGL_NO_SURFACE ||
@@ -3051,17 +3078,42 @@ bool headForTag(uint32_t tag, HeadSnap& out) {
 
 // ---- Frames --------------------------------------------------------------------------------------
 
+// Whether a sync file has signaled (Aurora's GPU is done with the frame), without waiting.
+bool fenceSignaled(int fd) {
+    if (fd < 0) return true;
+    pollfd p{fd, POLLIN, 0};
+    return poll(&p, 1, 0) > 0;
+}
+
 // The newest Aurora frame into the screen's swapchain. True while the swapchain holds a picture.
+// 1.1.1: never waits for Aurora's GPU. A frame taken while its rendering still runs is held (its buffer
+// stays Aurora's "reading" one) and copied at the first headset frame after its fence signals; until
+// then the swapchain keeps the last picture. The copy used to wait on the GPU for the fence: under a
+// heavy scene (80-90 ms of GPU a frame) every headset frame queued behind Aurora's, so the layer's own
+// loop (the head poses the game draws with, the controllers, the panels) ran at 10-15 Hz and the
+// compositor saw nearly every frame late (VrApi Stale ~73/s), each picture shown with a head pose
+// from 100+ ms before and Aurora's frames replaced before they were taken ("skipped").
 bool copyNewestFrame() {
     if (s.pendingRead != EGL_NO_SYNC_KHR) {
-        // the last copy has long run by now; Aurora may write that buffer again once it has
-        s.clientWaitSync(s.display, s.pendingRead, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, 50000000);
+        // the last copy: Aurora may write that buffer again once it has run (no wait: next frame else)
+        const EGLint r = s.clientWaitSync(s.display, s.pendingRead, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, 0);
+        if (r == EGL_TIMEOUT_EXPIRED_KHR) return s.haveScreen;
         s.destroySync(s.display, s.pendingRead);
         s.pendingRead = EGL_NO_SYNC_KHR;
         aurora_xr_present_done();
     }
-    AuroraXrFrame f{};
-    if (!aurora_xr_present_take(&f)) return s.haveScreen;
+    if (!s.held) {
+        if (!aurora_xr_present_take(&s.heldFrame)) return s.haveScreen;
+        s.held = true;
+        s.heldSinceNs = monotonicNs();
+    }
+    if (!fenceSignaled(s.heldFrame.syncFd)) {
+        s.framesHeld++;
+        return s.haveScreen;  // still rendering: the last picture meanwhile
+    }
+    AuroraXrFrame f = s.heldFrame;
+    s.held = false;
+    s.heldWaitNs += monotonicNs() - s.heldSinceNs;
     if (s.lastSerial != 0 && f.serial > s.lastSerial + 1) s.skipped += f.serial - s.lastSerial - 1;
     s_framesLost.store(s.skipped, std::memory_order_relaxed);
     s.lastSerial = f.serial;
@@ -3126,9 +3178,13 @@ bool copyNewestFrame() {
         if (f.ambient != s.ambientFrame) xrlog("picture: %s", f.ambient ? "with the room's ambience" : "no ambience");
         s.ambientFrame = f.ambient;
         s.haveScreen = true;
-        if (++s.frames == 1 || s.frames % 600 == 0)
-            xrlog("frame %u from Aurora (serial %u, %ux%u): %u skipped, %u without a fence", s.frames, f.serial,
-                  f.width, f.height, s.skipped, s.framesWithoutFence);
+        s_framesShown.store(++s.frames, std::memory_order_relaxed);
+        if (s.frames == 1 || s.frames % 600 == 0) {
+            xrlog("frame %u from Aurora (serial %u, %ux%u): %u skipped, %u without a fence; %u headset frames "
+                  "waited for Aurora's GPU, %.1f ms a frame",
+                  s.frames, f.serial, f.width, f.height, s.skipped, s.framesWithoutFence, s.framesHeld,
+                  s.frames > 0 ? double(s.heldWaitNs) / 1e6 / double(s.frames) : 0.0);
+        }
     }
     return s.haveScreen;
 }
@@ -3767,6 +3823,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
 
 extern "C" float wq_xr_gpu_busy(void) { return s_gpuBusy.load(std::memory_order_relaxed); }
 extern "C" uint32_t wq_xr_frames_lost(void) { return s_framesLost.load(std::memory_order_relaxed); }
+extern "C" uint32_t wq_xr_frames_shown(void) { return s_framesShown.load(std::memory_order_relaxed); }
 
 extern "C" bool wq_xr_start(void) {
     const char* e = getenv("WQ_XR");

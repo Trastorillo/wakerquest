@@ -101,6 +101,9 @@ void wq_xr_table(WqXrTable* out);
 // thread.
 float wq_xr_gpu_busy(void);
 uint32_t wq_xr_frames_lost(void);
+// The Aurora frames the headset has shown so far (copied once Aurora's GPU finished them): their rate is
+// the frame rate the player sees (pc_vr_dynres.cpp), whatever the game's own. Any thread.
+uint32_t wq_xr_frames_shown(void);
 // The game, with each frame drawn for head pose `tag` (before aurora_xr_set_frame_info): whether it is a
 // window's frame (the window mode's, or a special scene's: the HUD over the window) and the frustum it
 // drew both eyes with when not the head's (tangents left, right, down, up, as WqXrHead's; the window's
