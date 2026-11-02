@@ -631,6 +631,7 @@ int ambientEmitters(u16 id) {
 void ambientOff() {
     sAmbient.worldValid = false;  // its heading taken again when it starts
     sAmbient.windMidValid = false;
+    sAmbient.kingPlaced = sAmbient.giantPlaced = false;  // their places taken again (1.1.2)
     if (sAmbient.wasOn) {
         aurora_xr_set_ambient(false, 0, nullptr, nullptr, 0.0f, nullptr, 0.0f, 0.0f, 0.0f);
         pc::writef(STDERR_FILENO, "[vr] ambient off\n");
@@ -1644,15 +1645,21 @@ M4 ambientCameraAxes(float sc) {
 // about Link (its offset from him turned with the camera, at its own size, within 1.2 m), on the
 // room's floor, then the hand's move; the Helmaroc King 1.8 m in front of the head, a little above the
 // eyes, where the head looked when it showed (it keeps that place while the scene lasts).
-void ambientFacingAt(int kind, const float p[3], float at[3]) {
+// keep: the Helmaroc King's or the giant's place taken for good (the draw's); the log's call (false)
+// only reads where it would go (1.1.2: it ran before the actor first drew and fixed its place then)
+void ambientFacingAt(int kind, const float p[3], float at[3], bool keep = true) {
     if (kind == 5) {
         if (!sAmbient.kingPlaced) {
             const float* h = sAmbient.headPos;
             const float* f = sAmbient.headFwd;
-            sAmbient.kingAt[0] = h[0] + 1.8f * f[0];
-            sAmbient.kingAt[1] = h[1] + 0.15f;
-            sAmbient.kingAt[2] = h[2] + 1.8f * f[2];
-            sAmbient.kingPlaced = true;
+            at[0] = h[0] + 1.8f * f[0];
+            at[1] = h[1] + 0.15f;
+            at[2] = h[2] + 1.8f * f[2];
+            if (keep) {
+                memcpy(sAmbient.kingAt, at, sizeof(sAmbient.kingAt));
+                sAmbient.kingPlaced = true;
+            }
+            return;
         }
         memcpy(at, sAmbient.kingAt, sizeof(sAmbient.kingAt));
         return;
@@ -1663,11 +1670,15 @@ void ambientFacingAt(int kind, const float p[3], float at[3]) {
         if (!sAmbient.giantPlaced) {
             const float* h = sAmbient.headPos;
             const float* f = sAmbient.headFwd;
-            sAmbient.giantAt[0] = h[0] + 2.2f * f[0];
-            sAmbient.giantAt[2] = h[2] + 2.2f * f[2];
-            sAmbient.giantPlaced = true;
+            at[0] = h[0] + 2.2f * f[0];
+            at[2] = h[2] + 2.2f * f[2];
+            if (keep) {
+                sAmbient.giantAt[0] = at[0], sAmbient.giantAt[2] = at[2];
+                sAmbient.giantPlaced = true;
+            }
+        } else {
+            at[0] = sAmbient.giantAt[0], at[2] = sAmbient.giantAt[2];
         }
-        memcpy(at, sAmbient.giantAt, sizeof(sAmbient.giantAt));
         at[1] = sAmbient.floorY;
         return;
     }
@@ -1809,7 +1820,7 @@ void pc_vr_ambient_draw(void) {
         for (int j = 0; j < sAmbient.nActors && j < 6; j++) {
             float r[3], mv[3];
             if (ambientFacing(sAmbient.kinds[j])) {
-                ambientFacingAt(sAmbient.kinds[j], sAmbient.pos[j], r);
+                ambientFacingAt(sAmbient.kinds[j], sAmbient.pos[j], r, false);
             } else {
                 xform(sAmbient.stageWorld, sAmbient.pos[j], r);
                 ambientPlace(sAmbient.kinds[j], sAmbient.pos[j], mv);
