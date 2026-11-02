@@ -10,7 +10,8 @@ clip plane already keeps the pop-out's front; this adds its sides.
   delta's target space (as the mask's, x and y within +-1, z in metres toward the player) and the game
   camera's depth. Off at the end of each frame.
 - The GX uniform header gets xr_win (four vec4f: the table's rows, then the depth and 1 when on), written
-  as zeros when off or for draws the view delta does not apply to; MaxUniformSize grows by 64.
+  as zeros when off or for draws the view delta does not apply to; MaxUniformSize grows by 64 (3952),
+  rounded up to 4096 (a multiple of 256: aligned to the device's uniform offset alignment it still fits).
 - The fragment shader discards what is in front of the window's plane and outside the narrowing
   rectangle, as the mask's test (stereo.cpp, its window branch).
 
@@ -114,7 +115,7 @@ index b9c3faf..b39dfbf 100644
  constexpr u32 MaxIndexAttr = 12; // VA_POS -> VA_TEX7
 -constexpr u32 MaxUniformSize = 3840 + 48; // patch 0031: the see-through and the clip plane
 +// patch 0031: the see-through and the clip plane; patch 0037: the window's pop-out volume (4 vec4f)
-+constexpr u32 MaxUniformSize = 3840 + 48 + 64;
++constexpr u32 MaxUniformSize = 4096; // 3840 + 48 + 64 = 3952, rounded up to a multiple of 256
  constexpr u32 XfRegCount = 0x58; // 0x1000-0x1057
  
  enum DirtyFlag : u8 {

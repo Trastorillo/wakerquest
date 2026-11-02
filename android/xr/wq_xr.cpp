@@ -2597,12 +2597,19 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
                           (hudMove ? !s.gripDown[h]
                                    : diorama ? !s.gripDown[h]
                                              : window && trigNow && (!s.gripDown[h] || trigPress));
+        // the trigger on the window's HUD with the grip held, before it takes it: not the game's (it
+        // gets its L or R from about half way, the grab at 0.6), 1.1.5
+        if (window && down && !s.grabbed[h] && !hudMove && s.trig[h] > 0.2f &&
+            panelUnderHand(h, loc[h].pose.position) == 1)
+            s.whTrigHold[h] = true;
         if (take) {
-            const int panel = hudMove ? 1 : panelUnderHand(h, loc[h].pose.position);
+            // (window_hud_move: only while the HUD shows; else the grip holds the window)
+            const int panel = hudMove ? (s.hudShown ? 1 : 0) : panelUnderHand(h, loc[h].pose.position);
             if (panel) {
                 s.grabbed[h] = panel;
                 s.grabWindow[h] = window;
-                if (window && trigNow) s.whTrigHold[h] = true;
+                // its trigger not the game's while the HUD is held, whichever way it was taken
+                if (window) s.whTrigHold[h] = true;
                 s.grabHand[h] = loc[h].pose.position;
                 const float* from = panel == 1 ? st.hudPose : st.dialogueOffset;
                 for (int i = 0; i < 3; i++) s.grabOffset[h][i] = from[i];
