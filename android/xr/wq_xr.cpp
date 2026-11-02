@@ -93,14 +93,15 @@ constexpr float kWindowLiftMax = 1.0f;  // window_lift: the game camera raised o
 constexpr int kWindowMinLines = 648;
 constexpr int kWindowStep = 54;
 
-// The defaults (fase 2): the values Trasto plays with (his xr.ini of 1.0.8-fase1), the places included;
+// The defaults (fase 2): the values Trasto plays with (his xr.ini of 1.0.8-fase1; of 2-11-2026 since 1.1.4:
+// the window mode), the places included but the bubble's turn and the ambience's place;
 // the file a fresh install writes (kDefaultSettings) holds the same. The resolutions' -1 stays (older files).
 struct Settings {
-    float distance = 1.508f; // m in front of where the player looked at the start
-    float width = 0.85f;     // m; the height follows the picture (16:9 widescreen, 4:3 without)
-    float height = -0.084f;  // m above eye height
-    float screenX = 0.017f;  // m to the right (a grip moves it, as the window's)
-    float screenYaw = -2.2f; // degrees, turned to the left (a grip turns it)
+    float distance = 0.916f; // m in front of where the player looked at the start
+    float width = 0.65f;     // m; the height follows the picture (16:9 widescreen, 4:3 without)
+    float height = -0.179f;  // m above eye height
+    float screenX = -0.015f; // m to the right (a grip moves it, as the window's)
+    float screenYaw = 7.3f;  // degrees, turned to the left (a grip turns it)
     bool screenFrame = true; // the wooden frame around it (drawn here, procedurally)
     bool passthrough = true; // the room around the screen instead of black
     // the Rendimiento preset last chosen (kPresetKeys): 0 personal (the values by hand), 1 ahorro,
@@ -112,10 +113,10 @@ struct Settings {
     bool cpuLow = false;     // the CPU at its sustained low level (Ahorro); else the CPU is left as it is
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
     bool stereo = true;             // twice the drawing (stereo_resolution has fewer lines for it)
-    float stereoStrength = 0.088f;  // how far the distance moves per eye, in half picture widths
-    float stereoFocus = 50.0f;      // the depth (game units) that stays on the screen; nearer comes out of it
+    float stereoStrength = 0.1f;    // how far the distance moves per eye, in half picture widths
+    float stereoFocus = 200.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
     bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
-    float hudWidth = 0.7f;          // the diorama's HUD panel, metres across (behind the model)
+    float hudWidth = 0.9f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = lines / 480), one per mode
     // (activeResolution): resolution for the flat giant screen, diorama_resolution for the bubble,
     // stereo_resolution for the giant screen in 3D, window_resolution for the window. Applied at start and again when the mode or
@@ -125,20 +126,20 @@ struct Settings {
     int resolution = 972;         // 0.90 of 1080 lines (the menu's scale)
     int stereoResolution = -1;    // the 3D draws every frame twice: 918 (0.85) by default
     int windowResolution = -1;    // the window draws a wider view per eye: 864 (0.80) by default
-    int dioramaResolution = -1;   // the bubble's own (resolution's while the file has none)
+    int dioramaResolution = -1;   // the bubble's own (resolution's while the file has none; 1188 in a new file)
     // the diorama (mode = maqueta, pc_vr_diorama.cpp): the world as a model in the room, in a bubble
     // (a sphere, as GalaxyQuest's) or on a table (a box)
-    bool diorama = true;                         // the default mode: maqueta
+    bool diorama = false;                        // the default mode: ventana (1.1.4; maqueta before)
     bool sphere = true;
-    float tableWidth = 0.82f, tableDepth = 0.7f; // m: the bubble's diameter, or the table's width and depth
-    float tableSpan = 40.0f;                     // m of the game's world across it (more: more to draw)
-    float tableDistance = 0.446f;                // m, its middle in front of the eyes
-    float tableHeight = 0.191f;                  // m, Link (the table's top) below the eyes
+    float tableWidth = 3.0f, tableDepth = 0.7f;  // m: the bubble's diameter, or the table's width and depth
+    float tableSpan = 300.0f;                    // m of the game's world across it (more: more to draw)
+    float tableDistance = 0.469f;                // m, its middle in front of the eyes
+    float tableHeight = 0.238f;                  // m, Link (the table's top) below the eyes
     float tableFade = 0.05f;                     // m, the edges' fade
     bool tableFollowYaw = false;                 // the world turns with the game camera
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
-    bool windowHudOn = true;                     // the window: the HUD and dialogues over it (else on panels)
+    bool windowHudOn = false;                    // the window: the HUD and dialogues over it (else on panels)
     // the window's HUD moved, turned and sized by a grip on it (1.1.4): window_hud_pose (x, y, z in metres
     // in the window's own space, from where the window puts it; yaw in degrees) and window_hud_scale
     float windowHudPose[4] = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -154,51 +155,51 @@ struct Settings {
     bool talkScreen = true;
     // see Link through what stands in front of him (Aurora patch 0031): a hole this many of the game's
     // metres around him
-    bool seeThroughOn = true;
+    bool seeThroughOn = false;
     float seeThroughRadius = 0.8f;
     bool birdsFree = true;                       // the flying birds around the room, outside the bubble
     float birdRange = 2.5f;                      // how far, in the bubble's radii
     // the room's ambience (mode = pantalla, pc_vr_ambient.cpp): the game's own seagulls, crabs, small
     // birds, wind lines and rain drawn again outside the giant screen, fading with the distance from it
     bool ambient = true;        // on since 1.0.5 (tried live)
-    float ambientRange = 1.5f;  // m from the screen's edge where it has faded out
+    float ambientRange = 4.5f;  // m from the screen's edge where it has faded out
     bool ambientTestLink = false;  // the test's actor: Link instead of the nearest seagull
     bool ambientMask = true;       // hidden where the screen is (0: drawn over it too, for the tests)
     // the giant screen's ambience moved and sized by hand (ambient_move: the grips hold it instead of
     // the screen): metres in the room, degrees about the vertical through the screen's middle, a scale
     bool ambientMove = true;
     bool ambientWorld = true;  // anchored in the room (the world's, around Link); false: the game camera's view
-    float ambientX = 0.236f, ambientY = 0.394f, ambientZ = -0.244f, ambientYaw = -26.3f, ambientScale = 1.3f;
+    float ambientX = 0.236f, ambientY = 0.394f, ambientZ = -0.244f, ambientYaw = -26.3f, ambientScale = 1.05f;
     float tableX = 0.096f;                       // m, to the right of straight ahead (the grip moves it)
     float tableYaw = -19.0f;                     // degrees, the world turned by the grip (-180..180)
     float dialogueBack = 0.3f;                   // m, the dialogue panel behind the model's middle
     // the HUD's panel, fixed in the room (m in the LOCAL space, and its yaw in degrees): moved only by
     // a grip on it, not with the model
-    float hudPose[4] = {0.313f, 0.054f, -0.278f, -46.2f};
+    float hudPose[4] = {-0.147f, 0.152f, -0.512f, 15.0f};
     // m, the dialogues' panel moved by hand (a grip on it) from its place above the model; it moves with it
     float dialogueOffset[3] = {0, 0, 0};
     // m, the settings panel from the eyes when it opens (right, up, and ahead negative, in the head's
     // heading); a grip moves it (wq_panel.cpp)
-    float panelOffset[3] = {0.224f, 0.469f, -1.558f};
+    float panelOffset[3] = {0.034f, 0.160f, -1.622f};
     int language = 0;  // the settings panel's (language = es, en or fr): 0 Spanish, 1 English, 2 French
     // the window (mode = ventana, pc_vr_diorama.cpp): the world at its own scale through a rectangle in
     // the room (16:9), the game camera's eye window_depth in front of it looking through it (what it sees
     // nearer than that comes out, up to window_popout); each eye looks through it from
     // where it is, and what is near comes out of it toward the player (window_popout)
-    bool window = false;
-    float windowWidth = 0.95f;    // m across, up to kWindowMaxWidth
-    float windowDistance = 0.705f;  // m, its middle in front of the eyes
-    float windowHeight = -0.002f; // m above eye height
-    float windowX = 0.138f;       // m to the right (a grip moves it)
-    float windowYaw = -1.5f;      // degrees, turned to the left (a grip turns it)
-    float windowScale = 3.0f;     // the game's metres per metre of the room (more: the world smaller)
-    float windowLift = 0.0f;      // the game camera raised in the window (m of the room; grips + left stick)
+    bool window = true;  // the default mode (1.1.4)
+    float windowWidth = 0.45f;    // m across, up to kWindowMaxWidth
+    float windowDistance = 0.654f;  // m, its middle in front of the eyes
+    float windowHeight = -0.176f; // m above eye height
+    float windowX = -0.218f;      // m to the right (a grip moves it)
+    float windowYaw = 16.7f;      // degrees, turned to the left (a grip turns it)
+    float windowScale = 20.0f;    // the game's metres per metre of the room (more: the world smaller)
+    float windowLift = 0.078f;    // the game camera raised in the window (m of the room; grips + left stick)
     float windowDepth = 0.1f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window (off: cut at its plane)
-    float windowPopout = 0.1f;     // m, how far
+    float windowPopout = 1.5f;     // m, how far
     float windowDrawDistance = 200.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
-    float npcDrawDistance = 10.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
+    float npcDrawDistance = 20.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
                                     // drawn, every mode (pc_npc_distance.cpp); 0 = no limit
     // the vegetation's adaptive draw distance (pc_veg_distance.cpp, on by default): the palms, grass,
     // bushes, trees and flowers all drawn while the game keeps its 30 fps; when the frame rate falls
@@ -207,7 +208,7 @@ struct Settings {
     bool vegAdaptive = true;
     float vegMin = 20.0f;   // the game's metres
     float vegMax = 120.0f;  // the distance with no load (all drawn within the game's own culling)
-    float palmDrawDistance = 40.0f;  // the palms (Obj_Lpalm) always within this many of the game's metres
+    float palmDrawDistance = 30.0f;  // the palms (Obj_Lpalm) always within this many of the game's metres
                                      // from Link, fading at the edge (the game draws them 2.4 times its far
                                      // plane); 0 = as the game
     // the dynamic resolution (pc_vr_dynres.cpp, on by default): the second step after the vegetation's
@@ -242,13 +243,13 @@ const char kDefaultSettings[] =
     "# alone is the game's Z. Saved here when let go.\n"
     "# distance and width in metres, height in metres above the eyes,\n"
     "# passthrough 1 = the room around the screen, 0 = black; refresh in Hz (72, 80, 90, 120).\n"
-    "distance = 1.508\n"
-    "width = 0.85\n"
-    "height = -0.084\n"
+    "distance = 0.916\n"
+    "width = 0.65\n"
+    "height = -0.179\n"
     "# screen_x (m to the right) and screen_yaw (degrees): a grip moves and turns the screen, both\n"
     "# grips change its width (saved here); screen_frame 1 = a frame around it.\n"
-    "screen_x = 0.017\n"
-    "screen_yaw = -2.2\n"
+    "screen_x = -0.015\n"
+    "screen_yaw = 7.3\n"
     "screen_frame = 1\n"
     "passthrough = 1\n"
     "# language = es, en or fr: the settings panel's.\n"
@@ -266,8 +267,8 @@ const char kDefaultSettings[] =
     "# stereo_focus = the distance in the game that stays on the screen (50-2500); in cutscenes and dialogues\n"
     "# everything stays behind the screen; cine_3d 1 = more 3D, coming out, in the Helmaroc King's scenes.\n"
     "stereo = 1\n"
-    "stereo_strength = 0.088\n"
-    "stereo_focus = 50\n"
+    "stereo_strength = 0.1\n"
+    "stereo_focus = 200\n"
     "cine_3d = 1\n"
     "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
     "# the 3D changes: resolution = the giant screen, diorama_resolution = the bubble (resolution's while\n"
@@ -277,19 +278,19 @@ const char kDefaultSettings[] =
     "resolution = 972\n"
     "stereo_resolution = 918\n"
     "window_resolution = 864\n"
-    "diorama_resolution = 1620\n"
+    "diorama_resolution = 1188\n"
     "# mode = pantalla (a giant screen), maqueta (the world as a model in the room) or ventana (a window).\n"
-    "mode = maqueta\n"
+    "mode = ventana\n"
     "# the model: shape = esfera (a bubble, as in Galaxy) or caja (a table); bubble_size = its diameter\n"
     "# in m (the table's width), bubble_span = metres of the game across it, bubble_distance and\n"
     "# bubble_height (Link below the eyes) in m, bubble_x (m to the right) and bubble_yaw (degrees) where a\n"
     "# grip put it, bubble_fade = the edge's fade in m; table_depth (cm) for the box; table_follow_yaw 1 =\n"
     "# the world turns with the game camera. Also in the options menu.\n"
     "shape = esfera\n"
-    "bubble_size = 0.82\n"
-    "bubble_span = 40\n"
-    "bubble_distance = 0.446\n"
-    "bubble_height = 0.191\n"
+    "bubble_size = 3.00\n"
+    "bubble_span = 300\n"
+    "bubble_distance = 0.469\n"
+    "bubble_height = 0.238\n"
     "bubble_x = 0.096\n"
     "bubble_yaw = -19.0\n"
     "bubble_fade = 0.05\n"
@@ -297,11 +298,11 @@ const char kDefaultSettings[] =
     "table_follow_yaw = 0\n"
     "# the model's panels: hud_width (m) and hud_pose (x, y, z in m, yaw in degrees: where a grip put the HUD);\n"
     "# bird_range = how far the birds fly around the bubble, in its radii.\n"
-    "hud_width = 0.7\n"
-    "hud_pose = 0.313,0.054,-0.278,-46.2\n"
+    "hud_width = 0.9\n"
+    "hud_pose = -0.147,0.152,-0.512,15.0\n"
     "bird_range = 2.5\n"
     "# panel_offset = the settings panel from the eyes when it opens (m: right, up, ahead negative).\n"
-    "panel_offset = 0.224,0.469,-1.558\n"
+    "panel_offset = 0.034,0.160,-1.622\n"
     "# mode = ventana: the world at its own size through a window in the room. window_width (m, 16:9),\n"
     "# window_distance, window_height (above the eyes), window_x in m; window_yaw in degrees;\n"
     "# window_scale = metres of the game per metre (1 = real size); window_depth = the game camera in front\n"
@@ -309,25 +310,25 @@ const char kDefaultSettings[] =
     "# never past the camera); window_draw_distance = the game's metres drawn (at scale 1), the horizon;\n"
     "# window_hud_on 1 = the HUD over the window (else on panels below and above it); window_lift = the\n"
     "# game camera raised in the window (m of the room, under 0 lowered; grips held + the left stick).\n"
-    "window_width = 0.95\n"
-    "window_distance = 0.705\n"
-    "window_height = -0.002\n"
-    "window_x = 0.138\n"
-    "window_yaw = -1.5\n"
-    "window_scale = 3\n"
-    "window_lift = 0\n"
+    "window_width = 0.45\n"
+    "window_distance = 0.654\n"
+    "window_height = -0.176\n"
+    "window_x = -0.218\n"
+    "window_yaw = 16.7\n"
+    "window_scale = 20\n"
+    "window_lift = 0.078\n"
     "window_depth = 0.1\n"
     "window_popout_on = 1\n"
-    "window_popout = 0.1\n"
+    "window_popout = 1.5\n"
     "window_draw_distance = 200\n"
-    "window_hud_on = 1\n"
+    "window_hud_on = 0\n"
     "# the window's HUD where a grip on it put it: window_hud_pose (x, y, z in m in the window's space, yaw\n"
     "# in degrees) and window_hud_scale; grip + right stick click puts it back.\n"
     "window_hud_pose = 0,0,0,0\n"
     "window_hud_scale = 1\n"
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
-    "npc_draw_distance = 10\n"
+    "npc_draw_distance = 20\n"
     "# vegetation_adaptive 1 = the palms, grass, bushes and flowers all drawn while the game keeps 30 fps; when\n"
     "# the frame rate falls (frames lost), the farthest are left out step by step, never nearer than\n"
     "# vegetation_min m from Link, and come back when the load falls (vegetation_max: the top, in m).\n"
@@ -336,7 +337,7 @@ const char kDefaultSettings[] =
     "vegetation_max = 120\n"
     "# palm_draw_distance = the game's metres from Link within which the palms are drawn, always (they shrink\n"
     "# away at the edge); 0 = as far as the game draws them.\n"
-    "palm_draw_distance = 40\n"
+    "palm_draw_distance = 30\n"
     "# dynres 1 = the resolution follows the frame rate, after the vegetation (with vegetation_adaptive, only\n"
     "# once that is at vegetation_min): one step down (a tenth of the\n"
     "# mode's lines) when the game stays under dynres_low_fps for 3 s, one up when it holds\n"
@@ -354,7 +355,7 @@ const char kDefaultSettings[] =
     "talk_screen = 1\n"
     "cine_screen = 0\n"
     "# seethrough_on 1 = Link seen through what stands in front of him, a hole seethrough_radius m around him.\n"
-    "seethrough_on = 1\n"
+    "seethrough_on = 0\n"
     "seethrough_radius = 0.8\n"
     "# special_scenes 1 = some cutscenes (the Helmaroc King on Outset): the bubble closes in on the bird\n"
     "# (special_zoom of its span); special_window 1 = through the window in any mode instead, at real size,\n"
@@ -367,7 +368,7 @@ const char kDefaultSettings[] =
     "# mode = pantalla: ambient 1 = the game's own seagulls, crabs, birds, wind lines and rain also\n"
     "# outside the screen, in the room, fading out ambient_range m from its edge.\n"
     "ambient = 1\n"
-    "ambient_range = 1.5\n"
+    "ambient_range = 4.5\n"
     "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
     "ambient_test = seagull\n"
     "ambient_mask = 1\n"
@@ -377,7 +378,7 @@ const char kDefaultSettings[] =
     "ambient_y = 0.394\n"
     "ambient_z = -0.244\n"
     "ambient_yaw = -26.3\n"
-    "ambient_scale = 1.30\n"
+    "ambient_scale = 1.05\n"
     "ambient_move = 1\n"
     "# ambient_anchor = world: anchored in the room around Link, not turning with the game camera; camera: as\n"
     "# the camera sees it (lined up with the screen's picture, moving with the camera).\n"
