@@ -753,6 +753,9 @@ struct Xr {
     // both hands sizing the room's ambience (1.0.7): taken away from the screen or the window (their
     // rays off it), as the model is sized
     bool dragAmbient = false;
+    // with ambient_move (1.1.2): the grips closed with a hand's ray on the giant screen hold the screen,
+    // otherwise the ambience (taken when the hands on it change)
+    bool aimScreen = false;
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
@@ -2497,16 +2500,32 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         }
     }
     const bool ambientHeld = !window && !diorama && ambient && st.ambientMove;
+    // a hand's ray on the giant screen (a little beyond its edges)
+    auto aimOnScreen = [&]() {
+        const XrPosef frame = screenPose(st);
+        const float w = st.width * 1.2f;
+        const XrExtent2Df size{w, w * 9.0f / 16.0f};
+        for (int h = 0; h < 2; h++) {
+            XrVector3f o, d;
+            float t = 0.0f;
+            if (aimRay(h, &o, &d) && rayQuad(o, d, frame, size, &t)) return true;
+        }
+        return false;
+    };
     // With a grip held, the right stick scales the world (not the game's camera meanwhile): the model's
     // span (bubble_span), the window's scale (window_scale), the screen's ambience (ambient_scale), or
     // the screen's width when it has none. Forward makes the world larger, smoothly (twice or half as
     // large in a second at full tilt), with a soft tick every 10%; saved when the grips are let go.
+    // With ambient_move (1.1.2): the screen's width when a ray is on the screen as it starts, else the
+    // ambience (kept while the grips stay held).
     const bool held = s.gripDown[0] || s.gripDown[1];
     if (held && stick != nullptr) {
         const float y = stick->y;
         *stick = {0.0f, 0.0f};
         if (std::fabs(y) > 0.25f) {
-            const int what = diorama ? 1 : window ? 2 : ambient ? 3 : 4;
+            int what = diorama ? 1 : window ? 2 : ambient ? 3 : 4;
+            if (what == 3 && ambientHeld)
+                what = s.stickScale == 3 || s.stickScale == 4 ? s.stickScale : aimOnScreen() ? 4 : 3;
             float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale : &st.width;
             const float lo = what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.5f;
             const float hi = what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 40.0f;
@@ -2522,8 +2541,9 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             // the span and the window's scale are the game's metres per metre: fewer, the world larger
             *v = clampf(what <= 2 ? *v / k : *v * k, lo, hi);
             // both hands sizing the same thing go on from it
+            const bool ambientDragged = s.dragAmbient || (ambientHeld && !s.aimScreen);
             if (s.dragging && s.dragSize > 0.0f && before > 0.0f &&
-                (what == 4 || (what == 3 && (ambientHeld || s.dragAmbient))))
+                ((what == 4 && !ambientDragged) || (what == 3 && ambientDragged)))
                 s.dragSize *= *v / before;
             if (std::fabs(*v / s.stickTick - 1.0f) >= 0.1f) {
                 s.stickTick = *v;
@@ -2603,9 +2623,16 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         if (sizing && !s.dragAmbient) xrlog("grip: both hands on the ambience (its size)");
         s.dragAmbient = sizing;
         if (s.dragHands && !hands && !s.dragAmbient)
-            window ? saveWindow() : diorama ? saveModel() : ambientHeld ? saveAmbient() : saveScreen();
+            window ? saveWindow() : diorama ? saveModel() : ambientHeld && !s.aimScreen ? saveAmbient() : saveScreen();
+        // with ambient_move (1.1.2): the screen when a hand's ray is on it as the grips close, else the
+        // ambience; what was held before is saved when that changes with a grip still held
+        const bool aim = ambientHeld && hands && aimOnScreen();
+        if (ambientHeld && s.dragHands && hands && aim != s.aimScreen) s.aimScreen ? saveScreen() : saveAmbient();
+        s.aimScreen = aim;
+        const bool ambienceHeld = ambientHeld && !s.aimScreen;
         if (hands)
             xrlog("grip: %s", window ? (hands == 3 ? "both hands on the window" : "moving the window")
+                              : ambienceHeld ? (hands == 3 ? "both hands on the ambience" : "moving the ambience")
                               : !diorama ? (hands == 3 ? "both hands on the screen" : "moving the screen")
                               : hands == 3 ? "both hands on the model" : "moving the model");
         s.dragHands = hands;
@@ -2693,9 +2720,10 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         s.clickWas = click;
         return;
     }
-    if (ambientHeld) {
+    if (ambientHeld && !s.aimScreen) {
         // the giant screen's ambience (ambient_move): as the screen, one hand moves it and turns it, both
-        // also size it, the right stick's click puts it back
+        // also size it, the right stick's click puts it back (the grips closed with no ray on the screen,
+        // 1.1.2; else the screen itself, below)
         if (!s.dragging) {
             s.dragging = true;
             s.dragHand = at;
