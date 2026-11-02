@@ -494,12 +494,13 @@ struct Ambient {
     u32 recFrame = 0;
     const fopAc_ac_c* best = nullptr;  // the nearest seagull to Link (the log's)
     // this frame's ambient actors (drawn again, never culled): up to 16 small ones, the Helmaroc King,
-    // then the nearest characters and animals (kMaxPeople)
-    const void* actors[24];
-    int kinds[24];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King,
+    // then the nearest characters and animals (kMaxPeople), then the item Link is given (1.1.3)
+    const void* actors[25];
+    int kinds[25];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King,
                                         // 6 a character or an animal (ambientPerson), 7 a forest firefly,
-                                        // 8 the Great Fairy, 9 Valoo (ambientGiant)
-    float pos[24][3];                   // where they are (the world)
+                                        // 8 the Great Fairy, 9 Valoo (ambientGiant), 10 the item Link is
+                                        // given (Demo_Item)
+    float pos[25][3];                   // where they are (the world)
     unsigned nPeople = 0;               // the characters and animals near Link (the log's)
     // anchored in the room: the world to the room (stage space) and the head's, for the painter's
     // placing of each kind
@@ -513,6 +514,9 @@ struct Ambient {
     // the Great Fairy's or Valoo's (1.1.2), the same way: in front of the head when it first shows
     bool giantPlaced = false;
     float giantAt[3] = {0, 0, 0};
+    // the item Link is given (1.1.3), the same way: in front of the head when it first shows
+    bool itemPlaced = false;
+    float itemAt[3] = {0, 0, 0};
     float windYaw = 0.0f, k = 0.0f;
     // the game camera's heading this frame (1.0.8: the particles, the characters and the Helmaroc King
     // turned with it) and the hand's move, turn and size (ambient_move) about the anchor
@@ -651,7 +655,7 @@ int ambientEmitters(u16 id) {
 void ambientOff() {
     sAmbient.worldValid = false;  // its heading taken again when it starts
     sAmbient.windMidValid = false;
-    sAmbient.kingPlaced = sAmbient.giantPlaced = false;  // their places taken again (1.1.2)
+    sAmbient.kingPlaced = sAmbient.giantPlaced = sAmbient.itemPlaced = false;  // their places taken again (1.1.2)
     if (sAmbient.wasOn) {
         aurora_xr_set_ambient(false, 0, nullptr, nullptr, 0.0f, nullptr, 0.0f, 0.0f, 0.0f);
         pc::writef(STDERR_FILENO, "[vr] ambient off\n");
@@ -765,6 +769,25 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
             sAmbient.pos[i][2] = pick.ac[j]->current.pos.z;
         }
     }
+    // The item Link is given (1.1.3): the get-item demo's actor (Demo_Item, d_a_demo_item: the model he
+    // holds up during the fanfare, a J3D model of its own). Link is not in the room, so it shows in front
+    // of the player, at the characters' size. What a character holds (the grandmother's clothes, ...) it
+    // draws itself with its own model, so it is in the room already with the character
+    bool item = false;
+    if (!sAmbient.testLink && sAmbient.nActors < 25) {
+        if (fopAc_ac_c* given = fopAcM_SearchByName(fpcNm_Demo_Item_e)) {
+            item = true;
+            const int i = sAmbient.nActors++;
+            sAmbient.actors[i] = given;
+            sAmbient.kinds[i] = 10;
+            sAmbient.pos[i][0] = given->current.pos.x, sAmbient.pos[i][1] = given->current.pos.y;
+            sAmbient.pos[i][2] = given->current.pos.z;
+            static bool sLogged = false;
+            if (!sLogged) pc::writef(STDERR_FILENO, "[vr] ambient: the item Link is given in the room\n");
+            sLogged = true;
+        }
+    }
+    if (!item) sAmbient.itemPlaced = false;
     pc_vr_ambient_actor = sAmbient.nActors > 0 ? sAmbient.actors[0] : nullptr;
 
     // the screen as a window (roomFromWindow's fields), its picture's aspect the game projection's
@@ -1687,7 +1710,7 @@ const float kValooSize = 0.06f;
 float ambientFacingSize(int kind) {
     return kind == 5 ? kHelmarocSize : kind == 8 ? kBigelfSize : kind == 9 ? kValooSize : kAmbientSize;
 }
-bool ambientFacing(int kind) { return kind == 5 || kind == 6 || kind == 8 || kind == 9; }
+bool ambientFacing(int kind) { return kind == 5 || kind == 6 || kind == 8 || kind == 9 || kind == 10; }
 
 void ambientDelta(const float p[3], const float d[3], Mtx out, float size = kAmbientSize) {
     // moved by d, sized `size` about where it lands
@@ -1737,6 +1760,23 @@ void ambientFacingAt(int kind, const float p[3], float at[3], bool keep = true) 
             return;
         }
         memcpy(at, sAmbient.kingAt, sizeof(sAmbient.kingAt));
+        return;
+    }
+    if (kind == 10) {
+        // the item Link is given: 0.8 m in front of the head, 0.3 m under the eyes (its origin its middle)
+        if (!sAmbient.itemPlaced) {
+            const float* h = sAmbient.headPos;
+            const float* f = sAmbient.headFwd;
+            at[0] = h[0] + 0.8f * f[0];
+            at[1] = h[1] - 0.3f;
+            at[2] = h[2] + 0.8f * f[2];
+            if (keep) {
+                memcpy(sAmbient.itemAt, at, sizeof(sAmbient.itemAt));
+                sAmbient.itemPlaced = true;
+            }
+            return;
+        }
+        memcpy(at, sAmbient.itemAt, sizeof(sAmbient.itemAt));
         return;
     }
     if (kind == 8 || kind == 9) {
