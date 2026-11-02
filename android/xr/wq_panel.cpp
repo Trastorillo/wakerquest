@@ -227,6 +227,13 @@ const Item kWindow[] = {
     {kXr, "window_hud_on", {"HUD sobre la ventana", "HUD over the window", "HUD sur la fenêtre"},
      {"Si no, en paneles debajo y encima", "Else on panels below and above", "Sinon sur des panneaux dessous et dessus"},
      kSwitch},
+    {kXr, "window_hud_scale", {"Tamaño del HUD", "HUD size", "Taille du HUD"},
+     {"O agárralo con los dos grips", "Or hold it with both grips", "Ou saisissez-le avec les deux grips"},
+     kStepper, nullptr, 0, 0.2f, 5.0f, 0.1f, "%.1f"},
+    {kAction, "reset_window_hud", {"Restablecer HUD", "Reset HUD", "Réinitialiser le HUD"},
+     {"A su sitio y tamaño (o grip + clic sobre él)", "Back to its place and size (or grip + click on it)",
+      "À sa place et sa taille (ou grip + clic dessus)"},
+     kButton},
 };
 // the room's ambience (mode = pantalla, pc_vr_diorama.cpp): the game's seagulls, crabs and small birds
 // out of the screen
@@ -635,6 +642,10 @@ void press(const Item& it) {
     if (!strcmp(it.key, "reset_position")) {
         p.host.resetPosition();
         plog("the model back in its place");
+    } else if (!strcmp(it.key, "reset_window_hud")) {
+        p.host.xrSet("window_hud_pose", "0,0,0,0");
+        p.host.xrSet("window_hud_scale", "1");
+        plog("the window's HUD back in its place and size");
     } else if (!strcmp(it.key, "reset_panels")) {
         p.host.resetPanels();
         plog("the HUD and the dialogues back in their places");

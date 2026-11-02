@@ -138,6 +138,10 @@ struct Settings {
     bool viewRelative = true;                    // the left stick relative to the player's view of the model
     bool autoScreen = true;                      // first-person views on the giant screen
     bool windowHudOn = true;                     // the window: the HUD and dialogues over it (else on panels)
+    // the window's HUD moved, turned and sized by a grip on it (1.1.4): window_hud_pose (x, y, z in metres
+    // in the window's own space, from where the window puts it; yaw in degrees) and window_hud_scale
+    float windowHudPose[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    float windowHudScale = 1.0f;
     bool cineScreen = false;                     // and cutscenes (else the talk zoom, in the bubble)
     // the title screen on the giant screen, flat, whatever the mode: always (1.1.1; an old intro_2d key in
     // xr.ini is ignored)
@@ -316,6 +320,10 @@ const char kDefaultSettings[] =
     "window_popout = 0.1\n"
     "window_draw_distance = 200\n"
     "window_hud_on = 1\n"
+    "# the window's HUD where a grip on it put it: window_hud_pose (x, y, z in m in the window's space, yaw\n"
+    "# in degrees) and window_hud_scale; grip + right stick click puts it back.\n"
+    "window_hud_pose = 0,0,0,0\n"
+    "window_hud_scale = 1\n"
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
     "npc_draw_distance = 10\n"
@@ -501,7 +509,16 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_popout_special")) s.windowPopoutSpecial = clampf(f, 0.0f, 5.0f);
     else if (!strcmp(key, "window_fade")) s.windowFade = clampf(f, 0.0f, 0.5f);
     else if (!strcmp(key, "window_vignette")) s.windowVignette = on;
-    else if (!strcmp(key, "hud_pose")) {
+    else if (!strcmp(key, "window_hud_scale")) s.windowHudScale = clampf(f, 0.2f, 5.0f);
+    else if (!strcmp(key, "window_hud_pose")) {
+        float x = 0, y = 0, z = 0, yaw = 0;
+        if (sscanf(v, "%f,%f,%f,%f", &x, &y, &z, &yaw) == 4) {
+            s.windowHudPose[0] = clampf(x, -5.0f, 5.0f);
+            s.windowHudPose[1] = clampf(y, -5.0f, 5.0f);
+            s.windowHudPose[2] = clampf(z, -5.0f, 5.0f);
+            s.windowHudPose[3] = clampf(yaw, -180.0f, 180.0f);
+        }
+    } else if (!strcmp(key, "hud_pose")) {
         float x = 0, y = 0, z = 0, yaw = 0;
         if (sscanf(v, "%f,%f,%f,%f", &x, &y, &z, &yaw) == 4) {
             s.hudPose[0] = clampf(x, -10.0f, 10.0f);
@@ -584,6 +601,7 @@ std::string settingValue(const Settings& s, const char* key) {
         return num(float(resolutionOf(s, key)));
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
+    if (!strcmp(key, "window_hud_scale")) return num(s.windowHudScale);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
     if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
@@ -757,6 +775,12 @@ struct Xr {
     // with ambient_move (1.1.2): the grips closed with a hand's ray on the giant screen hold the screen,
     // otherwise the ambience (taken when the hands on it change)
     bool aimScreen = false;
+    // the window's HUD held (windowHudGrips, 1.1.4): the hands on it, its pose and size then, the hands'
+    // middle, heading and distance then, the right stick's click
+    int whHands = 0;
+    float whFrom[4] = {0, 0, 0, 0}, whScale = 1.0f, whHeading = 0.0f, whSpan = 0.0f;
+    XrVector3f whHand{};
+    bool whClickWas = false;
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
@@ -2432,6 +2456,69 @@ void saveScreen() {
     wq_xr_set("width", v);
 }
 
+// The window's HUD held by the grips on it (1.1.4; updateGrips takes the hands whose grip closed with
+// their ray or the hand on it): one hand moves it (its move in the window's own space) and turns it about
+// the vertical (the hand's turn), both also size it (their distance); grip + the right stick's click puts
+// it back (where the window puts it, its size). Saved (window_hud_pose, window_hud_scale) when let go.
+void windowHudGrips(const XrSpaceLocation loc[2], const bool valid[2], bool click) {
+    Settings& st = s.settings;
+    const int hands = (s.grabbed[0] == 1 && valid[0] ? 1 : 0) | (s.grabbed[1] == 1 && valid[1] ? 2 : 0);
+    auto save = [&]() {
+        char v[64];
+        snprintf(v, sizeof v, "%.3f,%.3f,%.3f,%.1f", st.windowHudPose[0], st.windowHudPose[1], st.windowHudPose[2],
+                 st.windowHudPose[3]);
+        wq_xr_set("window_hud_pose", v);
+        snprintf(v, sizeof v, "%.2f", st.windowHudScale);
+        wq_xr_set("window_hud_scale", v);
+    };
+    const XrVector3f a = loc[0].pose.position, b = loc[1].pose.position;
+    const XrVector3f at = hands == 3 ? vscale(vadd(a, b), 0.5f) : hands == 1 ? a : b;
+    const float heading = hands == 3 ? std::atan2(b.z - a.z, b.x - a.x)
+                                     : headingOf(loc[hands == 1 ? 0 : 1].pose.orientation);
+    const float span = hands == 3 ? std::sqrt(vdot(vsub(b, a), vsub(b, a))) : 0.0f;
+    if (hands != s.whHands) {
+        if (!hands) {
+            save();
+        } else {
+            memcpy(s.whFrom, st.windowHudPose, sizeof(s.whFrom));
+            s.whScale = st.windowHudScale;
+            s.whHand = at;
+            s.whHeading = heading;
+            s.whSpan = span;
+            xrlog("grip: %s the window's HUD", hands == 3 ? "both hands on" : "moving");
+        }
+        s.whHands = hands;
+    }
+    if (!hands) {
+        s.whClickWas = click;
+        return;
+    }
+    if (click && !s.whClickWas) {
+        st.windowHudPose[0] = st.windowHudPose[1] = st.windowHudPose[2] = st.windowHudPose[3] = 0.0f;
+        st.windowHudScale = 1.0f;
+        memcpy(s.whFrom, st.windowHudPose, sizeof(s.whFrom));
+        s.whScale = 1.0f;
+        s.whHand = at;
+        s.whHeading = heading;
+        s.whSpan = span;
+        xrlog("grip: the window's HUD back in its place");
+    } else {
+        // the hands' move in the window's own space
+        const XrQuaternionf q = windowPose(st).orientation;
+        const XrVector3f d = qrot({-q.x, -q.y, -q.z, q.w}, vsub(at, s.whHand));
+        st.windowHudPose[0] = clampf(s.whFrom[0] + d.x, -5.0f, 5.0f);
+        st.windowHudPose[1] = clampf(s.whFrom[1] + d.y, -5.0f, 5.0f);
+        st.windowHudPose[2] = clampf(s.whFrom[2] + d.z, -5.0f, 5.0f);
+        float yaw = s.whFrom[3] - wrapPi(heading - s.whHeading) * 57.2957795f;
+        while (yaw > 180.0f) yaw -= 360.0f;
+        while (yaw < -180.0f) yaw += 360.0f;
+        st.windowHudPose[3] = yaw;
+        if (hands == 3 && s.whSpan > 0.05f) st.windowHudScale = clampf(s.whScale * span / s.whSpan, 0.2f, 5.0f);
+    }
+    s.whClickWas = click;
+    publishSettings();
+}
+
 // The grips, in every mode (fase 2). Pressed with the hand's ray (or the hand) on the HUD's or the
 // dialogues' panel (the diorama): the panel follows the hand (the HUD turned to face the player), saved
 // on release. Otherwise on what the mode shows (the model, the window, the giant screen, or the screen's
@@ -2468,7 +2555,8 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     const float g[2] = {gripL, gripR};
     for (int h = 0; h < 2; h++) {
         const bool down = valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
-        if (down && !s.gripDown[h] && diorama) {
+        // (the window's HUD too, 1.1.4: windowHudGrips moves it)
+        if (down && !s.gripDown[h] && (diorama || window)) {
             const int panel = panelUnderHand(h, loc[h].pose.position);
             if (panel) {
                 s.grabbed[h] = panel;
@@ -2479,7 +2567,9 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
                 xrlog("grip: moving the %s", panel == 1 ? "HUD" : "dialogues");
             }
         }
-        if (!down && s.grabbed[h]) {
+        if (!down && s.grabbed[h] && window) {
+            s.grabbed[h] = 0;  // windowHudGrips saves it when no hand holds it
+        } else if (!down && s.grabbed[h]) {
             char v[64];
             if (s.grabbed[h] == 1) {
                 snprintf(v, sizeof v, "%.3f,%.3f,%.3f,%.1f", st.hudPose[0], st.hudPose[1], st.hudPose[2], st.hudPose[3]);
@@ -2491,7 +2581,7 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             s.grabbed[h] = 0;
         }
         s.gripDown[h] = down;
-        if (s.grabbed[h] && valid[h]) {
+        if (s.grabbed[h] && valid[h] && !window) {
             const XrVector3f dp = vsub(loc[h].pose.position, s.grabHand[h]);
             float* to = s.grabbed[h] == 1 ? st.hudPose : st.dialogueOffset;
             to[0] = s.grabOffset[h][0] + dp.x;
@@ -2504,6 +2594,7 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             publishSettings();
         }
     }
+    if (window) windowHudGrips(loc, valid, click);
     const bool ambientHeld = !window && !diorama && ambient && st.ambientMove;
     // a hand's ray on the giant screen (a little beyond its edges)
     auto aimOnScreen = [&]() {
@@ -2970,6 +3061,8 @@ void hostResetPanels() {
              defaults.hudPose[3]);
     hostSet("hud_pose", v);
     hostSet("dialogue_offset", "0,0,0");
+    hostSet("window_hud_pose", "0,0,0,0");  // the window's HUD too (1.1.4)
+    hostSet("window_hud_scale", "1");
 }
 
 // The Acerca de tab (wq_panel.cpp): the APK's version and the update check, both WakerQuestActivity's
@@ -3424,6 +3517,23 @@ void runFrame() {
                 // turned with it. Neither is taken by a grip (a grip takes the window).
                 const float hh = 0.5f * st.windowWidth * 9.0f / 16.0f;
                 hud.pose.orientation = windowPose(st).orientation;
+                // the HUD where the window puts it (x, y, z in its space, w x h), then moved, turned and
+                // sized by a grip on it (window_hud_pose, window_hud_scale; 1.1.4), and taken by a grip
+                auto placeWindowHud = [&](float x, float y, float z, float w, float h) {
+                    const float* o = st.windowHudPose;
+                    const XrQuaternionf q = windowPose(st).orientation;
+                    const float yaw = o[3] * 0.0174532925f;
+                    const XrQuaternionf t{0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
+                    hud.pose.position = onWindow(st, x + o[0], y + o[1], z + o[2]);
+                    hud.pose.orientation = {q.w * t.x + q.x * t.w + q.y * t.z - q.z * t.y,
+                                            q.w * t.y - q.x * t.z + q.y * t.w + q.z * t.x,
+                                            q.w * t.z + q.x * t.y - q.y * t.x + q.z * t.w,
+                                            q.w * t.w - q.x * t.x - q.y * t.y - q.z * t.z};
+                    hud.size = {w * st.windowHudScale, h * st.windowHudScale};
+                    s.hudShown = !panelOpen;
+                    s.hudPanel = hud.pose;
+                    s.hudSize = hud.size;
+                };
                 if (st.windowHudOn) {
                     // window_hud_on: the HUD, dialogues and all, over the window itself, as on a TV: its
                     // rectangle a centimetre in front, moving and scaling with it. With the pop-out on,
@@ -3438,8 +3548,7 @@ void runFrame() {
                     const float z = 0.01f + clampf(popout, 0.0f, 0.6f);
                     const float shrink = clampf((st.windowDistance - z) / std::max(st.windowDistance, 0.1f), 0.3f, 1.0f);
                     hud.subImage.imageRect = full;
-                    hud.pose.position = onWindow(st, 0.0f, 0.0f, z);
-                    hud.size = {st.windowWidth * shrink, 2.0f * hh * shrink};
+                    placeWindowHud(0.0f, 0.0f, z, st.windowWidth * shrink, 2.0f * hh * shrink);
                 } else if (s_dialogue.load()) {
                     const int32_t x0 = int32_t(eyeW * 0.08f), y0 = int32_t(s.screenH * 0.60f);
                     const int32_t cw = int32_t(eyeW * 0.84f), ch = int32_t(s.screenH * 0.38f);
@@ -3450,8 +3559,7 @@ void runFrame() {
                 } else {
                     const float w = st.windowWidth, h = w * float(s.screenH) / float(eyeW);
                     hud.subImage.imageRect = full;
-                    hud.pose.position = onWindow(st, 0.0f, -hh - 0.02f - 0.5f * h, 0.0f);
-                    hud.size = {w, h};
+                    placeWindowHud(0.0f, -hh - 0.02f - 0.5f * h, 0.0f, w, h);
                 }
                 if (!panelOpen) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&hud;
             } else if (s_talk.load() && st.talkScreen) {
@@ -3557,7 +3665,7 @@ void runFrame() {
         const int pl = updatePanelPointer(pointerQuads);
         if (wqp::layer(s.space, &panelQuad)) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&panelQuad;
         for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
-    } else if (!menuOpen && s.settings.diorama && (s.hudShown || s.dialogueShown)) {
+    } else if (!menuOpen && (s.settings.diorama || s.settings.window) && (s.hudShown || s.dialogueShown)) {
         const int pl = updatePanelRays(pointerQuads);
         for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
     }
