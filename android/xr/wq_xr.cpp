@@ -144,6 +144,7 @@ struct Settings {
     // in the window's own space, from where the window puts it; yaw in degrees) and window_hud_scale
     float windowHudPose[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float windowHudScale = 1.0f;
+    bool windowHudMove = false;  // window_hud_move (1.1.5): the grips hold the window's HUD, not the window
     bool cineScreen = false;                     // and cutscenes (else the talk zoom, in the bubble)
     // the title screen on the giant screen, flat, whatever the mode: always (1.1.1; an old intro_2d key in
     // xr.ini is ignored)
@@ -326,6 +327,9 @@ const char kDefaultSettings[] =
     "# in degrees) and window_hud_scale; grip + right stick click puts it back.\n"
     "window_hud_pose = 0,0,0,0\n"
     "window_hud_scale = 1\n"
+    "# window_hud_move 1 = the grips hold the window's HUD (one moves and turns it, both size it) instead of\n"
+    "# the window; else grip + trigger on the HUD takes it.\n"
+    "window_hud_move = 0\n"
     "# npc_draw_distance = the game's metres from Link within which the characters are drawn, every mode\n"
     "# (the ones in a cutscene or a dialogue always); 0 = all.\n"
     "npc_draw_distance = 20\n"
@@ -512,6 +516,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_fade")) s.windowFade = clampf(f, 0.0f, 0.5f);
     else if (!strcmp(key, "window_vignette")) s.windowVignette = on;
     else if (!strcmp(key, "window_hud_scale")) s.windowHudScale = clampf(f, 0.2f, 5.0f);
+    else if (!strcmp(key, "window_hud_move")) s.windowHudMove = on;
     else if (!strcmp(key, "window_hud_pose")) {
         float x = 0, y = 0, z = 0, yaw = 0;
         if (sscanf(v, "%f,%f,%f,%f", &x, &y, &z, &yaw) == 4) {
@@ -604,6 +609,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "window_hud_scale")) return num(s.windowHudScale);
+    if (!strcmp(key, "window_hud_move")) return flag(s.windowHudMove);
     if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
     if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
@@ -785,6 +791,7 @@ struct Xr {
     bool whClickWas = false;
     bool grabWindow[2] = {false, false};  // the panel grab began in the window mode (the window's HUD)
     bool whTrigHold[2] = {false, false};  // its trigger kept from the game until let go
+    bool trigWas[2] = {false, false};     // the trigger as updateGrips last saw it (its press, 1.1.5)
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
@@ -2579,17 +2586,28 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         const bool down = valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
         // (the window's HUD too, 1.1.4: windowHudGrips moves it; there the grip takes it only with the
         // trigger held, grip alone holding the window: the HUD over the window covers all of it)
-        if (down && !s.gripDown[h] && (diorama || (window && s.trig[h] > 0.6f))) {
-            const int panel = panelUnderHand(h, loc[h].pose.position);
+        // 1.1.5: the trigger pressed with the grip already held takes the HUD too (grip then trigger,
+        // the natural order: 1.1.4 took it only with the trigger held first, and a grip first took the
+        // window); with window_hud_move any grip in the window takes the HUD, wherever it points
+        const bool trigNow = s.trig[h] > 0.6f;
+        const bool trigPress = trigNow && !s.trigWas[h];
+        s.trigWas[h] = trigNow;
+        const bool hudMove = window && st.windowHudMove;
+        const bool take = !s.grabbed[h] && down &&
+                          (hudMove ? !s.gripDown[h]
+                                   : diorama ? !s.gripDown[h]
+                                             : window && trigNow && (!s.gripDown[h] || trigPress));
+        if (take) {
+            const int panel = hudMove ? 1 : panelUnderHand(h, loc[h].pose.position);
             if (panel) {
                 s.grabbed[h] = panel;
                 s.grabWindow[h] = window;
-                if (window) s.whTrigHold[h] = true;
+                if (window && trigNow) s.whTrigHold[h] = true;
                 s.grabHand[h] = loc[h].pose.position;
                 const float* from = panel == 1 ? st.hudPose : st.dialogueOffset;
                 for (int i = 0; i < 3; i++) s.grabOffset[h][i] = from[i];
                 pointerHaptic(h, 0.3f);
-                xrlog("grip: moving the %s", panel == 1 ? "HUD" : "dialogues");
+                if (!window) xrlog("grip: moving the %s", panel == 1 ? "HUD" : "dialogues");
             }
         }
         if (!down && s.grabbed[h] && s.grabWindow[h]) {
