@@ -477,7 +477,7 @@ int collectBird(void* actor, void*) {
 // where it would be. Aurora (patch 0034) draws those draws for each eye and hides them where the
 // screen is, fading them out away from it. Step 2: one seagull (the nearest to Link) as a test.
 struct Ambient {
-    unsigned n[5] = {};  // KAMOME (and KAMOME2, the same process here), DEMO_KMM, KN, KT, FF
+    unsigned n[8] = {};  // KAMOME (and KAMOME2, the same process here), DEMO_KMM, KN, KT, FF; [7] NH
     uint64_t lastLogNs = 0;
     bool on = false;      // this frame's painter draws the ambience (pc_vr_ambient_draw)
     bool wasOn = false;
@@ -497,7 +497,7 @@ struct Ambient {
     // then the nearest characters and animals (kMaxPeople)
     const void* actors[24];
     int kinds[24];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King,
-                                        // 6 a character or an animal (ambientPerson)
+                                        // 6 a character or an animal (ambientPerson), 7 a forest firefly
     float pos[24][3];                   // where they are (the world)
     unsigned nPeople = 0;               // the characters and animals near Link (the log's)
     // anchored in the room: the world to the room (stage space) and the head's, for the painter's
@@ -536,7 +536,10 @@ struct Ambient {
 };
 Ambient sAmbient;
 
-// 0..4 for an ambient actor's kind, -1 for any other
+// 0..4 for an ambient actor's kind, 7 for the forest firefly (1.1.2), -1 for any other.
+// The Forest Firefly (NH, d_a_nh: Forest Haven, the Forbidden Woods) draws its J3D model alone
+// (mDoExt_modelUpdateDL, its brk's glow in the material) and no depth read, unlike FF (GXPeekZ): its
+// halo is an alpha model (dComIfGd_setAlphaModel), the game's screen glow, not redrawn in the room
 int ambientKind(s16 name) {
     switch (name) {
     case fpcNm_KAMOME_e: return 0;
@@ -544,6 +547,7 @@ int ambientKind(s16 name) {
     case fpcNm_KN_e: return 2;
     case fpcNm_KT_e: return 3;
     case fpcNm_FF_e: return 4;
+    case fpcNm_NH_e: return 7;
     default: return -1;
     }
 }
@@ -813,12 +817,14 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     if (!sAmbient.wasOn || now - sAmbient.lastLogNs > 5000000000ull) {
         sAmbient.lastLogNs = now;
         pc::writef(STDERR_FILENO,
-                   "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u, characters and "
+                   "[vr] ambient: seagulls %u (demo %u), crabs %u, small birds %u, fireflies %u, forest fireflies "
+                   "%u, characters and "
                    "animals %u; rain %d; test "
                    "%s %d, %d packets; screen %.2f x %.2f m, eye point %.2f m in front, "
                    "%.4f m per unit, range %.1f m; paints %u (drawn %u, stale %u, no view %u); weather: "
                    "%d seagull and %d wind line emitters, snow %d, spores/ash %d\n",
-                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], sAmbient.nPeople,
+                   sAmbient.n[0], sAmbient.n[1], sAmbient.n[2], sAmbient.n[3], sAmbient.n[4], sAmbient.n[7],
+                   sAmbient.nPeople,
                    g_env_light.mRainCount,
                    table.ambientTestLink ? "Link (test)" : sAmbient.nActors > 0 ? "actors" : "no actors",
                    sAmbient.nActors, sAmbient.recN,
@@ -1549,6 +1555,9 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // Tamaño del ambiente on top); the Helmaroc King, a giant, far smaller (some 2 m across)
 const float kAmbientSize = 0.35f;
 const float kHelmarocSize = 0.12f;
+// the forest fireflies (1.1.2): twice the ambience's size (the game's model is some 10 units across,
+// 3 cm at 0.35; without its halo it would hardly be seen)
+const float kFireflySize = 0.7f;
 
 void ambientDelta(const float p[3], const float d[3], Mtx out, float size = kAmbientSize) {
     // moved by d, sized `size` about where it lands
@@ -1618,8 +1627,9 @@ void ambientFacingDelta(const float p[3], const float at[3], Mtx out, float size
 // Where an actor goes in the room (the move from where the anchored world puts it, metres): what is far
 // in the game is brought near, keeping its direction, so it stays within the ambience's range. The
 // seagulls in a ring 0.6-1.6 m around the head, 0.3-0.8 m over it; the crabs and small birds within
-// 1 m of the screen's middle, on the room's floor (the characters, the animals and the Helmaroc King:
-// ambientFacingAt).
+// 1 m of the screen's middle, on the room's floor; the forest fireflies floating around the head, in a
+// ring 0.5-1.5 m from it, from 0.4 m below the eyes to 0.3 m above them (the characters, the animals and
+// the Helmaroc King: ambientFacingAt).
 void ambientPlace(int kind, const float p[3], float d[3]) {
     float r[3];
     xform(sAmbient.stageWorld, p, r);
@@ -1643,6 +1653,17 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
         d[0] = m[0] + vx * f - r[0];
         d[1] = sAmbient.floorY - r[1];  // on the room's floor
         d[2] = m[2] + vz * f - r[2];
+    } else if (kind == 7) {
+        // its height over the game's ground (some 50 units, swaying) kept, small, about the eyes
+        const float* h = sAmbient.headPos;
+        float vx = r[0] - h[0], vz = r[2] - h[2];
+        const float l = std::sqrt(vx * vx + vz * vz);
+        if (l < 1e-3f) vx = 0.0f, vz = -1.0f;
+        const float ring = std::clamp(0.5f + 0.1f * l, 0.5f, 1.5f) / std::max(l, 1e-3f);
+        const float y = h[1] - 0.1f + std::clamp(0.1f * (r[1] - h[1]), -0.3f, 0.4f);
+        d[0] = h[0] + vx * ring - r[0];
+        d[1] = y - r[1];
+        d[2] = h[2] + vz * ring - r[2];
     }
 }
 
@@ -1750,7 +1771,7 @@ void pc_vr_ambient_draw(void) {
             } else {
                 float mv[3];
                 ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
-                ambientDelta(sAmbient.pos[a], mv, d);
+                ambientDelta(sAmbient.pos[a], mv, d, sAmbient.kinds[a] == 7 ? kFireflySize : kAmbientSize);
             }
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
             deltaActor = who;
