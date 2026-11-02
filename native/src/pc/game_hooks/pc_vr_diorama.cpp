@@ -1778,7 +1778,7 @@ void ambientWindMid(const float eye[3], float out[3]) {
 }
 
 constexpr float kHousiSize = 3.0f;  // the spores in the room: their quads this many times as large
-constexpr float kMoyaAlpha = 0.4f;   // the moya mist in the room: its alpha this much of the game's
+constexpr float kMoyaAlpha = 1.5f;   // the moya mist in the room: its alpha this much of the game's
 constexpr float kMoyaLift = -0.6f;   // and its middle this far from the eyes (metres, below them)
 
 void pc_vr_ambient_draw(void) {
@@ -1935,18 +1935,29 @@ void pc_vr_ambient_draw(void) {
                 // the moya mist (1.1.2: dKankyo_cloud_Packet, drawCloudShadow): up to 100 sprites 8 m
                 // across, within 20 m of a middle 15 m ahead of the camera, no depth test. At the rain's
                 // scale it would fill the room: half of it (the sprites 0.8 m across, within 2 m), its
-                // middle kMoyaLift below the eyes and only the sprites under it (pc_vr_moya_alpha), at
-                // kMoyaAlpha of their alpha: a mist about the legs, not in front of the eyes
+                // middle kMoyaLift below the eyes, and only the sprites between that middle's height and
+                // the room's floor (their lower edge on it at most): a mist about the legs, never in
+                // front of the eyes. Each sprite at kMoyaAlpha of its alpha (the game's are 4% to 7%,
+                // made to pile up many deep in front of the camera; fewer pile up below the head)
+                const float moyaKw = 0.001f;
+                const float midY = view->mLookat.mEye.y + look[1] * 1500.0f;
+                const float deepest = (sAmbient.headPos[1] - sAmbient.floorY) - 0.4f + kMoyaLift;  // metres
+                pc_vr_moya_top = midY;
+                pc_vr_moya_bottom = midY - std::max(0.0f, deepest) / moyaKw;
                 static bool sMoyaLogged = false;
                 if (!sMoyaLogged) {
                     sMoyaLogged = true;
-                    pc::writef(STDERR_FILENO, "[vr] ambient: the mist (%d) in the room, below the head, %.0f%% alpha\n",
-                               (int)g_env_light.mpMoyaPacket->mCount, kMoyaAlpha * 100.0f);
+                    pc::writef(STDERR_FILENO, "[vr] ambient: the mist (%d) in the room, %.2f to %.2f m below the "
+                               "eyes, %.0f%% of its alpha\n",
+                               (int)g_env_light.mpMoyaPacket->mCount, -kMoyaLift, -kMoyaLift + std::max(0.0f, deepest),
+                               kMoyaAlpha * 100.0f);
                 }
-                centred(1500.0f, 1500.0f, 0.001f, kMoyaLift);
+                centred(1500.0f, 1500.0f, moyaKw, kMoyaLift);
+                pc_vr_moya_room = 1;
                 pc_vr_moya_alpha = kMoyaAlpha;
                 g_env_light.mpMoyaPacket->draw();
                 pc_vr_moya_alpha = 1.0f;
+                pc_vr_moya_room = 0;
             }
             j3dSys.reinitGX();
             GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
