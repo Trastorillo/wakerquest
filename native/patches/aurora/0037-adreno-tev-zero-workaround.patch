@@ -1,0 +1,181 @@
+Adreno: the TEV's zero inputs read from the uniform buffer (Qualcomm's shader compiler miscompiles them)
+
+WakerQuest 1.1.3. Qualcomm's Adreno drivers from 0.700 on (Vulkan 512.700; the Quest 3 runs 512.837)
+miscompile TEV stages that take a constant zero input: Dolphin's BUG_BROKEN_TEV_COLOR_ZERO (PR #14899,
+merged 2026-10-04), where Dolphin on the same headset shows the same wrong dungeon minimap and HUD
+buttons as the port. Dolphin replaces colour inputs A and B that are zero with a uniform that is
+always 0 (konstLookup[8]); a tester's Snapdragon 8s Gen 3 still showed the bug with that alone.
+
+- webgpu: g_adrenoTevZeroWorkaround, set from the adapter (PCI vendor 0x5143, or a device named
+  Adreno), logged once: "adreno TEV zero workaround: on|off (adapter ..., vendor ...)".
+- The GX uniform header gets tev_zero (a vec4f after xr_clip, always written as zeros: every GX
+  shader's layout, 16 bytes more per draw).
+- On Adreno every zero TEV input (colour and alpha, A, B, C and D, and a zero rasterised channel)
+  is ubuf.tev_zero instead of the constant, so the driver cannot fold it. C and D too: the miscompile's
+  cause is not known, a uniform read costs next to nothing, and the minimap's own alpha (ZERO, A0,
+  TEXA, ZERO) and the clipping squares' colour (ZERO, ZERO, ZERO, C0) take zeros in several places.
+- build_shader_source's and build_shader's hash take the flag (the source differs on Adreno).
+
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+index 4994ef2..e4899e5 100644
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -92,6 +92,14 @@ bool uses_texture_sample(const TevStage& stage) noexcept {
+          a.c == GX_CA_TEXA || a.d == GX_CA_TEXA;
+ }
+ 
++// Patch 0037: a TEV input that is zero (A, B, C or D, colour and alpha, and a zero rasterised channel). On
++// Adreno (webgpu::g_adrenoTevZeroWorkaround) read from the uniform buffer's tev_zero, always 0, so the
++// driver's compiler cannot fold it: Qualcomm's drivers 0.700 and later miscompile TEV stages with a
++// constant zero input (Dolphin's BUG_BROKEN_TEV_COLOR_ZERO, PR #14899, its colour A and B; a tester's
++// Snapdragon 8s Gen 3 still showed it there, so every zero input here, alpha's too: a uniform read each)
++std::string tev_zero3() { return webgpu::g_adrenoTevZeroWorkaround ? "ubuf.tev_zero.rgb" : "vec3f(0.0)"; }
++std::string tev_zero1() { return webgpu::g_adrenoTevZeroWorkaround ? "ubuf.tev_zero.a" : "0.0"; }
++
+ std::string color_arg_reg(GXTevColorArg arg, size_t stageIdx, const ShaderConfig& config, const TevStage& stage) {
+   switch (arg) {
+     DEFAULT_FATAL("invalid color arg {}", underlying(arg));
+@@ -132,7 +140,7 @@ std::string color_arg_reg(GXTevColorArg arg, size_t stageIdx, const ShaderConfig
+   case GX_CC_RASC: {
+     // CHECK(stage.channelId != GX_COLOR_NULL, "unmapped color channel for stage {}", stageIdx);
+     if (stage.channelId == GX_COLOR_ZERO || stage.channelId == GX_COLOR_NULL) {
+-      return "vec3f(0.0)";
++      return tev_zero3();
+     }
+     if (is_alpha_bump_channel(stage.channelId)) {
+       std::string alpha = alpha_bump_sel(stageIdx, config, stage);
+@@ -148,7 +156,7 @@ std::string color_arg_reg(GXTevColorArg arg, size_t stageIdx, const ShaderConfig
+   case GX_CC_RASA: {
+     // CHECK(stage.channelId != GX_COLOR_NULL, "unmapped color channel for stage {}", stageIdx);
+     if (stage.channelId == GX_COLOR_ZERO || stage.channelId == GX_COLOR_NULL) {
+-      return "vec3f(0.0)";
++      return tev_zero3();
+     }
+     if (is_alpha_bump_channel(stage.channelId)) {
+       std::string alpha = alpha_bump_sel(stageIdx, config, stage);
+@@ -227,7 +235,7 @@ std::string color_arg_reg(GXTevColorArg arg, size_t stageIdx, const ShaderConfig
+     }
+   }
+   case GX_CC_ZERO:
+-    return "vec3f(0.0)";
++    return tev_zero3();
+   }
+ }
+ 
+@@ -254,7 +262,7 @@ std::string alpha_arg_reg(GXTevAlphaArg arg, size_t stageIdx, const ShaderConfig
+   case GX_CA_RASA: {
+     // CHECK(stage.channelId != GX_COLOR_NULL, "unmapped color channel for stage {}", stageIdx);
+     if (stage.channelId == GX_COLOR_ZERO || stage.channelId == GX_COLOR_NULL) {
+-      return "0.0";
++      return tev_zero1();
+     }
+     if (is_alpha_bump_channel(stage.channelId)) {
+       std::string alpha = alpha_bump_sel(stageIdx, config, stage);
+@@ -321,7 +329,7 @@ std::string alpha_arg_reg(GXTevAlphaArg arg, size_t stageIdx, const ShaderConfig
+     }
+   }
+   case GX_CA_ZERO:
+-    return "0.0";
++    return tev_zero1();
+   }
+ }
+ 
+@@ -891,7 +899,9 @@ absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
+ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlphaMode,
+                                 uint32_t normalAttachment) noexcept {
+   ZoneScoped;
+-  const auto hash = xxh3_hash(dstAlphaMode, xxh3_hash(normalAttachment, xxh3_hash(config)));
++  // patch 0037: the TEV zero workaround changes the source (fixed for the run, the adapter's)
++  const auto hash = xxh3_hash(webgpu::g_adrenoTevZeroWorkaround,
++                              xxh3_hash(dstAlphaMode, xxh3_hash(normalAttachment, xxh3_hash(config))));
+   const auto info = build_shader_info(config);
+   if (EnableDebugPrints && !s_seenShaders.contains(hash)) {
+     s_seenShaders.insert(hash);
+@@ -2094,7 +2104,8 @@ struct Uniform {{
+     logical_viewport_size: vec2f,
+     xr_cut0: vec4f,
+     xr_cut1: vec4f,
+-    xr_clip: vec4f,{0}
++    xr_clip: vec4f,
++    tev_zero: vec4f,{0}
+ }};
+ @group(0) @binding(0)
+ var<storage, read> vbuf: array<u32>;
+@@ -2143,7 +2154,9 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
+     }
+   }
+   const auto shaderSource = build_shader_source(config, dstAlphaMode, normalAttachment);
+-  const auto hash = xxh3_hash(dstAlphaMode, xxh3_hash(normalAttachment, xxh3_hash(config)));
++  // patch 0037: the TEV zero workaround changes the source (fixed for the run, the adapter's)
++  const auto hash = xxh3_hash(webgpu::g_adrenoTevZeroWorkaround,
++                              xxh3_hash(dstAlphaMode, xxh3_hash(normalAttachment, xxh3_hash(config))));
+   wgpu::ShaderSourceWGSL wgslDescriptor{};
+   wgslDescriptor.code = shaderSource.c_str();
+   const auto label = fmt::format("GX Shader {:x}", hash);
+diff --git a/lib/gx/shader_info.cpp b/lib/gx/shader_info.cpp
+index 9dcc291..5b937d9 100644
+--- a/lib/gx/shader_info.cpp
++++ b/lib/gx/shader_info.cpp
+@@ -242,7 +242,8 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
+ 
+   ShaderInfo info{
+       // render/logical viewport size, proj
+-      .uniformSize = 8 + 8 + 48 + 64, // patch 0031: the see-through's two vec4f, the clip plane
++      // patch 0037: tev_zero's vec4f
++      .uniformSize = 8 + 8 + 48 + 16 + 64, // patch 0031: the see-through's two vec4f, the clip plane
+   };
+ 
+   if (config.lineMode != 0) {
+@@ -464,6 +465,10 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+       buf.append<f32>(v);
+     }
+   }
++  // patch 0037: tev_zero, always zero (the TEV's zeros on Adreno, read at run time)
++  for (int i = 0; i < 4; ++i) {
++    buf.append<f32>(0.f);
++  }
+   if (info.lineMode != 0) {
+     if (info.lineMode == 3) { // GX_POINTS
+       buf.append<f32>(static_cast<f32>(g_gxState.pointSize) / 6.f);
+diff --git a/lib/webgpu/gpu.cpp b/lib/webgpu/gpu.cpp
+index 6de1152..3f2abdd 100644
+--- a/lib/webgpu/gpu.cpp
++++ b/lib/webgpu/gpu.cpp
+@@ -68,6 +68,7 @@ wgpu::AdapterInfo g_adapterInfo;
+ static wgpu::SurfaceCapabilities g_surfaceCapabilities;
+ bool g_hasCoreFeatures = false;
+ bool g_dualSourceBlendingSupported = false;
++bool g_adrenoTevZeroWorkaround = false; // patch 0037
+ bool g_bcTexturesSupported = false;
+ bool g_astcTexturesSupported = false;
+ bool g_textureComponentSwizzleSupported = false;
+@@ -880,6 +881,14 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+   const auto backendName = magic_enum::enum_name(g_backendType);
+   Log.info("Graphics adapter information\n  API: {}\n  Device: {} ({})\n  Driver: {}", backendName, adapterName,
+            magic_enum::enum_name(g_adapterInfo.adapterType), description);
++  // patch 0037: Qualcomm (PCI vendor 0x5143) or an adapter named Adreno: the TEV zero workaround
++  {
++    const std::string_view name = adapterName.length == SIZE_MAX ? std::string_view{adapterName.data}
++                                                                 : std::string_view{adapterName.data, adapterName.length};
++    g_adrenoTevZeroWorkaround = g_adapterInfo.vendorID == 0x5143 || name.find("Adreno") != std::string_view::npos;
++    Log.info("adreno TEV zero workaround: {} (adapter {}, vendor {:#x})", g_adrenoTevZeroWorkaround ? "on" : "off",
++             name, g_adapterInfo.vendorID);
++  }
+ 
+   {
+     wgpu::Limits supportedLimits{};
+diff --git a/lib/webgpu/gpu.hpp b/lib/webgpu/gpu.hpp
+index a1ce5c0..c0f03fd 100644
+--- a/lib/webgpu/gpu.hpp
++++ b/lib/webgpu/gpu.hpp
+@@ -61,6 +61,10 @@ extern bool g_bcTexturesSupported;
+ extern bool g_astcTexturesSupported;
+ extern bool g_textureComponentSwizzleSupported;
+ extern bool g_dualSourceBlendingSupported;
++// WakerQuest patch 0037: Qualcomm Adreno's shader compiler (drivers 0.700 and later) miscompiles TEV
++// stages with a constant zero input (Dolphin's BUG_BROKEN_TEV_COLOR_ZERO, PR #14899): on Adreno the
++// GX shaders read their zeros from the uniform buffer (ubuf.tev_zero) instead
++extern bool g_adrenoTevZeroWorkaround;
+ 
+ bool initialize(AuroraBackend backend, bool allowCpu);
+ void shutdown();
