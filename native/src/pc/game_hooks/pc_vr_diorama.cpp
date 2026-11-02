@@ -664,11 +664,17 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     }
     // the Helmaroc King taking Aryll on Outset (a demo in the sea stage's room 44, the d_a_demo_dk or
     // d_a_dk actor): the bird too, in front of the player in the room (ambientPlace), the scene itself
-    // as it is
+    // as it is. 1.1.2: its demos in the Forsaken Fortress too (the stage names the game's own code
+    // tests: MajyuE outside, majroom/Majroom inside, Mjtower the tower, M2tower the tower's second
+    // visit), never while its fight's actor (BDK) is there
     bool king = false;
     if (!sAmbient.testLink && sAmbient.nActors < 16 && dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0) {
         const char* stage = dComIfGp_getStartStageName();
-        if (stage != nullptr && strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44) {
+        const bool outset = stage != nullptr && strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44;
+        const bool fortress = stage != nullptr && (strcmp(stage, "MajyuE") == 0 || strcmp(stage, "majroom") == 0 ||
+                                                   strcmp(stage, "Majroom") == 0 || strcmp(stage, "Mjtower") == 0 ||
+                                                   strcmp(stage, "M2tower") == 0);
+        if (outset || (fortress && fopAcM_SearchByName(fpcNm_BDK_e) == nullptr)) {
             fopAc_ac_c* bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e);
             if (bird == nullptr) bird = fopAcM_SearchByName(fpcNm_DK_e);
             if (bird != nullptr) {
@@ -678,9 +684,10 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
                 sAmbient.kinds[i] = 5;
                 sAmbient.pos[i][0] = bird->current.pos.x, sAmbient.pos[i][1] = bird->current.pos.y;
                 sAmbient.pos[i][2] = bird->current.pos.z;
-                static bool sLogged = false;
-                if (!sLogged) pc::writef(STDERR_FILENO, "[vr] ambient: the Helmaroc King in the room\n");
-                sLogged = true;
+                static char sLogged[8] = "";  // once per stage
+                if (strncmp(sLogged, stage, sizeof(sLogged)) != 0)
+                    pc::writef(STDERR_FILENO, "[vr] ambient: the Helmaroc King in the room (%s)\n", stage);
+                strncpy(sLogged, stage, sizeof(sLogged));
             }
         }
     }
