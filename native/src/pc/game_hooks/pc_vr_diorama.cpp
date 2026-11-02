@@ -673,7 +673,7 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     // tests: MajyuE outside, majroom/Majroom inside, Mjtower the tower, M2tower the tower's second
     // visit), never while its fight's actor (BDK) is there
     bool king = false;
-    if (!sAmbient.testLink && sAmbient.nActors < 16 && dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0) {
+    if (!sAmbient.testLink && sAmbient.nActors < 24 && dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0) {
         const char* stage = dComIfGp_getStartStageName();
         const bool outset = stage != nullptr && strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44;
         const bool fortress = stage != nullptr && (strcmp(stage, "MajyuE") == 0 || strcmp(stage, "majroom") == 0 ||
@@ -701,7 +701,7 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     // player like the Helmaroc King, while near Link (kGiantRange); the nearest of them. Not DR2 (Valoo in
     // Gohma's fight): its draw holds the room's floor and rocks too
     bool giant = false;
-    if (!sAmbient.testLink && sAmbient.nActors < 16) {
+    if (!sAmbient.testLink && sAmbient.nActors < 24) {  // after up to 16 small ones (1.1.2: not left out by them)
         fopAc_ac_c* best = nullptr;
         int bestKind = 0;
         float bestD = 0.0f;
@@ -1718,7 +1718,8 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
         float vx = r[0] - h[0], vz = r[2] - h[2];
         const float l = std::sqrt(vx * vx + vz * vz);
         if (l < 1e-3f) vx = 0.0f, vz = -1.0f;
-        const float ring = std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f) / std::max(l, 1e-3f);
+        // (vx, vz) is already a unit vector when right under the head (1.1.2: it was divided by 1e-3)
+        const float ring = std::clamp(0.6f + 0.05f * l, 0.6f, 1.6f) / (l < 1e-3f ? 1.0f : l);
         const float y = h[1] + 0.3f + std::clamp(0.05f * (r[1] - h[1]), 0.0f, 0.5f);
         d[0] = h[0] + vx * ring - r[0];
         d[1] = y - r[1];
@@ -1738,7 +1739,8 @@ void ambientPlace(int kind, const float p[3], float d[3]) {
         float vx = r[0] - h[0], vz = r[2] - h[2];
         const float l = std::sqrt(vx * vx + vz * vz);
         if (l < 1e-3f) vx = 0.0f, vz = -1.0f;
-        const float ring = std::clamp(0.5f + 0.1f * l, 0.5f, 1.5f) / std::max(l, 1e-3f);
+        // (vx, vz) is already a unit vector when right under the head (1.1.2: it was divided by 1e-3)
+        const float ring = std::clamp(0.5f + 0.1f * l, 0.5f, 1.5f) / (l < 1e-3f ? 1.0f : l);
         const float y = h[1] - 0.1f + std::clamp(0.1f * (r[1] - h[1]), -0.3f, 0.4f);
         d[0] = h[0] + vx * ring - r[0];
         d[1] = y - r[1];
