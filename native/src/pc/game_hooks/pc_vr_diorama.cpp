@@ -1129,6 +1129,9 @@ const float kSeeSoftEdge = 0.35f;     // of the radius, dithered at the cone's e
 // This frame's see-through and clip plane (the window's), put back after the ambience's draws
 f32 sSeeParams[8], sClipPlane[4];
 bool sSeeOn = false, sClipOn = false;
+// the window's pop-out volume (Aurora patch 0037, 1.1.5): its table from the head and the camera's depth
+f32 sPopClip[12], sPopDepth = 0.0f;
+bool sPopClipOn = false;
 
 void seeThrough(const M4& headFromWorld, const fopAc_ac_c* player, float radiusMetres, float k) {
     if (radiusMetres <= 0.0f || player == nullptr) return;  // off: Aurora turns it off every frame
@@ -1233,6 +1236,15 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
         AuroraSetClipPlane(plane);
         memcpy(sClipPlane, plane, sizeof(sClipPlane));
         sClipOn = true;
+        // ... and its sides (Aurora patch 0037, 1.1.5): what is in front of the window's plane outside the
+        // rectangle narrowing toward the game camera's eye (where the mask cuts it) is not drawn either, so
+        // the game behind it shows there, not the room in its shape (the branches beside the window)
+        if (popout > 0.0f) {
+            memcpy(sPopClip, tfh, sizeof(sPopClip));
+            sPopDepth = table.windowDepth;
+            AuroraSetPopoutClip(sPopClip, sPopDepth);
+            sPopClipOn = true;
+        }
     }
     // the sky's things built around the camera's eye: drawn as they are, beyond the window
     memcpy(s.skyDelta, s.delta, sizeof(s.skyDelta));
@@ -1321,7 +1333,7 @@ void logDemoStart() {
 
 bool pc_vr_view_begin(view_class* view) {
     s.on = false;
-    sSeeOn = sClipOn = false;
+    sSeeOn = sClipOn = sPopClipOn = false;
     WqXrTable table;
     wq_xr_table(&table);
     WqXrHead head;
@@ -1933,6 +1945,7 @@ void pc_vr_ambient_draw(void) {
     // the window's see-through and clip plane would cut the ambience: off meanwhile
     if (sSeeOn) AuroraSetSeeThrough(nullptr);
     if (sClipOn) AuroraSetClipPlane(nullptr);
+    if (sPopClipOn) AuroraSetPopoutClip(nullptr, 0.0f);
     AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
     AuroraSetAmbient(true);
     j3dSys.reinitGX();
@@ -2107,6 +2120,7 @@ void pc_vr_ambient_draw(void) {
     }
     if (sSeeOn) AuroraSetSeeThrough(sSeeParams);
     if (sClipOn) AuroraSetClipPlane(sClipPlane);
+    if (sPopClipOn) AuroraSetPopoutClip(sPopClip, sPopDepth);
 }
 
 #else

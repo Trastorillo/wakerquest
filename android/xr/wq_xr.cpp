@@ -122,7 +122,7 @@ struct Settings {
     // stereo_resolution for the giant screen in 3D, window_resolution for the window. Applied at start and again when the mode or
     // the 3D changes (pc_menu.cpp syncVrResolution); 0 = the headset window's own (4128x2208, too much).
     // -1 (a file without the key, older ones): resolution's. A fresh install's file has each (972, 918,
-    // 864 and 1620: the bubble sharper than the screen).
+    // 864 and 1188: the bubble sharper than the screen).
     int resolution = 972;         // 0.90 of 1080 lines (the menu's scale)
     int stereoResolution = -1;    // the 3D draws every frame twice: 918 (0.85) by default
     int windowResolution = -1;    // the window draws a wider view per eye: 864 (0.80) by default
@@ -196,7 +196,7 @@ struct Settings {
     float windowLift = 0.078f;    // the game camera raised in the window (m of the room; grips + left stick)
     float windowDepth = 0.1f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window (off: cut at its plane)
-    float windowPopout = 1.5f;     // m, how far
+    float windowPopout = 0.1f;     // m, how far
     float windowDrawDistance = 200.0f;  // the game's metres at scale 1 (more with window_scale): the sea's
                                         // horizon; farther actors and models are not drawn
     float npcDrawDistance = 20.0f;  // the game's metres from Link: the characters (NPC_*) farther are not
@@ -319,7 +319,7 @@ const char kDefaultSettings[] =
     "window_lift = 0.078\n"
     "window_depth = 0.1\n"
     "window_popout_on = 1\n"
-    "window_popout = 1.5\n"
+    "window_popout = 0.1\n"
     "window_draw_distance = 200\n"
     "window_hud_on = 0\n"
     "# the window's HUD where a grip on it put it: window_hud_pose (x, y, z in m in the window's space, yaw\n"

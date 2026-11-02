@@ -1,0 +1,193 @@
+XR window: what its mask cuts in front of its plane is not drawn (the pop-out volume as a clip)
+
+WakerQuest 1.1.5. The window's eyes are masked (patch 0030): in front of its plane only the rectangle
+narrowing toward the game camera's eye (the pop-out volume) shows. What the head's frustum draws there
+outside that volume (branches near the camera, beside the window) took the EFB's pixels and the mask cut
+them to alpha 0: the room showed through, in their shape, instead of the game behind them. Patch 0031's
+clip plane already keeps the pop-out's front; this adds its sides.
+
+- GX_AURORA_SET_POPOUT_CLIP / AuroraSetPopoutClip(tableFromView, depth): the window's table from the view
+  delta's target space (as the mask's, x and y within +-1, z in metres toward the player) and the game
+  camera's depth. Off at the end of each frame.
+- The GX uniform header gets xr_win (four vec4f: the table's rows, then the depth and 1 when on), written
+  as zeros when off or for draws the view delta does not apply to; MaxUniformSize grows by 64.
+- The fragment shader discards what is in front of the window's plane and outside the narrowing
+  rectangle, as the mask's test (stereo.cpp, its window branch).
+
+diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
+index fe518f0..994f23f 100644
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -143,6 +143,16 @@ extern "C" {
+  */
+ #define GX_AURORA_SET_AMBIENT 0x0054
+ 
++/**
++ * The window's pop-out volume (native/patches/aurora/0037): followed by a u8. 0 turns it off. 1 is followed
++ * by 13 f32: the window's table from the view delta's target space (row-major 3x4: x and y within +-1 over
++ * the window's rectangle, z in metres toward the player), then the game camera's depth in front of it
++ * (metres). While on, the fragments of a draw the view delta applies to that are in front of the window's
++ * plane but outside the rectangle narrowing toward the camera's eye are discarded: what the window's mask
++ * would cut there is not drawn, so what is behind it shows. Off at the end of each frame.
++ */
++#define GX_AURORA_SET_POPOUT_CLIP 0x0055
++
+ #define GX2_SET_POLYGON_OFFSET 0x1000
+ 
+ 
+@@ -239,6 +249,12 @@ void AuroraSetSeeThrough(const f32* params);
+  */
+ void AuroraSetClipPlane(const f32* plane);
+ 
++/**
++ * GX_AURORA_SET_POPOUT_CLIP, recorded in the command stream: the table (12 f32) and the camera's depth, or
++ * NULL to turn it off.
++ */
++void AuroraSetPopoutClip(const f32* tableFromView, f32 depth);
++
+ /**
+  * GX_AURORA_SET_AMBIENT, recorded in the command stream.
+  */
+diff --git a/lib/dolphin/gx/GXAurora.cpp b/lib/dolphin/gx/GXAurora.cpp
+index a042c2c..09914b5 100644
+--- a/lib/dolphin/gx/GXAurora.cpp
++++ b/lib/dolphin/gx/GXAurora.cpp
+@@ -136,6 +136,19 @@ void AuroraSetClipPlane(const f32* plane) {
+   }
+ }
+ 
++void AuroraSetPopoutClip(const f32* tableFromView, f32 depth) {
++  GX_WRITE_AURORA(GX_AURORA_SET_POPOUT_CLIP);
++  if (tableFromView == nullptr) {
++    GX_WRITE_U8(0);
++    return;
++  }
++  GX_WRITE_U8(1);
++  for (int i = 0; i < 12; ++i) {
++    GX_WRITE_F32(tableFromView[i]);
++  }
++  GX_WRITE_F32(depth);
++}
++
+ void AuroraSetAmbient(bool on) {
+   GX_WRITE_AURORA(GX_AURORA_SET_AMBIENT);
+   GX_WRITE_U8(on ? 1 : 0);
+diff --git a/lib/gx/command_processor.cpp b/lib/gx/command_processor.cpp
+index 947d52f..11c1077 100644
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -1177,6 +1177,19 @@ void handle_aurora(ByteReader& reader) noexcept {
+       g_gxState.dirty |= DirtyUniform;
+     }
+     g_gxState.ambient = on;
++  } else if (subCmd == GX_AURORA_SET_POPOUT_CLIP) {
++    // native/patches/aurora/0037: as the clip plane
++    auto& st = g_gxState.seeThrough;
++    const bool active = reader.read<u8>() != 0;
++    if (active) {
++      for (auto& v : st.popout) {
++        v = reader.read<f32>();
++      }
++    }
++    if (active || st.popoutActive) {
++      g_gxState.dirty |= DirtyUniform;
++    }
++    st.popoutActive = active;
+   } else if (subCmd == GX_AURORA_SET_CLIP_PLANE) {
+     // native/patches/aurora/0031: as the see-through
+     auto& st = g_gxState.seeThrough;
+@@ -1273,6 +1286,7 @@ void clear_draw_cache() noexcept {
+   g_gxState.viewDelta.active = false; // native/patches/aurora/0019: never past a frame
+   g_gxState.seeThrough.active = false; // native/patches/aurora/0031: nor the see-through
+   g_gxState.seeThrough.clipActive = false; // and the clip plane
++  g_gxState.seeThrough.popoutActive = false; // and the window's pop-out volume (patch 0037)
+   g_gxState.ambient = false; // native/patches/aurora/0034: nor the ambience's mark
+   sDrawCache.bindGeneration = 0;
+   sDrawCache.uniformRange = {};
+diff --git a/lib/gx/gx.hpp b/lib/gx/gx.hpp
+index b9c3faf..b39dfbf 100644
+--- a/lib/gx/gx.hpp
++++ b/lib/gx/gx.hpp
+@@ -66,7 +66,8 @@ constexpr u32 MaxIndTexMtxs = 3;
+ constexpr u32 MaxVtxFmt = GX_MAX_VTXFMT;
+ constexpr u32 MaxPnMtx = (GX_PNMTX9 / 3) + 1;
+ constexpr u32 MaxIndexAttr = 12; // VA_POS -> VA_TEX7
+-constexpr u32 MaxUniformSize = 3840 + 48; // patch 0031: the see-through and the clip plane
++// patch 0031: the see-through and the clip plane; patch 0037: the window's pop-out volume (4 vec4f)
++constexpr u32 MaxUniformSize = 3840 + 48 + 64;
+ constexpr u32 XfRegCount = 0x58; // 0x1000-0x1057
+ 
+ enum DirtyFlag : u8 {
+@@ -320,6 +321,8 @@ struct SeeThrough {
+   std::array<float, 8> params{};
+   bool clipActive = false; // the clip plane
+   std::array<float, 4> clip{};
++  bool popoutActive = false;  // patch 0037: the window's pop-out volume
++  std::array<float, 13> popout{};
+ };
+ 
+ struct GXState {
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+index 4994ef2..73a4a46 100644
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -1737,7 +1737,17 @@ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlph
+         "\n        let cut_noise = fract(52.9829189 * fract(dot(in.pos.xy, vec2f(0.06711056, 0.00583715))));"
+         "\n        if (cut_along > 0.0 && cut_side * cut_depth > cut_noise) { discard; }"
+         "\n    }"
+-        "\n    if (dot(ubuf.xr_clip.xyz, in.xr_pos) + ubuf.xr_clip.w > 0.0) { discard; }");
++        "\n    if (dot(ubuf.xr_clip.xyz, in.xr_pos) + ubuf.xr_clip.w > 0.0) { discard; }"
++        // patch 0037: the window's pop-out volume: in front of the window's plane, outside the rectangle
++        // narrowing toward the game camera's eye (what the window's mask cuts), not drawn
++        "\n    if (ubuf.xr_win[3].y > 0.0) {"
++        "\n        let win_p = vec4f(in.xr_pos, 1.0);"
++        "\n        let win_z = dot(ubuf.xr_win[2], win_p);"
++        "\n        if (win_z > 0.0) {"
++        "\n            let win_w = (ubuf.xr_win[3].x - win_z) / ubuf.xr_win[3].x;"
++        "\n            if (abs(dot(ubuf.xr_win[0], win_p)) > win_w || abs(dot(ubuf.xr_win[1], win_p)) > win_w) { discard; }"
++        "\n        }"
++        "\n    }");
+   }
+ 
+   // Draw census fragment counters (gfx/census.hpp): invocations, then the fragments that survived
+@@ -2094,7 +2104,8 @@ struct Uniform {{
+     logical_viewport_size: vec2f,
+     xr_cut0: vec4f,
+     xr_cut1: vec4f,
+-    xr_clip: vec4f,{0}
++    xr_clip: vec4f,
++    xr_win: array<vec4f, 4>,{0}
+ }};
+ @group(0) @binding(0)
+ var<storage, read> vbuf: array<u32>;
+diff --git a/lib/gx/shader_info.cpp b/lib/gx/shader_info.cpp
+index 9dcc291..2c9f092 100644
+--- a/lib/gx/shader_info.cpp
++++ b/lib/gx/shader_info.cpp
+@@ -242,7 +242,8 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
+ 
+   ShaderInfo info{
+       // render/logical viewport size, proj
+-      .uniformSize = 8 + 8 + 48 + 64, // patch 0031: the see-through's two vec4f, the clip plane
++      // patch 0031: the see-through's two vec4f, the clip plane; patch 0037: the pop-out volume's four
++      .uniformSize = 8 + 8 + 48 + 64 + 64,
+   };
+ 
+   if (config.lineMode != 0) {
+@@ -463,6 +464,16 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+     for (const f32 v : clip) {
+       buf.append<f32>(v);
+     }
++    // patch 0037: the window's pop-out volume (the table's three rows, then the camera's depth and 1 on)
++    std::array<f32, 16> win{};
++    if (viewDelta && g_gxState.seeThrough.popoutActive) {
++      std::copy(g_gxState.seeThrough.popout.begin(), g_gxState.seeThrough.popout.begin() + 13, win.begin());
++      win[12] = std::max(win[12], 1e-3f);
++      win[13] = 1.f;
++    }
++    for (const f32 v : win) {
++      buf.append<f32>(v);
++    }
+   }
+   if (info.lineMode != 0) {
+     if (info.lineMode == 3) { // GX_POINTS
