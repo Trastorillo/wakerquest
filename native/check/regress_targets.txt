@@ -226,7 +226,8 @@ event-sweep 0 --stage Pjavdou:0:1:8 --preset sailing --env COS_EVENT_SWEEP=64 --
 dmap 0 --stage M_NewD2:0:0
 # COS_SMOKE=sea-chart (issue #14): the sea chart's island check points (FmapDat.bin) were read in host order
 # (count 0) with char sectors (unsigned on ARM), so no sector found its island: every zoom showed an empty
-# sector, then Forsaken Fortress
+# sector, then Forsaken Fortress; issue #40: the charts' X marks (CmapDat.bin) too were read in host order
+# (count 0x3D000000, the salvage points' bytes swapped), so the marks were drawn off the chart or not at all
 sea-chart 0 --stage sea:44:206
 # COS_SMOKE=mail-sort (issue #19): the draw buffer merged the sorting game's letters, one material with
 # six images, by a hash slot the host's image addresses share, so a letter showed another letter's image
