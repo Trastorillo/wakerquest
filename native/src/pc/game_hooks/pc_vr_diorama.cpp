@@ -1894,11 +1894,15 @@ void pc_vr_ambient_draw(void) {
         dComIfGp_particle_draw(&info);
         pc_vr_ambient_jpa = 0;
         // the weather's rain, snow and spores or ash (dKankyo's packets, drawn around the camera's eye):
-        // around the player, 0.002 m per unit, while the game has them
-        const bool rain = g_env_light.mRainCount > 0 && g_env_light.mpRainPacket != nullptr;
-        const bool snow = g_env_light.mSnowCount > 0 && g_env_light.mpSnowPacket != nullptr;
-        const bool housi = g_env_light.mHousiCount > 0 && g_env_light.mpHousiPacket != nullptr;
-        const bool moya = g_env_light.mpMoyaPacket != nullptr && g_env_light.mpMoyaPacket->mCount > 0;
+        // around the player, 0.002 m per unit, while the game has them. 1.1.2: each only while its
+        // initialised flag is set, as the game's own draw checks it (d_kankyo_wether.cpp): the game
+        // deletes a packet when it ends without clearing its pointer
+        const bool rain = g_env_light.mbRainInitialized && g_env_light.mRainCount > 0 && g_env_light.mpRainPacket != nullptr;
+        const bool snow = g_env_light.mbSnowInitialized && g_env_light.mSnowCount > 0 && g_env_light.mpSnowPacket != nullptr;
+        const bool housi =
+            g_env_light.mbHousiInitialized && g_env_light.mHousiCount > 0 && g_env_light.mpHousiPacket != nullptr;
+        const bool moya = g_env_light.mMoyaInitialized && g_env_light.mpMoyaPacket != nullptr &&
+                          g_env_light.mpMoyaPacket->mCount > 0;
         if (sAmbient.placed && (rain || snow || housi || moya)) {
             // each its middle (dKy_set_eyevect_calc2's, as the game makes it: ahead of the camera's eye,
             // the rain 7 m and 6 m along its pitch, the snow 5 m, the spores or ash 8 m) at the player's head
