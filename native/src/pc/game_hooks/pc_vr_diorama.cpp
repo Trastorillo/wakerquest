@@ -576,7 +576,7 @@ int collectAmbient(void* actor, void*) {
 
 // The characters (an NPC_* process, or the NPC group) and the animals among the actors (the pigs) the
 // ambience takes too (1.0.7), within kPeopleRange of Link, the kMaxPeople nearest; never an enemy, nor the
-// giants (the Great Deku Tree, the street stalls); Princess Zelda too (1.1.2)
+// giants (the Great Deku Tree, the street stalls, Jabun since 1.1.2); Princess Zelda too (1.1.2)
 constexpr int kMaxPeople = 6;
 constexpr float kPeopleRange = 1000.0f;  // game units (10 m, the characters' draw distance's default)
 signed char sIsPerson[fpcNm_MAX_NUM_e];  // 0 unknown, 1 no, 2 yes
@@ -585,7 +585,7 @@ bool ambientPerson(fopAc_ac_c* ac) {
     const int name = fopAcM_GetName(ac);
     if (name < 0 || name >= fpcNm_MAX_NUM_e) return false;
     if (sIsPerson[name] == 0) {
-        const bool giant = name == fpcNm_NPC_DE1_e || name == fpcNm_NPC_ROTEN_e;
+        const bool giant = name == fpcNm_NPC_DE1_e || name == fpcNm_NPC_ROTEN_e || name == fpcNm_NPC_JB1_e;
         const bool person = fopAcM_GetGroup(ac) == fopAc_NPC_e || strncmp(pc::censusProcName(name), "NPC_", 4) == 0;
         // the pigs (the ENV group) and Princess Zelda (PZ, 1.1.2: not an NPC_ process) by name
         sIsPerson[name] = !giant && (person || name == fpcNm_KB_e || name == fpcNm_PZ_e) ? 2 : 1;
