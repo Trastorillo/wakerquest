@@ -105,6 +105,9 @@ int pc_vr_ambient_jpa_kept(unsigned short userId);
 /* The weather's spores (the Forbidden Woods' green and blue motes, dKyr_drawHousi): their size times
    this, and no shadows on the ground, while the painter draws them again for the room (1 elsewhere). */
 extern float pc_vr_housi_size;
+/* The moya mist (drawCloudShadow): its alpha times this, its sprites above their middle left out and
+   its rotation not moved, while the painter draws it again for the room (1 elsewhere; 1.1.2). */
+extern float pc_vr_moya_alpha;
 void pc_vr_ambient_draw(void);
 
 class J3DModel;

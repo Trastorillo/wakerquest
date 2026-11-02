@@ -5503,8 +5503,9 @@ void drawCloudShadow(Mtx drawMtx, u8** pImg) {
     MTXConcat(camMtx, rotMtx, camMtx);
     GXLoadPosMtxImm(drawMtx, GX_PNMTX0);
 #if TARGET_PC
-    // COS_FPS60_TEST's paint B (game_hooks.h): the rotation as paint A left it.
-    if (!pc_paint_is_extra())
+    // COS_FPS60_TEST's paint B (game_hooks.h): the rotation as paint A left it. WakerQuest: the
+    // room's ambience drawing it again (pc_vr_moya_alpha, pc_vr.h) leaves it too.
+    if (!pc_paint_is_extra() && pc_vr_moya_alpha == 1.0f)
 #endif
     {
     rot -= 1.5f;
@@ -5522,10 +5523,19 @@ void drawCloudShadow(Mtx drawMtx, u8** pImg) {
         f32 size = pPkt->mEff[i].mSize;
         if (pPkt->mEff[i].mAlpha <= 0.000001f)
             continue;
+#if TARGET_PC
+        // WakerQuest: in the room only the sprites below their middle (under the player's head)
+        if (pc_vr_moya_alpha != 1.0f && pPkt->mEff[i].mPos.y > 0.0f)
+            continue;
+#endif
 
         GXLoadTexObj(&texObj, GX_TEXMAP0);
 
+#if TARGET_PC
+        reg0.a = pPkt->mEff[i].mAlpha * 255.0f * pc_vr_moya_alpha;
+#else
         reg0.a = pPkt->mEff[i].mAlpha * 255.0f;
+#endif
         GXSetTevColor(GX_TEVREG0, reg0);
 
         p.x = pPkt->mEff[i].mBasePos.x + pPkt->mEff[i].mPos.x;
@@ -5578,7 +5588,11 @@ void drawCloudShadow(Mtx drawMtx, u8** pImg) {
 
 #if TARGET_PC
     };
-    pc_kyr_draw_mist(drawSprites);
+    // WakerQuest: the room's ambience into its own pass, never COS_MIST_LOWRES's target
+    if (pc_vr_moya_alpha != 1.0f)
+        drawSprites();
+    else
+        pc_kyr_draw_mist(drawSprites);
 #endif
     GXSetClipMode(GX_CLIP_ENABLE);
 #if VERSION > VERSION_JPN

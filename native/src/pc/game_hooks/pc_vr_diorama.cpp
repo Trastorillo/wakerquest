@@ -1778,6 +1778,8 @@ void ambientWindMid(const float eye[3], float out[3]) {
 }
 
 constexpr float kHousiSize = 3.0f;  // the spores in the room: their quads this many times as large
+constexpr float kMoyaAlpha = 0.4f;   // the moya mist in the room: its alpha this much of the game's
+constexpr float kMoyaLift = -0.6f;   // and its middle this far from the eyes (metres, below them)
 
 void pc_vr_ambient_draw(void) {
     // the painter runs after the game frame's counter has moved on (fapGm_Execute): the packets taken
@@ -1896,14 +1898,15 @@ void pc_vr_ambient_draw(void) {
         const bool rain = g_env_light.mRainCount > 0 && g_env_light.mpRainPacket != nullptr;
         const bool snow = g_env_light.mSnowCount > 0 && g_env_light.mpSnowPacket != nullptr;
         const bool housi = g_env_light.mHousiCount > 0 && g_env_light.mpHousiPacket != nullptr;
-        if (sAmbient.placed && (rain || snow || housi)) {
+        const bool moya = g_env_light.mpMoyaPacket != nullptr && g_env_light.mpMoyaPacket->mCount > 0;
+        if (sAmbient.placed && (rain || snow || housi || moya)) {
             // each its middle (dKy_set_eyevect_calc2's, as the game makes it: ahead of the camera's eye,
             // the rain 7 m and 6 m along its pitch, the snow 5 m, the spores or ash 8 m) at the player's head
-            auto centred = [&](float ahead, float up) {
+            auto centred = [&](float ahead, float up, float kw = 0.002f, float lift = 0.0f) {
                 const float mid[3] = {view->mLookat.mEye.x + look[0] * ahead, view->mLookat.mEye.y + look[1] * up,
                                       view->mLookat.mEye.z + look[2] * ahead};
                 Mtx d;
-                ambientCenteredDelta(mid, d, 0.002f);
+                ambientCenteredDelta(mid, d, kw, lift);
                 AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
                 j3dSys.reinitGX();
             };
@@ -1923,6 +1926,23 @@ void pc_vr_ambient_draw(void) {
                 pc_vr_housi_size = kHousiSize;
                 g_env_light.mpHousiPacket->draw();
                 pc_vr_housi_size = 1.0f;
+            }
+            if (moya) {
+                // the moya mist (1.1.2: dKankyo_cloud_Packet, drawCloudShadow): up to 100 sprites 8 m
+                // across, within 20 m of a middle 15 m ahead of the camera, no depth test. At the rain's
+                // scale it would fill the room: half of it (the sprites 0.8 m across, within 2 m), its
+                // middle kMoyaLift below the eyes and only the sprites under it (pc_vr_moya_alpha), at
+                // kMoyaAlpha of their alpha: a mist about the legs, not in front of the eyes
+                static bool sMoyaLogged = false;
+                if (!sMoyaLogged) {
+                    sMoyaLogged = true;
+                    pc::writef(STDERR_FILENO, "[vr] ambient: the mist (%d) in the room, below the head, %.0f%% alpha\n",
+                               (int)g_env_light.mpMoyaPacket->mCount, kMoyaAlpha * 100.0f);
+                }
+                centred(1500.0f, 1500.0f, 0.001f, kMoyaLift);
+                pc_vr_moya_alpha = kMoyaAlpha;
+                g_env_light.mpMoyaPacket->draw();
+                pc_vr_moya_alpha = 1.0f;
             }
             j3dSys.reinitGX();
             GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
