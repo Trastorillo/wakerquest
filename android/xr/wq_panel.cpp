@@ -228,11 +228,13 @@ const Item kWindow[] = {
      {"Si no, en paneles debajo y encima", "Else on panels below and above", "Sinon sur des panneaux dessous et dessus"},
      kSwitch},
     {kXr, "window_hud_scale", {"Tamaño del HUD", "HUD size", "Taille du HUD"},
-     {"O agárralo con los dos grips", "Or hold it with both grips", "Ou saisissez-le avec les deux grips"},
+     {"Grip + gatillo sobre el HUD lo mueve; con las dos manos, lo escala",
+      "Grip + trigger on the HUD moves it; with both hands, sizes it",
+      "Grip + gâchette sur le HUD le déplace ; à deux mains, le redimensionne"},
      kStepper, nullptr, 0, 0.2f, 5.0f, 0.1f, "%.1f"},
     {kAction, "reset_window_hud", {"Restablecer HUD", "Reset HUD", "Réinitialiser le HUD"},
-     {"A su sitio y tamaño (o grip + clic sobre él)", "Back to its place and size (or grip + click on it)",
-      "À sa place et sa taille (ou grip + clic dessus)"},
+     {"A su sitio y tamaño (o clic del stick mientras lo agarras)", "Back to its place and size (or stick click while holding it)",
+      "À sa place et sa taille (ou clic du stick en le tenant)"},
      kButton},
 };
 // the room's ambience (mode = pantalla, pc_vr_diorama.cpp): the game's seagulls, crabs and small birds

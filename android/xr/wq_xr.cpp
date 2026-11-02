@@ -77,7 +77,8 @@ void xrlog(const char* fmt, ...) {
     fflush(stderr);
 }
 
-float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
+// (1.1.4: a value that is not a number, a NaN or an infinity read from xr.ini, gives lo)
+float clampf(float v, float lo, float hi) { return !std::isfinite(v) ? lo : v < lo ? lo : v > hi ? hi : v; }
 
 // ---- Settings (<files>/user/xr.ini) --------------------------------------------------------------
 
@@ -781,6 +782,8 @@ struct Xr {
     float whFrom[4] = {0, 0, 0, 0}, whScale = 1.0f, whHeading = 0.0f, whSpan = 0.0f;
     XrVector3f whHand{};
     bool whClickWas = false;
+    bool grabWindow[2] = {false, false};  // the panel grab began in the window mode (the window's HUD)
+    bool whTrigHold[2] = {false, false};  // its trigger kept from the game until let go
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
@@ -1825,6 +1828,13 @@ void updatePad() {
                 // the world (not the C-stick meanwhile). Not the model while a special scene shows the
                 // window instead
                 updateGrips(gripL, gripR, stickClick, &c, &m);
+                // the trigger that holds the window's HUD (with its grip) is not the game's, until it is let
+                // go (no L or R, nor a click when it is), 1.1.4
+                for (int h = 0; h < 2; h++) {
+                    float& t = h == 0 ? l : r;
+                    if (s.whTrigHold[h] && !(s.grabbed[h] && s.grabWindow[h]) && t < 0.2f) s.whTrigHold[h] = false;
+                    if (s.whTrigHold[h]) t = 0.0f;
+                }
             }
         }
     }
@@ -2325,6 +2335,8 @@ int updatePanelRays(XrCompositionLayerQuad* out) {
     for (int h = 0; h < 2; h++) {
         XrVector3f o, d;
         if (!s.raySwapchain || !aimRay(h, &o, &d)) continue;
+        // the window's HUD covers the window: its ray only with the trigger held (grip + trigger takes it)
+        if (s.settings.window && !s.grabbed[h] && s.trig[h] <= 0.4f) continue;
         float t = 0.0f, best = 0.0f;
         if (s.hudShown && rayQuad(o, d, s.hudPanel, s.hudSize, &t)) best = t;
         if (s.dialogueShown && rayQuad(o, d, s.dialoguePanel, s.dialogueSize, &t) && (best == 0.0f || t < best)) best = t;
@@ -2456,21 +2468,25 @@ void saveScreen() {
     wq_xr_set("width", v);
 }
 
+void saveWindowHud() {
+    const Settings& st = s.settings;
+    char v[64];
+    snprintf(v, sizeof v, "%.3f,%.3f,%.3f,%.1f", st.windowHudPose[0], st.windowHudPose[1], st.windowHudPose[2],
+             st.windowHudPose[3]);
+    wq_xr_set("window_hud_pose", v);
+    snprintf(v, sizeof v, "%.2f", st.windowHudScale);
+    wq_xr_set("window_hud_scale", v);
+}
+
 // The window's HUD held by the grips on it (1.1.4; updateGrips takes the hands whose grip closed with
-// their ray or the hand on it): one hand moves it (its move in the window's own space) and turns it about
+// their trigger held and their ray or the hand on it: grip alone holds the window): one hand moves it (its move in the window's own space) and turns it about
 // the vertical (the hand's turn), both also size it (their distance); grip + the right stick's click puts
 // it back (where the window puts it, its size). Saved (window_hud_pose, window_hud_scale) when let go.
 void windowHudGrips(const XrSpaceLocation loc[2], const bool valid[2], bool click) {
     Settings& st = s.settings;
-    const int hands = (s.grabbed[0] == 1 && valid[0] ? 1 : 0) | (s.grabbed[1] == 1 && valid[1] ? 2 : 0);
-    auto save = [&]() {
-        char v[64];
-        snprintf(v, sizeof v, "%.3f,%.3f,%.3f,%.1f", st.windowHudPose[0], st.windowHudPose[1], st.windowHudPose[2],
-                 st.windowHudPose[3]);
-        wq_xr_set("window_hud_pose", v);
-        snprintf(v, sizeof v, "%.2f", st.windowHudScale);
-        wq_xr_set("window_hud_scale", v);
-    };
+    const int hands = (s.grabbed[0] == 1 && s.grabWindow[0] && valid[0] ? 1 : 0) |
+                      (s.grabbed[1] == 1 && s.grabWindow[1] && valid[1] ? 2 : 0);
+    auto save = [&]() { saveWindowHud(); };
     const XrVector3f a = loc[0].pose.position, b = loc[1].pose.position;
     const XrVector3f at = hands == 3 ? vscale(vadd(a, b), 0.5f) : hands == 1 ? a : b;
     const float heading = hands == 3 ? std::atan2(b.z - a.z, b.x - a.x)
@@ -2544,6 +2560,11 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         // the title began or ended with a grip held: what was held is no longer shown; the drag stops
         // unsaved (xr.ini read again: no values of the one mixed into the other's) and starts afresh
         s.flatWas = flat;
+        // a panel held: let go (the window's HUD saved first), 1.1.4
+        if (s.whHands) saveWindowHud();
+        s.whHands = 0;
+        s.grabbed[0] = s.grabbed[1] = 0;
+        s.grabWindow[0] = s.grabWindow[1] = false;
         if (s.dragHands || s.dragAmbient || s.stickScale) {
             s.dragHands = 0;
             s.dragging = s.dragAmbient = false;
@@ -2555,11 +2576,14 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     const float g[2] = {gripL, gripR};
     for (int h = 0; h < 2; h++) {
         const bool down = valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
-        // (the window's HUD too, 1.1.4: windowHudGrips moves it)
-        if (down && !s.gripDown[h] && (diorama || window)) {
+        // (the window's HUD too, 1.1.4: windowHudGrips moves it; there the grip takes it only with the
+        // trigger held, grip alone holding the window: the HUD over the window covers all of it)
+        if (down && !s.gripDown[h] && (diorama || (window && s.trig[h] > 0.6f))) {
             const int panel = panelUnderHand(h, loc[h].pose.position);
             if (panel) {
                 s.grabbed[h] = panel;
+                s.grabWindow[h] = window;
+                if (window) s.whTrigHold[h] = true;
                 s.grabHand[h] = loc[h].pose.position;
                 const float* from = panel == 1 ? st.hudPose : st.dialogueOffset;
                 for (int i = 0; i < 3; i++) s.grabOffset[h][i] = from[i];
@@ -2567,8 +2591,9 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
                 xrlog("grip: moving the %s", panel == 1 ? "HUD" : "dialogues");
             }
         }
-        if (!down && s.grabbed[h] && window) {
+        if (!down && s.grabbed[h] && s.grabWindow[h]) {
             s.grabbed[h] = 0;  // windowHudGrips saves it when no hand holds it
+            s.grabWindow[h] = false;
         } else if (!down && s.grabbed[h]) {
             char v[64];
             if (s.grabbed[h] == 1) {
@@ -2581,7 +2606,7 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             s.grabbed[h] = 0;
         }
         s.gripDown[h] = down;
-        if (s.grabbed[h] && valid[h] && !window) {
+        if (s.grabbed[h] && valid[h] && !s.grabWindow[h]) {
             const XrVector3f dp = vsub(loc[h].pose.position, s.grabHand[h]);
             float* to = s.grabbed[h] == 1 ? st.hudPose : st.dialogueOffset;
             to[0] = s.grabOffset[h][0] + dp.x;
@@ -2594,7 +2619,15 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             publishSettings();
         }
     }
-    if (window) windowHudGrips(loc, valid, click);
+    if (window) {
+        windowHudGrips(loc, valid, click);
+    } else if (s.whHands) {
+        // the mode left the window with its HUD held: saved, let go (1.1.4)
+        saveWindowHud();
+        s.whHands = 0;
+        for (int h = 0; h < 2; h++)
+            if (s.grabWindow[h]) s.grabbed[h] = 0, s.grabWindow[h] = false;
+    }
     const bool ambientHeld = !window && !diorama && ambient && st.ambientMove;
     // a hand's ray on the giant screen (a little beyond its edges)
     auto aimOnScreen = [&]() {
@@ -3514,7 +3547,8 @@ void runFrame() {
                 // (the frame says so: the window mode's, or a special scene's in any mode)
                 // the window: a dialogue's message box (the bottom of the 2D, as the diorama's) on a
                 // panel just above it, or the HUD on a panel just below it, as wide as the window and
-                // turned with it. Neither is taken by a grip (a grip takes the window).
+                // turned with it. The HUD is taken by a grip with its trigger held (1.1.4: window_hud_pose,
+                // window_hud_scale); a grip alone takes the window, the dialogues' panel is not taken.
                 const float hh = 0.5f * st.windowWidth * 9.0f / 16.0f;
                 hud.pose.orientation = windowPose(st).orientation;
                 // the HUD where the window puts it (x, y, z in its space, w x h), then moved, turned and
