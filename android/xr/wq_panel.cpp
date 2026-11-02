@@ -160,8 +160,9 @@ const Item kScreen[] = {
     {kXr, "stereo_focus", {"Salir de la pantalla", "Out of the screen", "Sortir de l'écran"},
      {"Más = lo cercano sale hacia ti", "More = near things come out at you", "Plus = le proche sort vers vous"},
      kStepper, nullptr, 0, 50.0f, 2500.0f, 100.0f, "%.0f"},
-    {kXr, "cine_3d", {"3D intenso en cinemáticas", "Stronger 3D in cutscenes", "3D intense en cinématiques"},
-     {"Más profundidad en las escenas", "More depth in the scenes", "Plus de profondeur dans les scènes"}, kSwitch},
+    {kXr, "cine_3d", {"3D intenso con el Helmaroc", "Stronger 3D with the Helmaroc King", "3D intense avec le Roi Cuirassé"},
+     {"Sale de la pantalla en sus escenas", "It comes out of the screen in its scenes", "Il sort de l'écran dans ses scènes"},
+     kSwitch},
 };
 // the diorama (mode = maqueta): the bubble or the table, its birds, the hole around Link
 const Item kDiorama[] = {

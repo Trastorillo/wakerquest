@@ -135,6 +135,10 @@ void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue);
 // The game, every frame (pc_vr_diorama.cpp): an event (a cutscene) runs; the giant screen's 3D is
 // stronger meanwhile (cine_3d).
 void wq_xr_set_cinematic(bool cinematic);
+// The game, every frame (pc_vr_diorama.cpp, 1.1.3): a cutscene or a dialogue (the giant screen's 3D keeps
+// everything behind its plane meanwhile), the Helmaroc King's demo (coming out instead, cine_3d), and the
+// view depth of the nearest character the camera sees (game units, 0 none).
+void wq_xr_set_scene_3d(bool scene, bool king, float nearest);
 // The game, every frame (pc_vr_diorama.cpp): a special scene plays, drawn through the window whatever the
 // mode (its frames are window frames: the HUD over the window, the room around it).
 void wq_xr_set_special(bool special);

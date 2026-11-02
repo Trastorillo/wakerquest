@@ -258,7 +258,8 @@ const char kDefaultSettings[] =
     "gpu_boost = 0\n"
     "cpu_low = 0\n"
     "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.1),\n"
-    "# stereo_focus = the distance in the game that stays on the screen (50-2500); cine_3d 1 = more in cutscenes.\n"
+    "# stereo_focus = the distance in the game that stays on the screen (50-2500); in cutscenes and dialogues\n"
+    "# everything stays behind the screen; cine_3d 1 = more 3D, coming out, in the Helmaroc King's scenes.\n"
     "stereo = 1\n"
     "stereo_strength = 0.088\n"
     "stereo_focus = 50\n"
@@ -863,6 +864,10 @@ bool hasExtension(const std::vector<XrExtensionProperties>& exts, const char* na
 
 std::atomic_bool s_settingsDirty{false};  // wq_xr_set wrote the file: read it now
 std::atomic_bool s_cinematic{false};       // wq_xr_set_cinematic: the game runs an event (a cutscene)
+// wq_xr_set_scene_3d (1.1.3): a cutscene or a dialogue, the Helmaroc King's demo, and the depth (game units)
+// of the nearest character in the camera's view (0: none)
+std::atomic_bool s_scene{false}, s_sceneKing{false};
+std::atomic<float> s_sceneNear{0.0f};
 std::atomic_bool s_special{false};         // wq_xr_set_special: a special scene, through the window
 std::atomic_bool s_talk{false};            // wq_xr_set_talk: the bubble closes in on who talks
 std::atomic<float> s_gpuBusy{-1.0f};        // wq_xr_gpu_busy (pollGpuBusy)
@@ -3230,9 +3235,16 @@ XrQuaternionf facingPlayer(XrVector3f at) {
 }
 
 // The giant screen's 3D (the diorama sets its own eye shift every frame, pc_vr_diorama.cpp): the
-// settings', with more depth behind the screen (x1.6, the same plane) during
-// cutscenes (cine_3d), faded in and out over half a second. None during the title's flat screen
-// (intro_2d), whatever stereo says.
+// settings', clip.x += eye * strength * (w - focus), what is nearer than focus (w, game units) coming out
+// of the screen. None during the title's flat screen (intro_2d), whatever stereo says.
+// 1.1.3: in cutscenes and dialogues (wq_xr_set_scene_3d) everything stays behind the screen's plane: the
+// focus no farther than the nearest character in the camera's view, the strength the settings' (they came
+// out and were cut by the screen's edge). The Helmaroc King's demos (Outset, the Forsaken Fortress) keep
+// coming out, stronger (cine_3d, x1.6), but the nearest character no more than a third of the focus in
+// front of the screen (focus at most 1.5 times its depth), so what comes out stays modest and less of it
+// crosses the frame's edge. The focus eases (half-life 0.25 s), the strength over half a second.
+float s_sceneFocus = 0.0f;  // the focus in effect (0: none yet)
+int s_sceneLogged = 0;      // the last mode logged: 0 the game, 1 behind the screen, 2 the Helmaroc King
 void updateScreenStereo() {
     const Settings& st = s.settings;
     if ((st.diorama || st.window || s_special.load()) && s.dioramaFrame) {
@@ -3240,10 +3252,26 @@ void updateScreenStereo() {
         return;
     }
     const float dt = s.settings.refresh > 0 ? 1.0f / float(s.settings.refresh) : 1.0f / 90.0f;
-    const float want = st.cine3d && s_cinematic.load() ? 1.0f : 0.0f;
+    const bool scene = s_scene.load(), king = scene && s_sceneKing.load();
+    const float nearW = s_sceneNear.load();
+    const float want = st.cine3d && king ? 1.0f : 0.0f;
     s_cineRamp += clampf(want - s_cineRamp, -dt / 0.5f, dt / 0.5f);
     const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.10f);
-    const float focus = clampf(st.stereoFocus, 1.0f, 2500.0f);  // the same plane: more depth behind it
+    const float userFocus = clampf(st.stereoFocus, 1.0f, 2500.0f);
+    float target = userFocus;
+    if (scene && nearW > 0.0f) target = std::min(userFocus, (king ? 1.5f : 1.0f) * nearW);
+    target = std::max(target, 20.0f);
+    if (s_sceneFocus <= 0.0f) s_sceneFocus = userFocus;
+    s_sceneFocus = target + (s_sceneFocus - target) * std::exp2(-dt / 0.25f);
+    const float focus = clampf(s_sceneFocus, 1.0f, 2500.0f);
+    const int mode = king ? 2 : scene ? 1 : 0;
+    if (mode != s_sceneLogged && st.stereo) {
+        s_sceneLogged = mode;
+        xrlog("cinematic 3D: focus %.0f, strength %.3f (%s)", target,
+              clampf(st.stereoStrength * (st.cine3d && king ? 1.6f : 1.0f), 0.0f, 0.10f),
+              mode == 2 ? "the Helmaroc King: coming out, at most a third of the focus"
+              : mode == 1 ? "a cutscene or a dialogue: everything behind the screen" : "the game");
+    }
     const bool stereo = st.stereo && !s_introFlat.load();
     const float on = stereo ? 1.0f : 0.0f;
     if (on == s_stereoApplied[0] && std::fabs(strength - s_stereoApplied[1]) < 1e-5f &&
@@ -3742,6 +3770,12 @@ extern "C" void wq_xr_set_camera_heading(float heading, bool rotate, bool dialog
 }
 
 extern "C" void wq_xr_set_cinematic(bool cinematic) { s_cinematic.store(cinematic); }
+
+extern "C" void wq_xr_set_scene_3d(bool scene, bool king, float nearest) {
+    s_scene.store(scene);
+    s_sceneKing.store(king);
+    s_sceneNear.store(nearest);
+}
 
 extern "C" void wq_xr_set_special(bool special) {
     s_special.store(special);  // logged by the game ("[vr] special scene")

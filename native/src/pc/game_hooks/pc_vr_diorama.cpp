@@ -584,6 +584,24 @@ int collectAmbient(void* actor, void*) {
 constexpr int kMaxPeople = 6;
 constexpr float kPeopleRange = 1000.0f;  // game units (10 m, the characters' draw distance's default)
 signed char sIsPerson[fpcNm_MAX_NUM_e];  // 0 unknown, 1 no, 2 yes
+// The Helmaroc King in one of its demos (1.1.3, shared by the ambience, the special scene and the giant
+// screen's 3D): a demo playing on Outset (the sea stage's room 44) or in the Forsaken Fortress (the stage
+// names the game's own code tests: MajyuE outside, majroom/Majroom inside, Mjtower the tower, M2tower its
+// second visit), never while its fight's actor (BDK) is there; the bird DEMO_DK (made for its demos), or
+// DK while the demo moves it (its demo actor: Outset's DK may be there before the bird's own demo)
+fopAc_ac_c* helmarocInDemo() {
+    if (dComIfGp_demo_get() == nullptr || dComIfGp_demo_mode() == 0) return nullptr;
+    const char* stage = dComIfGp_getStartStageName();
+    if (stage == nullptr) return nullptr;
+    const bool outset = strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44;
+    const bool fortress = strcmp(stage, "MajyuE") == 0 || strcmp(stage, "majroom") == 0 ||
+                          strcmp(stage, "Majroom") == 0 || strcmp(stage, "Mjtower") == 0 || strcmp(stage, "M2tower") == 0;
+    if (!outset && !(fortress && fopAcM_SearchByName(fpcNm_BDK_e) == nullptr)) return nullptr;
+    if (fopAc_ac_c* bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e)) return bird;
+    fopAc_ac_c* bird = fopAcM_SearchByName(fpcNm_DK_e);
+    return bird != nullptr && dComIfGp_demo_getActor(bird->demoActorID) != nullptr ? bird : nullptr;
+}
+
 bool ambientPerson(fopAc_ac_c* ac) {
     if (fopAcM_GetGroup(ac) == fopAc_ENEMY_e || fopAcM_GetGroup(ac) == fopAc_PLAYER_e) return false;
     const int name = fopAcM_GetName(ac);
@@ -674,16 +692,12 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     // as it is. 1.1.2: its demos in the Forsaken Fortress too (the stage names the game's own code
     // tests: MajyuE outside, majroom/Majroom inside, Mjtower the tower, M2tower the tower's second
     // visit), never while its fight's actor (BDK) is there
+    // (helmarocInDemo, 1.1.3)
     bool king = false;
-    if (!sAmbient.testLink && sAmbient.nActors < 24 && dComIfGp_demo_get() != nullptr && dComIfGp_demo_mode() != 0) {
+    if (!sAmbient.testLink && sAmbient.nActors < 24) {
         const char* stage = dComIfGp_getStartStageName();
-        const bool outset = stage != nullptr && strcmp(stage, "sea") == 0 && dComIfGp_roomControl_getStayNo() == 44;
-        const bool fortress = stage != nullptr && (strcmp(stage, "MajyuE") == 0 || strcmp(stage, "majroom") == 0 ||
-                                                   strcmp(stage, "Majroom") == 0 || strcmp(stage, "Mjtower") == 0 ||
-                                                   strcmp(stage, "M2tower") == 0);
-        if (outset || (fortress && fopAcM_SearchByName(fpcNm_BDK_e) == nullptr)) {
-            fopAc_ac_c* bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e);
-            if (bird == nullptr) bird = fopAcM_SearchByName(fpcNm_DK_e);
+        {
+            fopAc_ac_c* bird = helmarocInDemo();
             if (bird != nullptr) {
                 king = true;
                 const int i = sAmbient.nActors++;
@@ -1220,6 +1234,43 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
 
 // A demo starting: which one (the stage, the room, the running event's name), for the special scenes
 // to come.
+// The giant screen's 3D in cutscenes and dialogues (1.1.3, wq_xr_set_scene_3d): the view depth (game units)
+// of the nearest character the camera sees, Link, the characters and animals the ambience takes, the
+// enemies, minus a margin for their size (kSceneMargin): the screen's focus goes no farther, so nothing
+// comes out of the screen. The camera's own target too (what it looks at).
+constexpr float kSceneMargin = 60.0f;
+struct SceneNear {
+    const view_class* view;
+    float near;
+};
+int collectSceneNear(void* actor, void* user) {
+    fopAc_ac_c* ac = (fopAc_ac_c*)actor;
+    SceneNear& sn = *(SceneNear*)user;
+    const int group = fopAcM_GetGroup(ac);
+    if (group != fopAc_PLAYER_e && group != fopAc_ENEMY_e && !ambientPerson(ac)) return 1;
+    const Mtx& v = sn.view->mViewMtx;
+    const cXyz& p = ac->current.pos;
+    const float vx = v[0][0] * p.x + v[0][1] * p.y + v[0][2] * p.z + v[0][3];
+    const float vy = v[1][0] * p.x + v[1][1] * p.y + v[1][2] * p.z + v[1][3] + 50.0f;  // about its middle
+    const float d = -(v[2][0] * p.x + v[2][1] * p.y + v[2][2] * p.z + v[2][3]);
+    if (d <= 1.0f) return 1;
+    // in the camera's frame (a little beyond its edges: what crosses them counts)
+    const float px = sn.view->mProjMtx[0][0], py = sn.view->mProjMtx[1][1];
+    if (std::fabs(px * vx / d) > 1.2f || std::fabs(py * vy / d) > 1.2f) return 1;
+    const float n = d - kSceneMargin;
+    if (n > 0.0f && (sn.near == 0.0f || n < sn.near)) sn.near = n;
+    return 1;
+}
+float sceneNearest(const view_class* view) {
+    SceneNear sn{view, 0.0f};
+    fopAcIt_Executor(collectSceneNear, &sn);
+    const float lx = view->mLookat.mCenter.x - view->mLookat.mEye.x, ly = view->mLookat.mCenter.y - view->mLookat.mEye.y,
+                lz = view->mLookat.mCenter.z - view->mLookat.mEye.z;
+    const float target = std::sqrt(lx * lx + ly * ly + lz * lz) - kSceneMargin;
+    if (target > 0.0f && (sn.near == 0.0f || target < sn.near)) sn.near = target;
+    return sn.near;
+}
+
 void logDemoStart() {
     dEvt_control_c* evt = g_dComIfG_gameInfo.play.getEvent();
     dEvent_manager_c& mng = g_dComIfG_gameInfo.play.getEvtManager();
@@ -1264,12 +1315,28 @@ bool pc_vr_view_begin(view_class* view) {
     // player. Over cine_screen and auto_screen while it plays; the mode as it was after it.
     // (on Outset alone: the sea stage's room 44; the bird's other demos, in the Forsaken Fortress, stay
     // as they are)
+    // (1.1.3: the bird while its demo moves it, helmarocInDemo: Outset's other demos, Aryll's talk on the
+    // lookout among them, are not the special scene)
     const char* stageName = dComIfGp_getStartStageName();
     fopAc_ac_c* bird = nullptr;
-    if (cutscene && table.specialScenes && stageName != nullptr && strcmp(stageName, "sea") == 0 &&
-        dComIfGp_roomControl_getStayNo() == 44) {
-        bird = fopAcM_SearchByName(fpcNm_DEMO_DK_e);
-        if (bird == nullptr) bird = fopAcM_SearchByName(fpcNm_DK_e);
+    fopAc_ac_c* kingNow = cutscene ? helmarocInDemo() : nullptr;
+    if (kingNow != nullptr && table.specialScenes && stageName != nullptr && strcmp(stageName, "sea") == 0)
+        bird = kingNow;
+    // the giant screen's 3D (1.1.3): in a cutscene or a dialogue everything behind the screen, but the
+    // Helmaroc King's demos come out (wq_xr.cpp's updateScreenStereo)
+    const bool scene3d = cutscene || dComIfGp_getMesgStatus() != 0;
+    wq_xr_set_scene_3d(scene3d, kingNow != nullptr, scene3d && view != nullptr ? sceneNearest(view) : 0.0f);
+    // the window's pop-out (window_popout) eased to none meanwhile, so what the camera holds close stays
+    // behind the window instead of coming out cut by its edges (half a second; the Helmaroc King's
+    // demos keep it)
+    static float sPopK = 1.0f;
+    static uint64_t sPopNs = 0;
+    {
+        const uint64_t now = nowNs();
+        const float dt = sPopNs != 0 ? std::min(0.1f, (float)((now - sPopNs) * 1e-9)) : 0.0f;
+        sPopNs = now;
+        const float wantK = scene3d && kingNow == nullptr ? 0.0f : 1.0f;
+        sPopK += std::clamp(wantK - sPopK, -dt / 0.5f, dt / 0.5f);
     }
     const bool specialScene = bird != nullptr && (table.specialWindow || table.diorama);
     const bool special = specialScene && table.specialWindow;       // through the window
@@ -1360,7 +1427,9 @@ bool pc_vr_view_begin(view_class* view) {
             if (!table.window) w.windowLift = 0.0f;  // the window's camera height only in the window mode
             return windowBegin(view, w, head, player);
         }
-        return windowBegin(view, table, head, player);
+        WqXrTable w = table;
+        w.windowPopout *= sPopK;
+        return windowBegin(view, w, head, player);
     }
     if (s.window) {
         s.window = false;
