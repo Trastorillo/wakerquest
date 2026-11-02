@@ -19,6 +19,9 @@ logo-res 0
 opening 0
 title-stage 0
 title 0
+# issue #39: a pipeline cache holding the frozen Mothula's GX pipeline (a stage reading an ungenerated
+# texture coordinate) aborted Aurora's warm-up at every start; Aurora patch 0023 resolves the stage
+title 0 --pipeline-cache native/check/pipeline-cache/frozen-mothula.sql
 file-select 0 --input native/check/input/file-select.txt
 
 # smoke tests and format sweeps
