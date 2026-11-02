@@ -18,6 +18,25 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra apretando el stick izquierdo (L3).
 
+### Novedades de la 1.1.5
+
+- **Modo ventana:** el HUD se mueve y se escala aparte de la ventana (grip + gatillo apuntando al HUD, o el
+  interruptor *Mover el HUD con los grips* en la pestaña Ventana; *Restablecer HUD* lo devuelve a su sitio).
+  Lo que sale de la ventana ya no deja ver la habitación a través: detrás se ve el juego.
+- **Cinemáticas y diálogos** en 3D sin salirse de la pantalla (se ajusta al personaje más cercano); el 3D
+  intenso queda para las escenas del Helmaroc.
+- **Ambiente en la habitación:** la luciérnaga del bosque, la princesa Zelda, el Helmaroc también en la
+  Fortaleza, la Gran Hada y Valú en pequeño, la niebla por debajo de la cabeza y los objetos que recibes.
+  Jabun ya no sale (es demasiado grande).
+- **Grips en modo pantalla con *Mover el ambiente*:** si apuntas a la pantalla se mueve la pantalla; si no, el
+  ambiente.
+- **Arreglos traídos de SwitchWaker:** el cuelgue al congelar un Mothula con flechas de hielo (que luego colgaba
+  cada arranque), los shaders guardados en cuanto se compilan, los cañones del Arrecife del Ojo y las X de las
+  cartas.
+- **Valores por defecto nuevos** (solo instalaciones nuevas): arranca en ventana, con una configuración probada
+  en Quest 3; la opción *Ventana* también está en el menú de opciones del juego.
+- Pendiente: el minimapa de las mazmorras se ve corrupto en las Quest (también en Dolphin del Quest).
+
 ### Novedades de la 1.1.1
 
 - **Sin vibración ni tirones:** la imagen de las gafas ya no espera a que el juego termine de pintar; aunque el
@@ -55,7 +74,7 @@ de tu propia ISO cada vez que arranca.
 WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
 native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,
 stereo, the room's ambience around the player. Its work lives in `android/` (the APK and the headset
-layer, `android/xr/`), Aurora patches 0023-0035 in `native/patches/aurora/`, and a few hooks under
+layer, `android/xr/`), Aurora patches 0023-0037 in `native/patches/aurora/`, and a few hooks under
 `native/src/pc/`; see [android/README.md](android/README.md) to build it.
 
 It keeps SwitchWaker's history and license (MIT, `LICENSE`; third-party terms in `THIRD_PARTY.md`).
