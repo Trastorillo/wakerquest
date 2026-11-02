@@ -600,11 +600,13 @@ struct PersonPick {
     fopAc_ac_c* ac[kMaxPeople];
     float d[kMaxPeople];
     int n;
+    bool noZelda;  // Ganondorf's fight (1.1.2): Princess Zelda left out
 };
 int collectPeople(void* actor, void* user) {
     fopAc_ac_c* ac = (fopAc_ac_c*)actor;
     PersonPick& pick = *(PersonPick*)user;
     if (!ambientPerson(ac)) return 1;
+    if (pick.noZelda && fopAcM_GetName(ac) == fpcNm_PZ_e) return 1;
     const float d = (ac->current.pos - sAmbient.link).abs();
     if (d > kPeopleRange) return 1;
     sAmbient.nPeople++;
@@ -736,6 +738,10 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
     sAmbient.nPeople = 0;
     if (!sAmbient.testLink) {
         PersonPick pick{};
+        // Princess Zelda (PZ) fights beside Link against Ganondorf at the top of his tower: not while
+        // Ganondorf's fight actor (GND) is there, so the room keeps the fight on the screen. Puppet
+        // Ganon's fights (BGN, BGN2, BGN3) have no PZ near Link
+        pick.noZelda = fopAcM_SearchByName(fpcNm_GND_e) != nullptr;
         fopAcIt_Executor(collectPeople, &pick);
         for (int j = 0; j < pick.n && sAmbient.nActors < 24; j++) {
             const int i = sAmbient.nActors++;
