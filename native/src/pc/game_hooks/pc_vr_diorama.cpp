@@ -497,7 +497,8 @@ struct Ambient {
     // then the nearest characters and animals (kMaxPeople)
     const void* actors[24];
     int kinds[24];                      // ambientKind's, -1 for Link (the test), 5 the Helmaroc King,
-                                        // 6 a character or an animal (ambientPerson), 7 a forest firefly
+                                        // 6 a character or an animal (ambientPerson), 7 a forest firefly,
+                                        // 8 the Great Fairy, 9 Valoo (ambientGiant)
     float pos[24][3];                   // where they are (the world)
     unsigned nPeople = 0;               // the characters and animals near Link (the log's)
     // anchored in the room: the world to the room (stage space) and the head's, for the painter's
@@ -509,6 +510,9 @@ struct Ambient {
     // the Helmaroc King's place in the room, taken in front of the head when it first shows
     bool kingPlaced = false;
     float kingAt[3] = {0, 0, 0};
+    // the Great Fairy's or Valoo's (1.1.2), the same way: in front of the head when it first shows
+    bool giantPlaced = false;
+    float giantAt[3] = {0, 0, 0};
     float windYaw = 0.0f, k = 0.0f;
     // the game camera's heading this frame (1.0.8: the particles, the characters and the Helmaroc King
     // turned with it) and the hand's move, turn and size (ambient_move) about the anchor
@@ -692,6 +696,41 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         }
     }
     if (!king) sAmbient.kingPlaced = false;  // its place taken again when it shows next
+    // the Great Fairy (BIGELF) and Valoo (DR, on Dragon Roost's peak), 1.1.2: small, in front of the
+    // player like the Helmaroc King, while near Link (kGiantRange); the nearest of them. Not DR2 (Valoo in
+    // Gohma's fight): its draw holds the room's floor and rocks too
+    bool giant = false;
+    if (!sAmbient.testLink && sAmbient.nActors < 16) {
+        fopAc_ac_c* best = nullptr;
+        int bestKind = 0;
+        float bestD = 0.0f;
+        const struct {
+            s16 name;
+            int kind;
+            float range;  // game units from Link
+        } kGiants[] = {{fpcNm_BIGELF_e, 8, 3000.0f}, {fpcNm_DR_e, 9, 6000.0f}};
+        for (const auto& g : kGiants) {
+            fopAc_ac_c* ac = fopAcM_SearchByName(g.name);
+            if (ac == nullptr) continue;
+            const float d = (ac->current.pos - sAmbient.link).abs();
+            if (d > g.range || (best != nullptr && d >= bestD)) continue;
+            best = ac, bestKind = g.kind, bestD = d;
+        }
+        if (best != nullptr) {
+            giant = true;
+            const int i = sAmbient.nActors++;
+            sAmbient.actors[i] = best;
+            sAmbient.kinds[i] = bestKind;
+            sAmbient.pos[i][0] = best->current.pos.x, sAmbient.pos[i][1] = best->current.pos.y;
+            sAmbient.pos[i][2] = best->current.pos.z;
+            static int sLogged = 0;
+            if (sLogged != bestKind)
+                pc::writef(STDERR_FILENO, "[vr] ambient: %s in the room, %.0f units from Link\n",
+                           bestKind == 8 ? "the Great Fairy" : "Valoo", bestD);
+            sLogged = bestKind;
+        }
+    }
+    if (!giant) sAmbient.giantPlaced = false;
     // the characters and animals near Link, on the room's floor (ambientPlace)
     sAmbient.nPeople = 0;
     if (!sAmbient.testLink) {
@@ -1566,6 +1605,13 @@ const float kHelmarocSize = 0.12f;
 // the forest fireflies (1.1.2): twice the ambience's size (the game's model is some 10 units across,
 // 3 cm at 0.35; without its halo it would hardly be seen)
 const float kFireflySize = 0.7f;
+// the Great Fairy (some 1 m tall in the room) and Valoo (some 1.5 m long), 1.1.2
+const float kBigelfSize = 0.10f;
+const float kValooSize = 0.06f;
+float ambientFacingSize(int kind) {
+    return kind == 5 ? kHelmarocSize : kind == 8 ? kBigelfSize : kind == 9 ? kValooSize : kAmbientSize;
+}
+bool ambientFacing(int kind) { return kind == 5 || kind == 6 || kind == 8 || kind == 9; }
 
 void ambientDelta(const float p[3], const float d[3], Mtx out, float size = kAmbientSize) {
     // moved by d, sized `size` about where it lands
@@ -1609,6 +1655,20 @@ void ambientFacingAt(int kind, const float p[3], float at[3]) {
             sAmbient.kingPlaced = true;
         }
         memcpy(at, sAmbient.kingAt, sizeof(sAmbient.kingAt));
+        return;
+    }
+    if (kind == 8 || kind == 9) {
+        // the Great Fairy or Valoo: 2.2 m in front of the head, on the room's floor (their origin is at
+        // their feet, the fairy's in her fountain's water)
+        if (!sAmbient.giantPlaced) {
+            const float* h = sAmbient.headPos;
+            const float* f = sAmbient.headFwd;
+            sAmbient.giantAt[0] = h[0] + 2.2f * f[0];
+            sAmbient.giantAt[2] = h[2] + 2.2f * f[2];
+            sAmbient.giantPlaced = true;
+        }
+        memcpy(at, sAmbient.giantAt, sizeof(sAmbient.giantAt));
+        at[1] = sAmbient.floorY;
         return;
     }
     const float reach = 1.2f;
@@ -1746,7 +1806,7 @@ void pc_vr_ambient_draw(void) {
         sAmbient.placeLogNs = nowLog;
         for (int j = 0; j < sAmbient.nActors && j < 6; j++) {
             float r[3], mv[3];
-            if (sAmbient.kinds[j] == 5 || sAmbient.kinds[j] == 6) {
+            if (ambientFacing(sAmbient.kinds[j])) {
                 ambientFacingAt(sAmbient.kinds[j], sAmbient.pos[j], r);
             } else {
                 xform(sAmbient.stageWorld, sAmbient.pos[j], r);
@@ -1772,10 +1832,10 @@ void pc_vr_ambient_draw(void) {
             if (sAmbient.actors[j] == who) a = j;
         if (sAmbient.placed && a >= 0) {
             Mtx d;
-            if (sAmbient.kinds[a] == 5 || sAmbient.kinds[a] == 6) {
+            if (ambientFacing(sAmbient.kinds[a])) {
                 float at[3];
                 ambientFacingAt(sAmbient.kinds[a], sAmbient.pos[a], at);
-                ambientFacingDelta(sAmbient.pos[a], at, d, sAmbient.kinds[a] == 5 ? kHelmarocSize : kAmbientSize);
+                ambientFacingDelta(sAmbient.pos[a], at, d, ambientFacingSize(sAmbient.kinds[a]));
             } else {
                 float mv[3];
                 ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
