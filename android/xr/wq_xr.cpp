@@ -3259,8 +3259,8 @@ void updateScreenStereo() {
     const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.10f);
     const float userFocus = clampf(st.stereoFocus, 1.0f, 2500.0f);
     float target = userFocus;
-    if (scene && nearW > 0.0f) target = std::min(userFocus, (king ? 1.5f : 1.0f) * nearW);
-    target = std::max(target, 20.0f);
+    // (1.1.4: the floor of 20 units only for the scenes' focus; the settings' as they are)
+    if (scene && nearW > 0.0f) target = std::max(std::min(userFocus, (king ? 1.5f : 1.0f) * nearW), 20.0f);
     if (s_sceneFocus <= 0.0f) s_sceneFocus = userFocus;
     s_sceneFocus = target + (s_sceneFocus - target) * std::exp2(-dt / 0.25f);
     const float focus = clampf(s_sceneFocus, 1.0f, 2500.0f);

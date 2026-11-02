@@ -1271,17 +1271,22 @@ int collectSceneNear(void* actor, void* user) {
     SceneNear& sn = *(SceneNear*)user;
     const int group = fopAcM_GetGroup(ac);
     if (group != fopAc_PLAYER_e && group != fopAc_ENEMY_e && !ambientPerson(ac)) return 1;
+    // only what the game drew (1.1.4): fopAc_Draw marks the actors it did not draw (culled, hidden, too
+    // far) with the condition NODRAW
+    if (fopAcM_CheckCondition(ac, fopAcCnd_NODRAW_e) != 0) return 1;
     const Mtx& v = sn.view->mViewMtx;
-    const cXyz& p = ac->current.pos;
+    // about its middle: 50 units above its feet (the world's up, 1.1.4)
+    const cXyz p(ac->current.pos.x, ac->current.pos.y + 50.0f, ac->current.pos.z);
     const float vx = v[0][0] * p.x + v[0][1] * p.y + v[0][2] * p.z + v[0][3];
-    const float vy = v[1][0] * p.x + v[1][1] * p.y + v[1][2] * p.z + v[1][3] + 50.0f;  // about its middle
+    const float vy = v[1][0] * p.x + v[1][1] * p.y + v[1][2] * p.z + v[1][3];
     const float d = -(v[2][0] * p.x + v[2][1] * p.y + v[2][2] * p.z + v[2][3]);
     if (d <= 1.0f) return 1;
     // in the camera's frame (a little beyond its edges: what crosses them counts)
     const float px = sn.view->mProjMtx[0][0], py = sn.view->mProjMtx[1][1];
     if (std::fabs(px * vx / d) > 1.2f || std::fabs(py * vy / d) > 1.2f) return 1;
-    const float n = d - kSceneMargin;
-    if (n > 0.0f && (sn.near == 0.0f || n < sn.near)) sn.near = n;
+    // (1.1.4: one nearer than the margin counts too, the nearest of all; it was left out)
+    const float n = std::max(d - kSceneMargin, 1.0f);
+    if (sn.near == 0.0f || n < sn.near) sn.near = n;
     return 1;
 }
 float sceneNearest(const view_class* view) {
@@ -1289,8 +1294,9 @@ float sceneNearest(const view_class* view) {
     fopAcIt_Executor(collectSceneNear, &sn);
     const float lx = view->mLookat.mCenter.x - view->mLookat.mEye.x, ly = view->mLookat.mCenter.y - view->mLookat.mEye.y,
                 lz = view->mLookat.mCenter.z - view->mLookat.mEye.z;
-    const float target = std::sqrt(lx * lx + ly * ly + lz * lz) - kSceneMargin;
-    if (target > 0.0f && (sn.near == 0.0f || target < sn.near)) sn.near = target;
+    const float dist = std::sqrt(lx * lx + ly * ly + lz * lz);
+    const float target = std::max(dist - kSceneMargin, 1.0f);
+    if (dist > 1.0f && (sn.near == 0.0f || target < sn.near)) sn.near = target;
     return sn.near;
 }
 
