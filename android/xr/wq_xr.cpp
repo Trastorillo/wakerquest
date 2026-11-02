@@ -132,7 +132,7 @@ struct Settings {
     bool diorama = false;                        // the default mode: ventana (1.1.4; maqueta before)
     bool sphere = true;
     float tableWidth = 3.0f, tableDepth = 0.7f;  // m: the bubble's diameter, or the table's width and depth
-    float tableSpan = 300.0f;                    // m of the game's world across it (more: more to draw)
+    float tableSpan = 60.0f;                     // m of the game's world across it (more: more to draw)
     float tableDistance = 0.469f;                // m, its middle in front of the eyes
     float tableHeight = 0.238f;                  // m, Link (the table's top) below the eyes
     float tableFade = 0.05f;                     // m, the edges' fade
@@ -192,7 +192,7 @@ struct Settings {
     float windowHeight = -0.176f; // m above eye height
     float windowX = -0.218f;      // m to the right (a grip moves it)
     float windowYaw = 16.7f;      // degrees, turned to the left (a grip turns it)
-    float windowScale = 20.0f;    // the game's metres per metre of the room (more: the world smaller)
+    float windowScale = 8.0f;     // the game's metres per metre of the room (more: the world smaller)
     float windowLift = 0.078f;    // the game camera raised in the window (m of the room; grips + left stick)
     float windowDepth = 0.1f;     // m, the game camera's eye in front of the window (caps the pop-out)
     bool windowPopoutOn = true;   // near things come out of the window (off: cut at its plane)
@@ -288,7 +288,7 @@ const char kDefaultSettings[] =
     "# the world turns with the game camera. Also in the options menu.\n"
     "shape = esfera\n"
     "bubble_size = 3.00\n"
-    "bubble_span = 300\n"
+    "bubble_span = 60\n"
     "bubble_distance = 0.469\n"
     "bubble_height = 0.238\n"
     "bubble_x = 0.096\n"
@@ -315,7 +315,7 @@ const char kDefaultSettings[] =
     "window_height = -0.176\n"
     "window_x = -0.218\n"
     "window_yaw = 16.7\n"
-    "window_scale = 20\n"
+    "window_scale = 8\n"
     "window_lift = 0.078\n"
     "window_depth = 0.1\n"
     "window_popout_on = 1\n"
