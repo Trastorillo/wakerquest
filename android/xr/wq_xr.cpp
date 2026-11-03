@@ -237,7 +237,8 @@ struct Settings {
 const char kDefaultSettings[] =
     "# WakerQuest: the screen in the headset. Read again while playing.\n"
     "# The controllers: the left stick's click opens and closes the settings panel (and closes the game's\n"
-    "# options menu); a grip holds what it is on (the screen, the window, the model, the ambience, a panel):\n"
+    "# options menu); the GC's D-pad: left grip + Y up (the dungeon map, the sea chart), + X down, right\n"
+    "# grip + B left, + A right (pressed as the grip closes: what it took stays where it was); a grip holds what it is on (the screen, the window, the model, the ambience, a panel):\n"
     "# one moves and turns it, both also size it; with a grip held, the right stick scales the world (the\n"
     "# model's bubble_span, the window's window_scale, the screen's ambience's ambient_scale, or the screen's\n"
     "# width without ambience) and its click puts what is held back in its place; the right stick's click\n"
@@ -817,6 +818,19 @@ struct Xr {
     // the left stick's click (L3) opens and closes it; once it closes, the controller is not the game's
     // until every trigger, grip and face button is let go
     bool menuClickWas = false, comboHeld = false;
+    // the GC's D-pad (1.1.6): a grip and a face button of the same hand (left: Y up, X down; right: B left,
+    // A right). updatePad gives updateGrips the face buttons (face: A, B, X, Y); updateGrips sets dpad.
+    // gripSnap/gripAt: the settings and the hand's pose when that hand's grip closed; gripCombo: the grip
+    // made a D-pad (its grab cancelled), holding nothing until let go; faceHold: a face button kept from
+    // the game until let go (pressed with its hand's grip held); dpadUntil: each direction's least (ns)
+    bool face[4] = {false, false, false, false};
+    bool faceWas[4] = {false, false, false, false};
+    bool faceHold[4] = {false, false, false, false};
+    bool dpad[4] = {false, false, false, false};  // up, down, left, right
+    uint64_t dpadUntil[4] = {0, 0, 0, 0};
+    bool gripCombo[2] = {false, false};
+    XrPosef gripAt[2]{};
+    Settings gripSnap[2];
     uint64_t menuCloseUntil = 0;  // ns: the game's options menu closed by L3 (its L+R+Z held until then)
     bool hasPerf = false;
     int perfApplied = -1;
@@ -1835,7 +1849,21 @@ void updatePad() {
                 // every mode: the grips hold what they are on, and with one held the right stick scales
                 // the world (not the C-stick meanwhile). Not the model while a special scene shows the
                 // window instead
+                s.face[0] = a, s.face[1] = b, s.face[2] = x, s.face[3] = y;
                 updateGrips(gripL, gripR, stickClick, &c, &m);
+                // the face buttons of a hand whose grip is held (1.1.6: the D-pad's, or ignored while it
+                // holds something) are not the game's, until let go
+                {
+                    bool* btn[4] = {&a, &b, &x, &y};
+                    const bool gripHeld[2] = {gripL > 0.6f || s.gripDown[0] || s.gripCombo[0],
+                                              gripR > 0.6f || s.gripDown[1] || s.gripCombo[1]};
+                    for (int i = 0; i < 4; i++) {
+                        const int hand = i < 2 ? 1 : 0;  // A, B the right controller's; X, Y the left's
+                        if (*btn[i] && gripHeld[hand]) s.faceHold[i] = true;
+                        if (!*btn[i]) s.faceHold[i] = false;
+                        if (s.faceHold[i]) *btn[i] = false;
+                    }
+                }
                 // the trigger that holds the window's HUD (with its grip) is not the game's, until it is let
                 // go (no L or R, nor a click when it is), 1.1.4
                 for (int h = 0; h < 2; h++) {
@@ -1892,6 +1920,23 @@ void updatePad() {
     SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_NORTH, y);
     SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, z > 0.6f);
     SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_START, start);
+    // the GC's D-pad (grip + a face button, updateGrips; 1.1.6): none while the session is not focused,
+    // the settings panel or the game's menu open
+    {
+        timespec ts{};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        const uint64_t now = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+        const bool off = !s.focused || wqp::isOpen() || s_menuOpen.load();
+        bool d[4];
+        for (int i = 0; i < 4; i++) {
+            d[i] = !off && (s.dpad[i] || now < s.dpadUntil[i]);
+            if (off) s.dpad[i] = false, s.dpadUntil[i] = 0;
+        }
+        SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_DPAD_UP, d[0]);
+        SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN, d[1]);
+        SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT, d[2]);
+        SDL_SetJoystickVirtualButton(s.pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, d[3]);
+    }
 }
 
 void updateRumble() {
@@ -2581,9 +2626,78 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             xrlog("grip: the drag cut (the title's flat screen %s)", flat ? "began" : "ended");
         }
     }
+    // The GC's D-pad (1.1.6): the grip and a face button of the same hand, the left's Y up and X down, the
+    // right's B left and A right, while the button is held (at least kDpadLeastNs, for the game to see its
+    // press). Pressed before the hand moved kComboMove nor turned kComboTurn since its grip closed, what
+    // that grip took goes back where it was (the settings as they were then; nothing written to xr.ini)
+    // and the grip holds nothing more until let go; pressed after, while it moves something, the button
+    // is ignored. Either way not the game's (updatePad).
+    constexpr uint64_t kDpadLeastNs = 100000000ull;
+    constexpr float kComboMove = 0.025f, kComboTurn = 10.0f * 0.0174532925f;
+    {
+        timespec ts{};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        const uint64_t now = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+        // face: A, B, X, Y; the D-pad: up, down, left, right
+        static const int kBtn[2][2] = {{3, 2}, {1, 0}};   // per hand: (its first, its second) button
+        static const int kDir[2][2] = {{0, 1}, {2, 3}};   // left: Y up, X down; right: B left, A right
+        static const char* kBtnName[4] = {"A", "B", "X", "Y"};
+        static const char* kDirName[4] = {"up", "down", "left", "right"};
+        for (int h = 0; h < 2; h++) {
+            for (int k = 0; k < 2; k++) {
+                const int bi = kBtn[h][k], di = kDir[h][k];
+                const bool press = s.face[bi] && !s.faceWas[bi];
+                // (the grip closing in this same frame: nothing taken yet)
+                const bool gripNow = s.gripDown[h] || (h == 0 ? gripL : gripR) > 0.6f;
+                if (press && gripNow && !s.gripCombo[h] && valid[h]) {
+                    bool still = true;
+                    if (s.gripDown[h]) {
+                        const XrVector3f dp = vsub(loc[h].pose.position, s.gripAt[h].position);
+                        const XrQuaternionf& q0 = s.gripAt[h].orientation;
+                        const XrQuaternionf& q1 = loc[h].pose.orientation;
+                        const float dot = std::fabs(q0.x * q1.x + q0.y * q1.y + q0.z * q1.z + q0.w * q1.w);
+                        const float turn = 2.0f * std::acos(std::min(dot, 1.0f));
+                        still = std::sqrt(vdot(dp, dp)) < kComboMove && turn < kComboTurn;
+                    }
+                    if (still) {
+                        // its grab cancelled: what it took back where it was, nothing saved
+                        if (s.gripDown[h]) s.settings = s.gripSnap[h];
+                        s.gripCombo[h] = true;
+                        s.gripDown[h] = false;
+                        s.grabbed[h] = 0;
+                        s.grabWindow[h] = false;
+                        s.dragHands &= ~(1 << h);
+                        s.dragging = false;  // the other hand, if it holds, starts again from where it is
+                        if (s.dragHands == 0) s.dragAmbient = false;
+                        s.whHands = 0;       // the window's HUD: the other hand takes it again, unsaved
+                        s.stickScale = 0;
+                        publishSettings();
+                        xrlog("grip + %s: its grab cancelled, back where it was", kBtnName[bi]);
+                    }
+                }
+                if (s.gripCombo[h] && s.face[bi]) {
+                    if (press) {
+                        s.dpadUntil[di] = now + kDpadLeastNs;
+                        xrlog("grip + %s: the D-pad %s", kBtnName[bi], kDirName[di]);
+                    }
+                    s.dpad[di] = true;
+                } else {
+                    s.dpad[di] = false;
+                }
+            }
+        }
+        for (int i = 0; i < 4; i++) s.faceWas[i] = s.face[i];
+    }
     const float g[2] = {gripL, gripR};
     for (int h = 0; h < 2; h++) {
-        const bool down = valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
+        // (a grip that made the D-pad holds nothing until let go, 1.1.6)
+        if (s.gripCombo[h] && g[h] < 0.4f) s.gripCombo[h] = false;
+        const bool down = !s.gripCombo[h] && valid[h] && g[h] > (s.gripDown[h] ? 0.4f : 0.6f);
+        if (down && !s.gripDown[h]) {
+            // where the hand and the settings were as the grip closed (the D-pad's cancel, 1.1.6)
+            s.gripAt[h] = loc[h].pose;
+            s.gripSnap[h] = st;
+        }
         // (the window's HUD too, 1.1.4: windowHudGrips moves it; there the grip takes it only with the
         // trigger held, grip alone holding the window: the HUD over the window covers all of it)
         // 1.1.5: the trigger pressed with the grip already held takes the HUD too (grip then trigger,
