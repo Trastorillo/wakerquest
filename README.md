@@ -18,6 +18,20 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra apretando el stick izquierdo (L3).
 
+### Novedades de la 1.1.6
+
+- **La cruceta de la GameCube, por fin en los mandos:** se hace con el grip y un botón de la misma mano. Pulsa el
+  botón nada más cerrar el grip; si no has movido la mano, no se mueve nada de lo que agarrabas.
+
+  | Mandos | Cruceta | Para qué |
+  |---|---|---|
+  | Grip izquierdo + Y | Arriba | Mapa de la mazmorra y carta náutica |
+  | Grip izquierdo + X | Abajo | Cerrar el mapa |
+  | Grip derecho + B | Izquierda | Minimapa |
+  | Grip derecho + A | Derecha | Minimapa |
+
+  Mientras aprietas un grip, los botones de esa mano no llegan al juego como A/B/X/Y.
+
 ### Novedades de la 1.1.5
 
 - **Modo ventana:** el HUD se mueve y se escala aparte de la ventana (grip + gatillo apuntando al HUD, o el
