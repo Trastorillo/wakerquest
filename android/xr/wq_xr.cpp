@@ -4282,9 +4282,9 @@ extern "C" bool wq_xr_start(void) {
         setenv("COS_FB_SCALE", scale, 1);
         xrlog("internal resolution: %d lines, %s (COS_FB_SCALE=%s)", lines, activeResolutionKey(s.settings), scale);
     }
-    // The Touch controllers also appear to Android as a gamepad (vendor 0x2833, product 0x0160) that
+    // The Touch controllers also appear to Android as a gamepad (vendor 0x2833, product 0x0160 or 0x13A0) that
     // sends nothing useful in VR; the virtual gamepad stands in for them.
-    SDL_SetHint(SDL_HINT_JOYSTICK_BLACKLIST_DEVICES, "0x2833/0x0160");
+    SDL_SetHint(SDL_HINT_JOYSTICK_BLACKLIST_DEVICES, "0x2833/0x0160,0x2833/0x13A0");
     std::thread(threadMain).detach();
     xrlog("headset layer started");
     return true;

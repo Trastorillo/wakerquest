@@ -1,31 +1,66 @@
-Input: the Quest's virtual gamepad is always game port 1; Meta's system gamepad (vid 0x2833) is ignored
+Input: the Quest's virtual gamepad is always a pad the game reads; Meta's system gamepad (vid 0x2833) is ignored; other pads are folded into port 1
 
-WakerQuest 1.1.7. The game reads only port 1 (PAD channel 0), and the port of a pad is SDL's player
-index, which SDL gives to each device in order of appearance. On some Quest 3 installs Android's own
-view of the Touch Plus controllers (vendor 0x2833, product 0x13A0; the blacklist in wq_xr.cpp only
-knew product 0x0160) appeared before the virtual gamepad and took port 1: Start and the buttons the
-game reads did nothing, while the XR layer's own grips still worked.
+WakerQuest 1.1.7 (everything under __ANDROID__: PC and Switch are unchanged). The game reads only port 1
+(PAD channel 0), and the port of a pad is SDL's player index, which SDL gives to each device in order of
+appearance. On some Quest 3 installs Android's own view of the Touch Plus controllers (vendor 0x2833,
+product 0x13A0; the blacklist in wq_xr.cpp only knew product 0x0160) appeared before the virtual
+gamepad and took port 1: Start and the buttons the game reads did nothing, while the XR layer's own
+grips still worked.
 
-- add_controller: a pad with vendor 0x2833 is closed and ignored (as the Apple TV remote is).
+- add_controller: a pad with vendor 0x2833 is given no player index, closed and ignored (as the Apple
+  TV remote is).
 - pin_virtual_controller_to_first_port: after every add or remove (and the saved preferences), the
   virtual joystick (SDL_IsJoystickVirtual) is set to player index 0; SDL moves whoever held it to the
-  first free index, so a real Bluetooth pad stays connected as port 2. Whatever the order of arrival.
+  first free index. Not done only when the saved preference for port 1 names a controller connected
+  right now (the player's choice in the ports menu); the virtual pad then just gets a free port if it
+  has none. An unset or empty preference, or one naming an absent pad, does not stop the pin.
+- PADRead: ports 2 to 4 are folded into port 1 (copy if port 1 has no pad, else merge_virtual_status),
+  so a Bluetooth controller plays together with the Touch controllers whichever port each has.
 - log_controller_ports: one line per game port with the pad on it, after each add or remove.
 
 diff --git a/lib/input.cpp b/lib/input.cpp
-index 9101f24..226d1fb 100644
 --- a/lib/input.cpp
 +++ b/lib/input.cpp
-@@ -289,6 +289,46 @@ void apply_port_preferences() noexcept {
+@@ -289,6 +289,77 @@ void apply_port_preferences() noexcept {
      }
    }
  }
++#if defined(__ANDROID__)
 +// WakerQuest: the virtual gamepad that stands in for the Touch controllers (SDL_AttachVirtualJoystick, see
-+// android/xr/wq_xr.cpp) must always be port 1 of the game (PAD channel 0, the only one it reads). SDL gives
-+// each device the first free player index as it appears, so any other pad that showed up first (Android
-+// exposes the Touch controllers as a gamepad too, vendor 0x2833) took port 1 and left the game deaf.
++// android/xr/wq_xr.cpp) must always be a port the game reads (port 1; PADRead also folds ports 2-4 into it).
++// SDL gives each device the first free player index as it appears, so any other pad that showed up first
++// (Android exposes the Touch controllers as a gamepad too, vendor 0x2833) took port 1 and left the game deaf.
 +// Called after every add or remove, once the saved port preferences have been applied.
++//
++// The one exception is a saved preference for port 1 that names a controller connected right now (other than
++// the virtual one): the player chose that in the ports menu, so it keeps port 1 (the virtual pad is then
++// folded in from another port by PADRead). A preference that is unset, empty (the menu left port 1 empty on
++// purpose) or names a controller that is absent or ignored never keeps the Touch controllers out of port 1:
++// apply_port_preferences would otherwise strip SDL's default index from the virtual pad.
 +void pin_virtual_controller_to_first_port() noexcept {
++  ensure_port_preferences_loaded();
++  const auto& preference = g_portPreferences[0];
++  if (preference.state == PortPreferenceState::Controller) {
++    for (auto& [instance, controller] : g_GameControllers) {
++      if (!SDL_IsJoystickVirtual(instance) &&
++          identity_match(preference.identity, controller_identity(controller)) != IdentityMatch::None) {
++        // port 1 stays the player's choice; the virtual pad still needs some port (PADRead folds it into port 1)
++        for (auto& [vInstance, vController] : g_GameControllers) {
++          const int32_t vPlayer = SDL_GetGamepadPlayerIndex(vController.m_controller);
++          if (!SDL_IsJoystickVirtual(vInstance) || (vPlayer >= 0 && vPlayer < PAD_MAX_CONTROLLERS)) {
++            continue;
++          }
++          for (int32_t port = 1; port < PAD_MAX_CONTROLLERS; ++port) {
++            if (get_controller_for_player(static_cast<uint32_t>(port)) == nullptr) {
++              SDL_SetGamepadPlayerIndex(vController.m_controller, port);
++              break;
++            }
++          }
++        }
++        return;
++      }
++    }
++  }
 +  for (auto& [instance, controller] : g_GameControllers) {
 +    if (!SDL_IsJoystickVirtual(instance)) {
 +      continue;
@@ -60,40 +95,74 @@ index 9101f24..226d1fb 100644
 +    }
 +  }
 +}
++#endif // __ANDROID__
  } // namespace
  
  GameController* get_controller_for_player(uint32_t player) noexcept {
-@@ -342,6 +382,15 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
+@@ -342,6 +413,19 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
        SDL_CloseGamepad(ctrl);
        return -1;
      }
++#if defined(__ANDROID__)
 +    if (controller.m_vid == 0x2833 /* Oculus / Meta: Android's own view of the Touch controllers */) {
 +      // WakerQuest: the Touch controllers reach the game through the virtual gamepad; this one would take
 +      // port 1 and leave the game with no input
 +      Log.info("Ignoring controller '{}' (vid {:04x}, pid {:04x}): Meta Quest system gamepad",
 +               SDL_GetGamepadName(ctrl) != nullptr ? SDL_GetGamepadName(ctrl) : "unknown", controller.m_vid,
 +               controller.m_pid);
++      // no port left behind: the ignored pad must not keep a player index
++      SDL_SetGamepadPlayerIndex(ctrl, -1);
 +      SDL_CloseGamepad(ctrl);
 +      return -1;
 +    }
++#endif
      controller.m_isGameCube = controller.m_vid == 0x057E && controller.m_pid == 0x0337;
      if (controller.m_isGameCube ||
          (SDL_GetGamepadType(ctrl) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && controller.m_pid == 0x2073)) {
-@@ -356,6 +405,8 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
+@@ -356,6 +440,10 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
               controller.m_pid, static_cast<int>(SDL_GetGamepadType(ctrl)));
      g_GameControllers[instance] = controller;
      apply_port_preferences();
++#if defined(__ANDROID__)
 +    pin_virtual_controller_to_first_port();
 +    log_controller_ports();
++#endif
      return instance;
    }
  
-@@ -371,6 +422,8 @@ void remove_controller(Uint32 instance) noexcept {
+@@ -371,6 +459,10 @@ void remove_controller(Uint32 instance) noexcept {
      SDL_CloseGamepad(it->second.m_controller);
      g_GameControllers.erase(it);
      apply_port_preferences();
++#if defined(__ANDROID__)
 +    pin_virtual_controller_to_first_port();
 +    log_controller_ports();
++#endif
    }
+ }
+ 
+diff --git a/lib/dolphin/pad/pad.cpp b/lib/dolphin/pad/pad.cpp
+--- a/lib/dolphin/pad/pad.cpp
++++ b/lib/dolphin/pad/pad.cpp
+@@ -953,6 +953,21 @@ u32 PADRead(PADStatus* status) {
+       }
+     }
+   }
++#if defined(__ANDROID__)
++  // WakerQuest: the game reads only port 1, where the Touch controllers' virtual gamepad is. Any other pad (a
++  // Bluetooth controller, which SDL gives port 2 to 4) is folded into port 1, so it plays together with the Touch
++  // controllers. Ports 2 to 4 keep their own status for other readers.
++  for (uint32_t i = 1; i < PAD_CHANMAX; ++i) {
++    if (status[i].err != PAD_ERR_NONE) {
++      continue;
++    }
++    if (status[0].err != PAD_ERR_NONE) {
++      status[0] = status[i];
++    } else {
++      merge_virtual_status(status[0], status[i]);
++    }
++  }
++#endif
+   return rumbleSupport;
  }
  
