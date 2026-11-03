@@ -1,0 +1,99 @@
+Input: the Quest's virtual gamepad is always game port 1; Meta's system gamepad (vid 0x2833) is ignored
+
+WakerQuest 1.1.7. The game reads only port 1 (PAD channel 0), and the port of a pad is SDL's player
+index, which SDL gives to each device in order of appearance. On some Quest 3 installs Android's own
+view of the Touch Plus controllers (vendor 0x2833, product 0x13A0; the blacklist in wq_xr.cpp only
+knew product 0x0160) appeared before the virtual gamepad and took port 1: Start and the buttons the
+game reads did nothing, while the XR layer's own grips still worked.
+
+- add_controller: a pad with vendor 0x2833 is closed and ignored (as the Apple TV remote is).
+- pin_virtual_controller_to_first_port: after every add or remove (and the saved preferences), the
+  virtual joystick (SDL_IsJoystickVirtual) is set to player index 0; SDL moves whoever held it to the
+  first free index, so a real Bluetooth pad stays connected as port 2. Whatever the order of arrival.
+- log_controller_ports: one line per game port with the pad on it, after each add or remove.
+
+diff --git a/lib/input.cpp b/lib/input.cpp
+index 9101f24..226d1fb 100644
+--- a/lib/input.cpp
++++ b/lib/input.cpp
+@@ -289,6 +289,46 @@ void apply_port_preferences() noexcept {
+     }
+   }
+ }
++// WakerQuest: the virtual gamepad that stands in for the Touch controllers (SDL_AttachVirtualJoystick, see
++// android/xr/wq_xr.cpp) must always be port 1 of the game (PAD channel 0, the only one it reads). SDL gives
++// each device the first free player index as it appears, so any other pad that showed up first (Android
++// exposes the Touch controllers as a gamepad too, vendor 0x2833) took port 1 and left the game deaf.
++// Called after every add or remove, once the saved port preferences have been applied.
++void pin_virtual_controller_to_first_port() noexcept {
++  for (auto& [instance, controller] : g_GameControllers) {
++    if (!SDL_IsJoystickVirtual(instance)) {
++      continue;
++    }
++    if (SDL_GetGamepadPlayerIndex(controller.m_controller) != 0) {
++      // SDL moves whoever held player index 0 to the first free one
++      SDL_SetGamepadPlayerIndex(controller.m_controller, 0);
++    }
++    break;
++  }
++}
++
++void log_controller_ports() noexcept {
++  for (uint32_t port = 0; port < PAD_MAX_CONTROLLERS; ++port) {
++    const char* name = nullptr;
++    for (auto& [instance, controller] : g_GameControllers) {
++      if (SDL_GetGamepadPlayerIndex(controller.m_controller) == static_cast<int32_t>(port)) {
++        name = SDL_GetGamepadName(controller.m_controller);
++        Log.info("Game port {}: '{}' (instance {}, vid {:04x}, pid {:04x}{})", port + 1,
++                 name != nullptr ? name : "unknown", instance, controller.m_vid, controller.m_pid,
++                 SDL_IsJoystickVirtual(instance) ? ", virtual" : "");
++        break;
++      }
++    }
++  }
++  for (auto& [instance, controller] : g_GameControllers) {
++    if (SDL_GetGamepadPlayerIndex(controller.m_controller) < 0 ||
++        SDL_GetGamepadPlayerIndex(controller.m_controller) >= static_cast<int32_t>(PAD_MAX_CONTROLLERS)) {
++      const char* name = SDL_GetGamepadName(controller.m_controller);
++      Log.info("Controller without a game port: '{}' (instance {}, vid {:04x}, pid {:04x})",
++               name != nullptr ? name : "unknown", instance, controller.m_vid, controller.m_pid);
++    }
++  }
++}
+ } // namespace
+ 
+ GameController* get_controller_for_player(uint32_t player) noexcept {
+@@ -342,6 +382,15 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
+       SDL_CloseGamepad(ctrl);
+       return -1;
+     }
++    if (controller.m_vid == 0x2833 /* Oculus / Meta: Android's own view of the Touch controllers */) {
++      // WakerQuest: the Touch controllers reach the game through the virtual gamepad; this one would take
++      // port 1 and leave the game with no input
++      Log.info("Ignoring controller '{}' (vid {:04x}, pid {:04x}): Meta Quest system gamepad",
++               SDL_GetGamepadName(ctrl) != nullptr ? SDL_GetGamepadName(ctrl) : "unknown", controller.m_vid,
++               controller.m_pid);
++      SDL_CloseGamepad(ctrl);
++      return -1;
++    }
+     controller.m_isGameCube = controller.m_vid == 0x057E && controller.m_pid == 0x0337;
+     if (controller.m_isGameCube ||
+         (SDL_GetGamepadType(ctrl) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && controller.m_pid == 0x2073)) {
+@@ -356,6 +405,8 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
+              controller.m_pid, static_cast<int>(SDL_GetGamepadType(ctrl)));
+     g_GameControllers[instance] = controller;
+     apply_port_preferences();
++    pin_virtual_controller_to_first_port();
++    log_controller_ports();
+     return instance;
+   }
+ 
+@@ -371,6 +422,8 @@ void remove_controller(Uint32 instance) noexcept {
+     SDL_CloseGamepad(it->second.m_controller);
+     g_GameControllers.erase(it);
+     apply_port_preferences();
++    pin_virtual_controller_to_first_port();
++    log_controller_ports();
+   }
+ }
+ 
