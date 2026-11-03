@@ -18,6 +18,16 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra apretando el stick izquierdo (L3).
 
+### Novedades de la 1.1.7
+
+- **Arreglo de los mandos: en algunas Quest 3 no funcionaban los botones del juego (ni siquiera Start).**
+  - **Por qué pasaba:** en esas gafas, el sistema presenta también los Touch Plus como un mando Android normal
+    (Oculus, modelo 0x13A0). Ese mando ocupaba el puerto 1 del juego y el mando de WakerQuest pasaba al puerto 2.
+    El juego solo lee el puerto 1, y por ahí no llegaba ningún botón. Los grips sí funcionaban, porque los
+    gestionan las gafas directamente.
+  - **Qué cambia:** ese mando del sistema se ignora y el mando de WakerQuest queda siempre en el puerto 1. Un mando
+    Bluetooth real suma sus botones a los de los Touch, así que funcionan los dos a la vez.
+
 ### Novedades de la 1.1.6
 
 - **La cruceta de la GameCube, por fin en los mandos:** se hace con el grip y un botón de la misma mano. Pulsa el
@@ -88,7 +98,7 @@ de tu propia ISO cada vez que arranca.
 WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
 native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,
 stereo, the room's ambience around the player. Its work lives in `android/` (the APK and the headset
-layer, `android/xr/`), Aurora patches 0023-0037 in `native/patches/aurora/`, and a few hooks under
+layer, `android/xr/`), Aurora patches 0023-0038 in `native/patches/aurora/`, and a few hooks under
 `native/src/pc/`; see [android/README.md](android/README.md) to build it.
 
 It keeps SwitchWaker's history and license (MIT, `LICENSE`; third-party terms in `THIRD_PARTY.md`).
