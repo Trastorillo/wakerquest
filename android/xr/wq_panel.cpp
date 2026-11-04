@@ -263,9 +263,9 @@ const Item kAmbient[] = {
 };
 // cutscenes, dialogues and the diorama's panels (pc_vr_diorama.cpp)
 const Item kScenes[] = {
-    {kXr, "cine_screen", {"Cinemáticas en pantalla gigante", "Cutscenes on the giant screen", "Cinématiques sur écran géant"},
-     {"En la maqueta; vuelve a la burbuja al acabar", "In the diorama; back to the bubble after",
-      "Dans la maquette ; retour à la bulle ensuite"},
+    {kXr, "cine_3d", {"Cinemáticas en pantalla 3D", "Cutscenes on the 3D screen", "Cinématiques sur écran 3D"},
+     {"Solo la pantalla gigante; luego vuelve al modo", "Only the giant screen; back to the mode after",
+      "Seulement l'écran géant ; retour au mode ensuite"},
      kSwitch},
     {kXr, "auto_screen", {"Pantalla automática en 1ª persona", "Automatic screen in first person", "Écran auto en vue subjective"},
      {"Telescopio, apuntar, cámara: en 2D", "Telescope, aiming, camera: in 2D", "Longue-vue, visée, photo : en 2D"},

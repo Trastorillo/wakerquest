@@ -57,6 +57,7 @@ extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <algorithm>
 #include <vector>
 
 #define XR_USE_PLATFORM_ANDROID
@@ -145,7 +146,7 @@ struct Settings {
     float windowHudPose[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float windowHudScale = 1.0f;
     bool windowHudMove = false;  // window_hud_move (1.1.5): the grips hold the window's HUD, not the window
-    bool cineScreen = false;                     // and cutscenes (else the talk zoom, in the bubble)
+    bool cineScreen = true;                      // 1.1.8 (key cine_3d): cutscenes only on the giant screen in 3D
     // the title screen on the giant screen, flat, whatever the mode: always (1.1.1; an old intro_2d key in
     // xr.ini is ignored)
     bool intro2d = true;
@@ -353,12 +354,13 @@ const char kDefaultSettings[] =
     "dynres_high_fps = 29.5\n"
     "dynres_min = 0.7\n"
     "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
-    "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it; cine_screen 1 =\n"
-    "# cutscenes on the giant screen instead.\n"
+    "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it. 1.1.8: cine_3d 1 =\n"
+    "# the real cutscenes (not the dialogues) show only the giant screen in 3D, with no model, window or\n"
+    "# ambience, and back to the mode after them (a second later, so short chained ones do not flicker).\n"
     "talk_zoom_on = 1\n"
     "talk_zoom = 0.6\n"
     "talk_screen = 1\n"
-    "cine_screen = 0\n"
+    "cine_3d = 1\n"
     "# seethrough_on 1 = Link seen through what stands in front of him, a hole seethrough_radius m around him.\n"
     "seethrough_on = 0\n"
     "seethrough_radius = 0.8\n"
@@ -468,7 +470,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
-    else if (!strcmp(key, "cine_screen")) s.cineScreen = on;
+    else if (!strcmp(key, "cine_3d")) s.cineScreen = on;
     else if (!strcmp(key, "language")) s.language = !strcmp(v, "en") ? 1 : !strcmp(v, "fr") ? 2 : 0;
     else if (!strcmp(key, "talk_zoom_on")) s.talkZoomOn = on;
     else if (!strcmp(key, "talk_zoom")) s.talkZoom = clampf(f, 0.1f, 1.0f);
@@ -611,7 +613,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "window_hud_scale")) return num(s.windowHudScale);
     if (!strcmp(key, "window_hud_move")) return flag(s.windowHudMove);
-    if (!strcmp(key, "cine_screen")) return flag(s.cineScreen);
+    if (!strcmp(key, "cine_3d")) return flag(s.cineScreen);
     if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
     if (!strcmp(key, "talk_zoom")) return num(s.talkZoom);
@@ -1329,9 +1331,28 @@ bool initSession() {
     return true;
 }
 
+// 1.1.8: a swapchain (and with it Aurora's buffer, which has its size) made anew costs a stall and memory churn;
+// more than 6 in a minute is logged, once a minute, with the last size change.
+void noteSwapchainRecreation(uint32_t w, uint32_t h) {
+    static std::vector<uint64_t> times;
+    static uint64_t lastWarnNs = 0;
+    timespec ts{};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const uint64_t now = uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
+    times.push_back(now);
+    times.erase(std::remove_if(times.begin(), times.end(), [now](uint64_t t) { return now - t > 60000000000ull; }),
+                times.end());
+    if (times.size() > 6 && now - lastWarnNs >= 60000000000ull) {
+        lastWarnNs = now;
+        xrlog("warning: %zu swapchain/buffer recreations in the last minute (last: %ux%u -> %ux%u, %s ambience)",
+              times.size(), s.screenW, s.screenH, w, h, s.ambientFrame ? "with" : "without");
+    }
+}
+
 // The screen's swapchain, the size of Aurora's buffers.
 bool ensureSwapchain(uint32_t w, uint32_t h) {
     if (s.swapchain && w == s.screenW && h == s.screenH) return true;
+    if (s.swapchain) noteSwapchainRecreation(w, h);
     if (s.swapchain) {
         glDeleteFramebuffers(GLsizei(s.fbos.size()), s.fbos.data());
         xrDestroySwapchain(s.swapchain);

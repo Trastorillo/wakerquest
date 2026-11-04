@@ -1,0 +1,109 @@
+XR ambience layer with hysteresis: a frame with nothing of it to draw keeps the buffer's size
+
+WakerQuest 1.1.8. The screen mode's ambience (patch 0034) added its two eyes to the buffer only in the
+frames that had something to draw (an actor near the screen); with none, the buffer lost two eyes, and
+the XR layer recreated its swapchain and re-imported the buffers at every change (137 recreations in a
+session where there was nothing to draw at all).
+
+- encode_ambient: once the layer is on, a frame with nothing to draw does not drop it: the screen's
+  picture is kept aside as ever and the ambience's two eyes are cleared to transparent (clear_ambient_eyes,
+  two empty passes), so the buffer, its size and the eyes' places stay. Off, once, after 3 s without a
+  draw; back on at the first frame with one. Both changes are logged.
+
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -18,6 +18,7 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <chrono>
+ #include <cstdint>
+ #include <cmath>
+ #include <cstring>
+@@ -597,8 +598,18 @@ void encode_hud(wgpu::CommandEncoder& cmd, FramePacket& frame) {
+ // stereo, the left one already kept by copy_left_eye) kept aside; then for each eye the passes that
+ // hold the ambience's draws, over a cleared EFB, drawing those alone (no clears, copies nor tasks),
+ // each masked into its own picture.
++//
++// WakerQuest 1.1.8: the layer (the two more eyes in the buffer, which then changes its width) has hysteresis.
++// Nothing of the ambience to draw (no actor near) for 3 s: it goes off, once; it comes back as soon as there is
++// something, and does not go off before 3 s have passed with nothing. A frame with nothing while the layer is
++// on keeps the size of the buffer: its two eyes are cleared to transparent.
+ bool encode_ambient(wgpu::CommandEncoder& cmd, FramePacket& frame, bool stereoFrame) {
+   ZoneScoped;
++  constexpr int64_t kHoldNs = 3000000000ll;
++  static bool s_layerOn = false;
++  static int64_t s_lastDrawNs = 0;
++  const int64_t nowNs =
++      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+   bool any = false;
+   for (const auto& op : frame.ops) {
+     any = any || (op.type == FrameOpType::RenderPass && op.renderPass != nullptr && op.renderPass->hasAmbient);
+@@ -608,8 +619,22 @@ bool encode_ambient(wgpu::CommandEncoder& cmd, FramePacket& frame, bool stereoFr
+     if (s_none++ % 600 == 0) {
+       Log.info("ambience: no pass holds its draws ({} frames)", s_none);
+     }
+-    return false;
++    if (s_layerOn && nowNs - s_lastDrawNs >= kHoldNs) {
++      s_layerOn = false;
++      Log.info("ambience: layer off, nothing to draw for 3 s");
++    }
++    if (!s_layerOn) {
++      return false;
++    }
++    copy_screen_eye(cmd, frame_diorama() ? 0 : stereoFrame ? 1 : 0);
++    clear_ambient_eyes(cmd);
++    return true;
++  }
++  if (!s_layerOn) {
++    Log.info("ambience: layer on");
+   }
++  s_layerOn = true;
++  s_lastDrawNs = nowNs;
+   const webgpu::gpu_prof::Zone zone{cmd, "Ambience"};
+   // the screen's picture kept aside; the window's frames: its eyes are kept already (masked), the HUD
+   // (in the EFB after its replay) kept aside as the screen's left eye
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -782,6 +782,28 @@ void encode_ambient_mask(wgpu::CommandEncoder& cmd, int eye) {
+   pass.End();
+ }
+ 
++// 1.1.8: the ambience's two eyes cleared to transparent, at the size of the screen's picture, for a frame with
++// nothing of it to draw while its layer stays on (the buffer keeps its size; the present places them as ever)
++void clear_ambient_eyes(wgpu::CommandEncoder& cmd) {
++  const auto& source = webgpu::present_source();
++  for (int eye = 0; eye < 2; eye++) {
++    auto& target = g_ambEye[eye];
++    if (!target.texture || target.size.width != source.size.width || target.size.height != source.size.height) {
++      target = webgpu::create_render_texture(source.size.width, source.size.height, false);
++    }
++    const wgpu::RenderPassColorAttachment color{
++        .view = target.view,
++        .loadOp = wgpu::LoadOp::Clear,
++        .storeOp = wgpu::StoreOp::Store,
++        .clearValue = {0.0, 0.0, 0.0, 0.0},
++    };
++    const wgpu::RenderPassDescriptor desc{
++        .label = "XR ambience empty", .colorAttachmentCount = 1, .colorAttachments = &color};
++    auto pass = cmd.BeginRenderPass(&desc);
++    pass.End();
++  }
++}
++
+ void shutdown() noexcept {
+   g_left = {};
+   g_masked[0] = g_masked[1] = {};
+diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
+--- a/lib/gfx/stereo.hpp
++++ b/lib/gfx/stereo.hpp
+@@ -106,5 +106,7 @@ void copy_screen_eye(wgpu::CommandEncoder& cmd, int eye);
+ void begin_ambient_replay(int eye) noexcept;
+ void end_ambient_replay() noexcept;
+ void encode_ambient_mask(wgpu::CommandEncoder& cmd, int eye);
++// 1.1.8: the ambience's eyes cleared to transparent (the layer stays on with nothing to draw)
++void clear_ambient_eyes(wgpu::CommandEncoder& cmd);
+ 
+ } // namespace aurora::gfx::stereo

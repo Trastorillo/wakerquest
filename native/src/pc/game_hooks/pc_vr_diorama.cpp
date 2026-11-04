@@ -1359,6 +1359,18 @@ bool pc_vr_view_begin(view_class* view) {
     // (1.1.3: the bird while its demo moves it, helmarocInDemo: Outset's other demos, Aryll's talk on the
     // lookout among them, are not the special scene)
     const char* stageName = dComIfGp_getStartStageName();
+    {
+        // 1.1.8: every change of stage or room in the log (the stage's creation logs only its own start)
+        static char sLogStage[16] = "";
+        static int sLogRoom = -99;
+        const int room = dComIfGp_roomControl_getStayNo();
+        if (stageName != nullptr && (room != sLogRoom || strncmp(stageName, sLogStage, sizeof(sLogStage) - 1) != 0)) {
+            sLogRoom = room;
+            strncpy(sLogStage, stageName, sizeof(sLogStage) - 1);
+            pc::writef(STDERR_FILENO, "[cos] stage: %s room %d
+", sLogStage, room);
+        }
+    }
     fopAc_ac_c* bird = nullptr;
     fopAc_ac_c* kingNow = cutscene ? helmarocInDemo() : nullptr;
     if (kingNow != nullptr && table.specialScenes && stageName != nullptr && strcmp(stageName, "sea") == 0)
@@ -1408,7 +1420,15 @@ bool pc_vr_view_begin(view_class* view) {
         sIntro2dWas = intro2d;
     }
     wq_xr_set_intro_flat(intro2d);
-    const bool ownView = !specialScene && (intro2d || firstPerson || (table.cineScreen && cutscene));
+    // 1.1.8 (cine_3d, on by default): a real cutscene (a demo, not a dialogue) shows only the giant screen in
+    // 3D, in every mode: no model, window or ambience (but the Helmaroc King's demos, the special scenes
+    // and the ambience's king); the mode as it was a second after it ends, so short demos chained one
+    // after another do not switch the picture each time.
+    static uint64_t sCutsceneNs = 0;
+    if (cutscene) sCutsceneNs = nowNs();
+    const bool cutsceneHeld = cutscene || (sCutsceneNs != 0 && nowNs() - sCutsceneNs < 1000000000ull);
+    const bool cineOnly = table.cineScreen && cutsceneHeld && kingNow == nullptr;
+    const bool ownView = !specialScene && (intro2d || firstPerson || cineOnly);
     const bool modeOn = table.diorama || table.window || special;
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
@@ -1435,7 +1455,7 @@ bool pc_vr_view_begin(view_class* view) {
         // the stick as on the screen meanwhile (1.0.9): aiming in first person (the hookshot, the bow...)
         // it keeps the game camera's own axes, not the model's last heading
         wq_xr_set_camera_heading(0.0f, false, dComIfGp_getMesgStatus() != 0);
-        if (!modeOn && !intro2d) {
+        if (!modeOn && !intro2d && !cineOnly) {
             ambientFrame(view, table, player);
         } else {
             ambientOff();
