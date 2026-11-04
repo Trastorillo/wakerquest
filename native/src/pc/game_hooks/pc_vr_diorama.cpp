@@ -1367,8 +1367,7 @@ bool pc_vr_view_begin(view_class* view) {
         if (stageName != nullptr && (room != sLogRoom || strncmp(stageName, sLogStage, sizeof(sLogStage) - 1) != 0)) {
             sLogRoom = room;
             strncpy(sLogStage, stageName, sizeof(sLogStage) - 1);
-            pc::writef(STDERR_FILENO, "[cos] stage: %s room %d
-", sLogStage, room);
+            pc::writef(STDERR_FILENO, "[cos] stage: %s room %d\n", sLogStage, room);
         }
     }
     fopAc_ac_c* bird = nullptr;
@@ -1420,7 +1419,7 @@ bool pc_vr_view_begin(view_class* view) {
         sIntro2dWas = intro2d;
     }
     wq_xr_set_intro_flat(intro2d);
-    // 1.1.8 (cine_3d, on by default): a real cutscene (a demo, not a dialogue) shows only the giant screen in
+    // 1.1.8 (cine_only, on by default): a real cutscene (a demo, not a dialogue) shows only the giant screen in
     // 3D, in every mode: no model, window or ambience (but the Helmaroc King's demos, the special scenes
     // and the ambience's king); the mode as it was a second after it ends, so short demos chained one
     // after another do not switch the picture each time.

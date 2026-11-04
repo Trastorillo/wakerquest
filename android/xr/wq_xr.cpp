@@ -100,6 +100,7 @@ constexpr int kWindowStep = 54;
 struct Settings {
     float distance = 0.916f; // m in front of where the player looked at the start
     float width = 0.65f;     // m; the height follows the picture (16:9 widescreen, 4:3 without)
+    float screenScale = 1.0f;  // 1.1.8: the game's world on the giant screen, as the window's scale (more: smaller, deeper)
     float height = -0.179f;  // m above eye height
     float screenX = -0.015f; // m to the right (a grip moves it, as the window's)
     float screenYaw = 7.3f;  // degrees, turned to the left (a grip turns it)
@@ -116,6 +117,7 @@ struct Settings {
     bool stereo = true;             // twice the drawing (stereo_resolution has fewer lines for it)
     float stereoStrength = 0.1f;    // how far the distance moves per eye, in half picture widths
     float stereoFocus = 200.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
+    bool flatEdges = false;         // 1.1.8: the giant screen's 3D strips at its left and right edges: the same picture in both eyes
     bool cine3d = true;             // cutscenes (the game's events): more depth and more coming out
     float hudWidth = 0.9f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = lines / 480), one per mode
@@ -146,7 +148,7 @@ struct Settings {
     float windowHudPose[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     float windowHudScale = 1.0f;
     bool windowHudMove = false;  // window_hud_move (1.1.5): the grips hold the window's HUD, not the window
-    bool cineScreen = true;                      // 1.1.8 (key cine_3d): cutscenes only on the giant screen in 3D
+    bool cineScreen = true;                      // 1.1.8 (key cine_only): cutscenes only on the giant screen in 3D
     // the title screen on the giant screen, flat, whatever the mode: always (1.1.1; an old intro_2d key in
     // xr.ini is ignored)
     bool intro2d = true;
@@ -241,13 +243,16 @@ const char kDefaultSettings[] =
     "# options menu); the GC's D-pad: left grip + Y up (the dungeon map, the sea chart), + X down, right\n"
     "# grip + B left, + A right (pressed as the grip closes: what it took stays where it was); a grip holds what it is on (the screen, the window, the model, the ambience, a panel):\n"
     "# one moves and turns it, both also size it; with a grip held, the right stick scales the world (the\n"
-    "# model's bubble_span, the window's window_scale, the screen's ambience's ambient_scale, or the screen's\n"
-    "# width without ambience) and its click puts what is held back in its place; the right stick's click\n"
+    "# model's bubble_span, the window's window_scale, the screen's ambience's ambient_scale, or the giant screen's\n"
+    "# screen_scale (the world's size on it: its 3D depth) when the ray is on it or it has no ambience) and its click puts what is held back in its place; the right stick's click\n"
     "# alone is the game's Z. Saved here when let go.\n"
     "# distance and width in metres, height in metres above the eyes,\n"
     "# passthrough 1 = the room around the screen, 0 = black; refresh in Hz (72, 80, 90, 120).\n"
     "distance = 0.916\n"
     "width = 0.65\n"
+    "# screen_scale 1 = the screen's 3D as it is; more: the world smaller, deeper. The eyes' separation does not\n"
+    "# grow with width (1.1.8): stereo_strength is for width 0.65 and shrinks as the screen grows.\n"
+    "screen_scale = 1\n"
     "height = -0.179\n"
     "# screen_x (m to the right) and screen_yaw (degrees): a grip moves and turns the screen, both\n"
     "# grips change its width (saved here); screen_frame 1 = a frame around it.\n"
@@ -273,6 +278,9 @@ const char kDefaultSettings[] =
     "stereo_strength = 0.1\n"
     "stereo_focus = 200\n"
     "cine_3d = 1\n"
+    "# flat_edges 1 = on the giant screen in 3D, the strips at its left and right edges (6% of each eye) blend into\n"
+    "# the left eye's picture in both eyes, so no eye sees at the edge what the other does not.\n"
+    "flat_edges = 0\n"
     "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
     "# the 3D changes: resolution = the giant screen, diorama_resolution = the bubble (resolution's while\n"
     "# it is not here), stereo_resolution = the giant screen in 3D, window_resolution = the window. The\n"
@@ -354,13 +362,13 @@ const char kDefaultSettings[] =
     "dynres_high_fps = 29.5\n"
     "dynres_min = 0.7\n"
     "# cutscenes and dialogues in the bubble: talk_zoom_on 1 = it closes in on who talks (talk_zoom of\n"
-    "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it. 1.1.8: cine_3d 1 =\n"
+    "# its span), talk_screen 1 = the game's 2D (the dialogue box) on a panel beside it. 1.1.8: cine_only 1 =\n"
     "# the real cutscenes (not the dialogues) show only the giant screen in 3D, with no model, window or\n"
     "# ambience, and back to the mode after them (a second later, so short chained ones do not flicker).\n"
     "talk_zoom_on = 1\n"
     "talk_zoom = 0.6\n"
     "talk_screen = 1\n"
-    "cine_3d = 1\n"
+    "cine_only = 1\n"
     "# seethrough_on 1 = Link seen through what stands in front of him, a hole seethrough_radius m around him.\n"
     "seethrough_on = 0\n"
     "seethrough_radius = 0.8\n"
@@ -434,6 +442,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     const bool on = !(!strcmp(v, "0") || !strcmp(v, "off") || !strcmp(v, "no") || !strcmp(v, "false"));
     if (!strcmp(key, "distance")) s.distance = clampf(f, 0.5f, 30.0f);
     else if (!strcmp(key, "width")) s.width = clampf(f, 0.5f, 40.0f);
+    else if (!strcmp(key, "screen_scale")) s.screenScale = clampf(f, 0.25f, 20.0f);
     else if (!strcmp(key, "height")) s.height = clampf(f, -10.0f, 10.0f);
     else if (!strcmp(key, "screen_x")) s.screenX = clampf(f, -10.0f, 10.0f);
     else if (!strcmp(key, "screen_yaw")) s.screenYaw = std::remainder(f, 360.0f);  // -180..180
@@ -444,6 +453,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo")) s.stereo = on;
     else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.10f);
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
+    else if (!strcmp(key, "flat_edges")) s.flatEdges = on;
     else if (!strcmp(key, "cine_3d")) s.cine3d = on;
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "diorama_resolution")) s.dioramaResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
@@ -470,7 +480,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "gpu_boost")) s.gpuBoost = on;
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
-    else if (!strcmp(key, "cine_3d")) s.cineScreen = on;
+    else if (!strcmp(key, "cine_only")) s.cineScreen = on;
     else if (!strcmp(key, "language")) s.language = !strcmp(v, "en") ? 1 : !strcmp(v, "fr") ? 2 : 0;
     else if (!strcmp(key, "talk_zoom_on")) s.talkZoomOn = on;
     else if (!strcmp(key, "talk_zoom")) s.talkZoom = clampf(f, 0.1f, 1.0f);
@@ -613,7 +623,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "window_hud_on")) return flag(s.windowHudOn);
     if (!strcmp(key, "window_hud_scale")) return num(s.windowHudScale);
     if (!strcmp(key, "window_hud_move")) return flag(s.windowHudMove);
-    if (!strcmp(key, "cine_3d")) return flag(s.cineScreen);
+    if (!strcmp(key, "cine_only")) return flag(s.cineScreen);
     if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
     if (!strcmp(key, "talk_zoom")) return num(s.talkZoom);
@@ -647,11 +657,13 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "ambient_scale")) return num(s.ambientScale);
     if (!strcmp(key, "stereo_strength")) return num(s.stereoStrength);
     if (!strcmp(key, "stereo_focus")) return num(s.stereoFocus);
+    if (!strcmp(key, "flat_edges")) return flag(s.flatEdges);
     if (!strcmp(key, "cine_3d")) return flag(s.cine3d);
     if (!strcmp(key, "passthrough")) return flag(s.passthrough);
     if (!strcmp(key, "stereo")) return flag(s.stereo);
     if (!strcmp(key, "distance")) return num(s.distance);
     if (!strcmp(key, "width")) return num(s.width);
+    if (!strcmp(key, "screen_scale")) return num(s.screenScale);
     if (!strcmp(key, "height")) return num(s.height);
     if (!strcmp(key, "screen_x")) return num(s.screenX);
     if (!strcmp(key, "screen_yaw")) return num(s.screenYaw);
@@ -860,7 +872,7 @@ struct Xr {
     bool dioramaFrame = false;
     uint32_t frameTag = 0;
     bool hudFrame = false;  // the buffer's third part is the HUD's panel (Aurora patch 0026)
-    GLint copyUAlpha = -1, copyUHud = -1;
+    GLint copyUAlpha = -1, copyUHud = -1, copyUFlat = -1;
 };
 Xr s;
 
@@ -1164,11 +1176,19 @@ uniform sampler2D u_tex;
 uniform int u_linear;
 uniform int u_alpha;  // the diorama: keep the alpha (straight in the buffer), premultiplied for OpenXR
                       // 2, 3: the room's ambience after one or two screen eyes (those stay opaque)
+uniform vec2 u_flat;  // 1.1.8: the screen's 3D: x the width of one eye in the buffer (0: off), y the strip (of an eye)
 uniform vec2 u_hud;   // with u_alpha 1: the HUD's part of the buffer (the window's ambience after it)
 in vec2 v_uv;
 out vec4 o_color;
 void main() {
     vec4 t = texture(u_tex, v_uv);
+    if (u_flat.x > 0.0 && v_uv.x < 2.0 * u_flat.x) {
+        // the strips at the eyes' left and right edges: the left eye's picture in both (flat, on the screen)
+        float right = step(u_flat.x, v_uv.x);
+        float lx = (v_uv.x - right * u_flat.x) / u_flat.x;
+        float k = 1.0 - smoothstep(0.0, u_flat.y, min(lx, 1.0 - lx));
+        if (k > 0.0 && right > 0.5) t = mix(t, texture(u_tex, vec2(v_uv.x - u_flat.x, v_uv.y)), k);
+    }
     vec3 c = t.rgb;
     if (u_linear != 0)
         c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
@@ -1202,6 +1222,7 @@ void main() {
     s.copyULinear = glGetUniformLocation(s.copyProg, "u_linear");
     s.copyUAlpha = glGetUniformLocation(s.copyProg, "u_alpha");
     s.copyUHud = glGetUniformLocation(s.copyProg, "u_hud");
+    s.copyUFlat = glGetUniformLocation(s.copyProg, "u_flat");
     return true;
 }
 
@@ -2548,6 +2569,8 @@ void saveScreen() {
     wq_xr_set("screen_yaw", v);
     snprintf(v, sizeof v, "%.2f", st.width);
     wq_xr_set("width", v);
+    snprintf(v, sizeof v, "%.2f", st.screenScale);
+    wq_xr_set("screen_scale", v);
 }
 
 // The D-pad's cancel (grip + a face button right as the grip closed, 1.1.6): hand h lets go of what it
@@ -2596,6 +2619,7 @@ void cancelGrab(int h, bool window, bool diorama, bool ambient) {
         if (s.stickScale == 1) st.tableSpan = was.tableSpan;
         if (s.stickScale == 2) st.windowScale = was.windowScale;
         if (s.stickScale == 3) st.ambientScale = was.ambientScale;
+        if (s.stickScale == 4) st.screenScale = was.screenScale;
         if (s.stickScale == 4) st.width = was.width;
         s.stickScale = 0;
         if (s.stickLift) st.windowLift = was.windowLift;
@@ -2891,24 +2915,23 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             int what = diorama ? 1 : window ? 2 : ambient ? 3 : 4;
             if (what == 3 && ambientHeld)
                 what = s.stickScale == 3 || s.stickScale == 4 ? s.stickScale : aimOnScreen() ? 4 : 3;
-            float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale : &st.width;
-            const float lo = what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.5f;
-            const float hi = what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 40.0f;
+            float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale : &st.screenScale;
+            const float lo = what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.25f;
+            const float hi = what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 20.0f;
             if (s.stickScale != what) {
                 s.stickScale = what;
                 s.stickTick = *v;
                 xrlog("grip: the right stick scales %s", what == 1 ? "the model's world" : what == 2 ? "the window's world"
-                                                         : what == 3 ? "the ambience" : "the screen");
+                                                         : what == 3 ? "the ambience" : "the screen's world");
             }
             const float dt = st.refresh > 0 ? 1.0f / float(st.refresh) : 1.0f / 72.0f;
             const float k = std::exp2((std::fabs(y) - 0.25f) / 0.75f * dt * (y > 0.0f ? 1.0f : -1.0f));
             const float before = *v;
-            // the span and the window's scale are the game's metres per metre: fewer, the world larger
-            *v = clampf(what <= 2 ? *v / k : *v * k, lo, hi);
+            // the span, the window's and the screen's scale are the game's metres per metre: fewer, the world larger
+            *v = clampf(what == 1 || what == 2 || what == 4 ? *v / k : *v * k, lo, hi);
             // both hands sizing the same thing go on from it
             const bool ambientDragged = s.dragAmbient || (ambientHeld && !s.aimScreen);
-            if (s.dragging && s.dragSize > 0.0f && before > 0.0f &&
-                ((what == 4 && !ambientDragged) || (what == 3 && ambientDragged)))
+            if (s.dragging && s.dragSize > 0.0f && before > 0.0f && what == 3 && ambientDragged)
                 s.dragSize *= *v / before;
             if (std::fabs(*v / s.stickTick - 1.0f) >= 0.1f) {
                 s.stickTick = *v;
@@ -2962,8 +2985,8 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             snprintf(v, sizeof v, "%.2f", st.ambientScale);
             wq_xr_set("ambient_scale", v);
         } else {
-            snprintf(v, sizeof v, "%.2f", st.width);
-            wq_xr_set("width", v);
+            snprintf(v, sizeof v, "%.2f", st.screenScale);
+            wq_xr_set("screen_scale", v);
         }
         s.stickScale = 0;
     }
@@ -3143,8 +3166,9 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             st.height = defaults.height;
             st.distance = defaults.distance;
             st.screenYaw = defaults.screenYaw;
+            st.screenScale = defaults.screenScale;
             s.dragging = false;
-            xrlog("grip: the screen back in its place");
+            xrlog("grip: the screen back in its place (and its world's scale)");
         } else {
             st.screenX = clampf(s.dragX + (at.x - s.dragHand.x), -10.0f, 10.0f);
             st.height = clampf(s.dragHeight + (at.y - s.dragHand.y), -10.0f, 10.0f);
@@ -3550,6 +3574,11 @@ bool copyNewestFrame() {
             // left | right | HUD, then the window's ambience's two eyes
             if (f.ambient && f.hud) glUniform2f(s.copyUHud, 0.4f, 0.6f);
             else glUniform2f(s.copyUHud, 0.6667f, 2.0f);
+            // 1.1.8 (flat_edges): the screen's two eyes, with the ambience's after them when it is there
+            if (s.settings.flatEdges && f.stereo && !f.diorama && !f.hud)
+                glUniform2f(s.copyUFlat, 1.0f / float(f.ambient ? 4 : 2), 0.06f);
+            else
+                glUniform2f(s.copyUFlat, 0.0f, 0.06f);
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, tex);
             glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -3618,7 +3647,12 @@ void updateScreenStereo() {
     const float nearW = s_sceneNear.load();
     const float want = st.cine3d && king ? 1.0f : 0.0f;
     s_cineRamp += clampf(want - s_cineRamp, -dt / 0.5f, dt / 0.5f);
-    const float strength = clampf(st.stereoStrength * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.10f);
+    // 1.1.8: the eyes' separation in the world is the same whatever the screen's width (clip.x moves by a share of
+    // the picture, which grows with the screen): strength x (the default width / the width), and with the
+    // screen's world scale (screen_scale: more, the world smaller, so deeper). At the default width and scale
+    // nothing changes. The Helmaroc's scenes (below) go through the same factor.
+    const float widthK = (0.65f / clampf(st.width, 0.5f, 40.0f)) * st.screenScale;
+    const float strength = clampf(st.stereoStrength * widthK * (1.0f + 0.6f * s_cineRamp), 0.0f, 0.30f);
     const float userFocus = clampf(st.stereoFocus, 1.0f, 2500.0f);
     float target = userFocus;
     // (1.1.4: the floor of 20 units only for the scenes' focus; the settings' as they are)
@@ -3630,7 +3664,7 @@ void updateScreenStereo() {
     if (mode != s_sceneLogged && st.stereo) {
         s_sceneLogged = mode;
         xrlog("cinematic 3D: focus %.0f, strength %.3f (%s)", target,
-              clampf(st.stereoStrength * (st.cine3d && king ? 1.6f : 1.0f), 0.0f, 0.10f),
+              clampf(st.stereoStrength * widthK * (st.cine3d && king ? 1.6f : 1.0f), 0.0f, 0.30f),
               mode == 2 ? "the Helmaroc King: coming out, at most a third of the focus"
               : mode == 1 ? "a cutscene or a dialogue: everything behind the screen" : "the game");
     }
@@ -3968,6 +4002,8 @@ void runFrame() {
             snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.windowScale);
         else if (s.labelWhat == 3)
             snprintf(text, sizeof text, "%s x%.2f", kAmbience[lang], st.ambientScale);
+        else if (s.labelWhat == 4)
+            snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.screenScale);
         else if (s.labelWhat == 5)
             snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.windowLift);
         else if (st.window && lines > 0)

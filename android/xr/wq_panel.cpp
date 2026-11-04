@@ -163,6 +163,10 @@ const Item kScreen[] = {
     {kXr, "cine_3d", {"3D intenso con el Helmaroc", "Stronger 3D with the Helmaroc King", "3D intense avec le Roi Cuirassé"},
      {"Sale de la pantalla en sus escenas", "It comes out of the screen in its scenes", "Il sort de l'écran dans ses scènes"},
      kSwitch},
+    {kXr, "flat_edges", {"Bordes planos", "Flat edges", "Bords plats"},
+     {"Los lados de la pantalla 3D, sin doble imagen", "The 3D screen's sides, no double image",
+      "Les côtés de l'écran 3D, sans double image"},
+     kSwitch},
 };
 // the diorama (mode = maqueta): the bubble or the table, its birds, the hole around Link
 const Item kDiorama[] = {
@@ -263,7 +267,7 @@ const Item kAmbient[] = {
 };
 // cutscenes, dialogues and the diorama's panels (pc_vr_diorama.cpp)
 const Item kScenes[] = {
-    {kXr, "cine_3d", {"Cinemáticas en pantalla 3D", "Cutscenes on the 3D screen", "Cinématiques sur écran 3D"},
+    {kXr, "cine_only", {"Cinemáticas en pantalla 3D", "Cutscenes on the 3D screen", "Cinématiques sur écran 3D"},
      {"Solo la pantalla gigante; luego vuelve al modo", "Only the giant screen; back to the mode after",
       "Seulement l'écran géant ; retour au mode ensuite"},
      kSwitch},
