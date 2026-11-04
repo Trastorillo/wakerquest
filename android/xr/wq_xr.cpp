@@ -271,7 +271,7 @@ const char kDefaultSettings[] =
     "refresh = 72\n"
     "gpu_boost = 0\n"
     "cpu_low = 0\n"
-    "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.1),\n"
+    "# 3D: stereo 1/0; stereo_strength = depth of what is far (0.004-0.3; 0.1 at the default width 0.65, the effective one is scaled by width),\n"
     "# stereo_focus = the distance in the game that stays on the screen (50-2500); in cutscenes and dialogues\n"
     "# everything stays behind the screen; cine_3d 1 = more 3D, coming out, in the Helmaroc King's scenes.\n"
     "stereo = 1\n"
@@ -451,7 +451,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "perf_preset")) s.perfPreset = presetIndex(v);
     else if (!strcmp(key, "refresh")) s.refresh = int(f);
     else if (!strcmp(key, "stereo")) s.stereo = on;
-    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.10f);
+    else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.30f);
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
     else if (!strcmp(key, "flat_edges")) s.flatEdges = on;
     else if (!strcmp(key, "cine_3d")) s.cine3d = on;
@@ -586,9 +586,12 @@ int windowLines(int base, float width, int current) {
 
 // The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
 std::atomic_bool s_introFlat{false};  // wq_xr_set_intro_flat: the title on the flat giant screen
+std::atomic_bool s_cineScreen{false};  // wq_xr_set_cine_screen (1.1.8): a cutscene on the giant screen, in 3D
 const char* activeResolutionKey(const Settings& s) {
     // the title screen (intro_2d): the flat giant screen's, whatever the mode (the scene that ran slow)
     if (s_introFlat.load()) return "resolution";
+    // a cutscene on the giant screen (cine_only): the screen's 3D resolution, not the model's or the window's
+    if (s_cineScreen.load()) return s.stereo ? "stereo_resolution" : "resolution";
     return s.window ? "window_resolution" : s.diorama ? "diorama_resolution" : s.stereo ? "stereo_resolution" : "resolution";
 }
 int resolutionOf(const Settings& s, const char* key) {
@@ -1365,8 +1368,8 @@ void noteSwapchainRecreation(uint32_t w, uint32_t h) {
                 times.end());
     if (times.size() > 6 && now - lastWarnNs >= 60000000000ull) {
         lastWarnNs = now;
-        xrlog("warning: %zu swapchain/buffer recreations in the last minute (last: %ux%u -> %ux%u, %s ambience)",
-              times.size(), s.screenW, s.screenH, w, h, s.ambientFrame ? "with" : "without");
+        xrlog("warning: %zu swapchain/buffer recreations in the last minute (last: %ux%u before, %ux%u now)",
+              times.size(), s.screenW, s.screenH, w, h);
     }
 }
 
@@ -2620,7 +2623,6 @@ void cancelGrab(int h, bool window, bool diorama, bool ambient) {
         if (s.stickScale == 2) st.windowScale = was.windowScale;
         if (s.stickScale == 3) st.ambientScale = was.ambientScale;
         if (s.stickScale == 4) st.screenScale = was.screenScale;
-        if (s.stickScale == 4) st.width = was.width;
         s.stickScale = 0;
         if (s.stickLift) st.windowLift = was.windowLift;
         s.stickLift = false;
@@ -2732,7 +2734,7 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     }
     Settings& st = s.settings;
     // the mode shown: the title's flat screen is the giant screen, with no ambience
-    const bool flat = s_introFlat.load();
+    const bool flat = s_introFlat.load() || s_cineScreen.load();  // (a cutscene: the screen shown, 1.1.8)
     const bool window = st.window && !flat, diorama = st.diorama && !flat, ambient = st.ambient && !flat;
     if (flat != s.flatWas) {
         // the title began or ended with a grip held: what was held is no longer shown; the drag stops
@@ -3345,6 +3347,7 @@ void resetPositions(void (*set)(const char*, const char*)) {
     set("distance", v);
     snprintf(v, sizeof v, "%g", defaults.screenYaw);
     set("screen_yaw", v);
+    set("screen_scale", "1");  // 1.1.8: the screen's world scale too
 }
 void hostResetPosition() { resetPositions(hostSet); }
 void hostResetPanels() {
@@ -3638,7 +3641,7 @@ float s_sceneFocus = 0.0f;  // the focus in effect (0: none yet)
 int s_sceneLogged = 0;      // the last mode logged: 0 the game, 1 behind the screen, 2 the Helmaroc King
 void updateScreenStereo() {
     const Settings& st = s.settings;
-    if ((st.diorama || st.window || s_special.load()) && s.dioramaFrame) {
+    if ((st.diorama || st.window || s_special.load()) && s.dioramaFrame && !s_cineScreen.load()) {
         s_stereoApplied[0] = -1.0f;  // the diorama's eye shift; the screen's applied again after it
         return;
     }
@@ -3977,7 +3980,7 @@ void runFrame() {
     // world's scale while the right stick changes it (a grip held)
     if (SDL_GetTicks() < s.sizeShownUntil) {
         Settings st = s.settings;
-        if (s_introFlat.load()) st.diorama = st.window = false;  // the title: the screen
+        if (s_introFlat.load() || s_cineScreen.load()) st.diorama = st.window = false;  // the title, a cutscene: the screen
         const bool flat = !st.diorama && !st.window;
         const float r = st.sphere ? 0.5f * st.tableWidth : 0.5f * st.tableDepth;
         const float midY = st.sphere ? -st.tableHeight + 0.35f * r : -st.tableHeight + 0.1f;
@@ -4155,7 +4158,7 @@ extern "C" int wq_xr_resolution(int* base) {
     const Settings& st = s_sharedSettings;
     const int lines = activeResolution(st);
     if (base != nullptr) *base = lines;
-    if (!st.window || s_introFlat.load()) {  // (the title: the flat screen's lines, whole)
+    if (!st.window || s_introFlat.load() || s_cineScreen.load()) {  // (the title, a cutscene: the screen's lines, whole)
         s_windowLines.store(0);
         return lines;
     }
@@ -4202,6 +4205,11 @@ extern "C" void wq_xr_set_talk(bool talk) {
 extern "C" void wq_xr_reset_position(void) {
     if (s.settingsPath[0] == '\0') return;
     resetPositions(wq_xr_set);
+}
+
+extern "C" void wq_xr_set_cine_screen(bool on) {
+    if (s_cineScreen.exchange(on) != on)
+        xrlog("cutscene on the giant screen in 3D (cine_only): %s", on ? "on" : "over, the mode as it was");
 }
 
 extern "C" void wq_xr_set_intro_flat(bool flat) {

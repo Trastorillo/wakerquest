@@ -1364,10 +1364,10 @@ bool pc_vr_view_begin(view_class* view) {
         static char sLogStage[16] = "";
         static int sLogRoom = -99;
         const int room = dComIfGp_roomControl_getStayNo();
-        if (stageName != nullptr && (room != sLogRoom || strncmp(stageName, sLogStage, sizeof(sLogStage) - 1) != 0)) {
+        if (stageName != nullptr && room >= 0 && (room != sLogRoom || strncmp(stageName, sLogStage, sizeof(sLogStage) - 1) != 0)) {
             sLogRoom = room;
             strncpy(sLogStage, stageName, sizeof(sLogStage) - 1);
-            pc::writef(STDERR_FILENO, "[cos] stage: %s room %d\n", sLogStage, room);
+            pc::writef(STDERR_FILENO, "[vr] scene: %s room %d\n", sLogStage, room);
         }
     }
     fopAc_ac_c* bird = nullptr;
@@ -1423,10 +1423,15 @@ bool pc_vr_view_begin(view_class* view) {
     // 3D, in every mode: no model, window or ambience (but the Helmaroc King's demos, the special scenes
     // and the ambience's king); the mode as it was a second after it ends, so short demos chained one
     // after another do not switch the picture each time.
-    static uint64_t sCutsceneNs = 0;
-    if (cutscene) sCutsceneNs = nowNs();
+    // (the Helmaroc King's demos are not cutscenes of this kind, and helmarocInDemo may give null between their
+    // phases: the king seen less than a second ago counts as there)
+    static uint64_t sCutsceneNs = 0, sKingNs = 0;
+    if (kingNow != nullptr) sKingNs = nowNs();
+    const bool kingRecent = sKingNs != 0 && nowNs() - sKingNs < 1000000000ull;
+    if (cutscene && !kingRecent) sCutsceneNs = nowNs();
     const bool cutsceneHeld = cutscene || (sCutsceneNs != 0 && nowNs() - sCutsceneNs < 1000000000ull);
-    const bool cineOnly = table.cineScreen && cutsceneHeld && kingNow == nullptr;
+    const bool cineOnly = table.cineScreen && cutsceneHeld && !kingRecent;
+    wq_xr_set_cine_screen(cineOnly && !specialScene);
     const bool ownView = !specialScene && (intro2d || firstPerson || cineOnly);
     const bool modeOn = table.diorama || table.window || special;
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);

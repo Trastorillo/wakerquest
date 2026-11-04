@@ -156,7 +156,7 @@ const Item kScreen[] = {
      {"Una imagen para cada ojo", "A picture for each eye", "Une image pour chaque œil"}, kSwitch},
     {kXr, "stereo_strength", {"Profundidad 3D", "3D depth", "Profondeur 3D"},
      {"Más = el fondo más lejos", "More = the background farther", "Plus = le fond plus loin"}, kStepper, nullptr, 0,
-     0.004f, 0.10f, 0.002f, "%.3f"},
+     0.004f, 0.30f, 0.004f, "%.3f"},
     {kXr, "stereo_focus", {"Salir de la pantalla", "Out of the screen", "Sortir de l'écran"},
      {"Más = lo cercano sale hacia ti", "More = near things come out at you", "Plus = le proche sort vers vous"},
      kStepper, nullptr, 0, 50.0f, 2500.0f, 100.0f, "%.0f"},

@@ -149,6 +149,9 @@ void wq_xr_set_talk(bool talk);
 // the layer shows the screen with no 3D meanwhile and the grips hold the screen; the mode in xr.ini stays
 // as it is (nothing is written), and comes back when it ends.
 void wq_xr_set_intro_flat(bool flat);
+// The game, every frame (pc_vr_diorama.cpp, 1.1.8): a real cutscene shows on the giant screen in 3D whatever the
+// mode (cine_only): its resolution, the grips and the 3D are the screen's meanwhile; xr.ini unchanged.
+void wq_xr_set_cine_screen(bool on);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);
