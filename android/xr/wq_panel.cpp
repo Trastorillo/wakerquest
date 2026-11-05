@@ -1,8 +1,8 @@
 // WakerQuest's settings panel in the headset, after GalaxyQuest's VR settings panel
 // (platform/src/xr/vr_settings.cpp): a panel drawn by the headset layer on the CPU (ui_canvas.h) into
 // a quad layer of its own, sharp whatever the game's resolution, in front of the player in any mode
-// (the giant screen, the diorama, the window). It opens and closes with the left stick's click (fase 2;
-// before, both triggers and the right grip, which the grips now need), and is worked with the laser
+// (the giant screen, the diorama, the window). It opens and closes with the left grip + Y (1.1.9; before,
+// the left stick's click, and both triggers and the right grip), and is worked with the laser
 // pointer (either hand's trigger) or the controller. The game waits while it is open
 // (pc_vr_panel_frame, the game thread).
 //
@@ -11,7 +11,7 @@
 // every frame and applies (wq_xr_panel_* in wq_xr.h). The other game settings stay in the game's
 // options menu, a button away ("Más opciones").
 //
-// Fase 2: nine tabs in two rows, by what they set (General, Pantalla, Maqueta, Ventana, Ambiente;
+// Fase 2: nine tabs in two rows, by what they set (General, Pantalla 3D, Maqueta, Ventana, Ambiente;
 // Escenas, Rendimiento, Mandos, Acerca de), every row of before kept; a few rows that only tell (the
 // controls) and the Acerca de tab (the version, the update check). In three languages (xr.ini
 // language = es, en or fr): each text a Tr, the French letters in ui_font.h since then.
@@ -95,9 +95,11 @@ struct Item {
 constexpr int kLabelMaxW = 640;  // the size label's chain (wq_xr.cpp: the window's line is longer)
 
 #define OPTS(o) o, (int)(sizeof(o) / sizeof(o[0]))
+// (pantalla3d: mode = pantalla with stereo = 1 in xr.ini, wq_xr.cpp settingValue and wq_xr_set)
 const Option kMode[] = {{"pantalla", {"Pantalla", "Screen", "Écran"}},
-                        {"maqueta", {"Maqueta", "Diorama", "Maquette"}},
-                        {"ventana", {"Ventana", "Window", "Fenêtre"}}};
+                        {"pantalla3d", {"Pantalla 3D", "3D Screen", "Écran 3D"}},
+                        {"ventana", {"Ventana", "Window", "Fenêtre"}},
+                        {"maqueta", {"Maqueta", "Diorama", "Maquette"}}};
 const Option kShape[] = {{"esfera", {"Esfera", "Sphere", "Sphère"}}, {"caja", {"Caja", "Box", "Boîte"}}};
 const Option kRefresh[] = {{"72", {"72 Hz"}}, {"80", {"80 Hz"}}, {"90", {"90 Hz"}}, {"120", {"120 Hz"}}};
 const Option kResolution[] = {{"540", {"0,50", "0.50"}},   {"648", {"0,60", "0.60"}},   {"756", {"0,70", "0.70"}},
@@ -105,8 +107,9 @@ const Option kResolution[] = {{"540", {"0,50", "0.50"}},   {"648", {"0,60", "0.6
                               {"1080", {"1,00", "1.00"}},  {"1188", {"1,10", "1.10"}},  {"1296", {"1,20", "1.20"}},
                               {"1404", {"1,30", "1.30"}},  {"1512", {"1,40", "1.40"}},  {"1620", {"1,50", "1.50"}},
                               {"1728", {"1,60", "1.60"}},  {"1944", {"1,80", "1.80"}},  {"2160", {"2,00", "2.00"}}};
-// the Rendimiento preset (wq_xr.cpp kPresetKeys): refresh, GPU, resolution, 3D, the bubble's world, the
-// window's horizon, the characters' distance, set at once when one is chosen; personal = the values chosen by hand
+// the Rendimiento preset (wq_xr.cpp kPresetKeys): every mode's refresh and resolution, the CPU, the bubble's
+// world, the window's horizon, the characters' distance, set at once when one is chosen; personal = the values
+// chosen by hand
 const Option kPerfPreset[] = {{"ahorro", {"Ahorro", "Saving", "Économie"}},
                               {"equilibrado", {"Equilibrado", "Balanced", "Équilibré"}},
                               {"maximo", {"Máximo", "Maximum", "Maximum"}},
@@ -119,8 +122,8 @@ const Option kPanelLanguage[] = {{"es", {"Español"}}, {"en", {"English"}}, {"fr
 // General: the mode, the languages, the game's start
 const Item kGeneral[] = {
     {kXr, "mode", {"Modo", "Mode", "Mode"},
-     {"Pantalla gigante, el mundo en burbuja, o ventana", "A giant screen, the world in a bubble, or a window",
-      "Écran géant, le monde en bulle, ou fenêtre"},
+     {"Pantalla 2D o 3D, ventana, o el mundo en burbuja", "2D or 3D screen, a window, or the world in a bubble",
+      "Écran 2D ou 3D, fenêtre, ou le monde en bulle"},
      kStepper, OPTS(kMode)},
     {kXr, "language", {"Idioma del panel", "Panel language", "Langue du panneau"},
      {"Este panel de ajustes", "This settings panel", "Ce panneau de réglages"}, kStepper, OPTS(kPanelLanguage)},
@@ -129,13 +132,14 @@ const Item kGeneral[] = {
     {kGame, "COS_QOL_SKIP_INTRO", {"Saltar la introducción", "Skip the intro", "Passer l'introduction"},
      {"Al empezar una partida nueva", "When a new game starts", "En commençant une nouvelle partie"}, kSwitch},
     {kAction, "full_menu", {"Más opciones", "More options", "Plus d'options"},
-     {"El menú completo del juego (con el mando)", "The game's full menu (with the controller)",
-      "Le menu complet du jeu (à la manette)"},
+     {"El menú completo del juego; lo cierra grip izq. + Y", "The game's full menu; left grip + Y closes it",
+      "Le menu complet du jeu ; grip gauche + Y le ferme"},
      kButton},
     {kAction, "reset_position", {"Recolocar burbuja y ventana", "Reset bubble and window", "Replacer bulle et fenêtre"},
      {"Y la pantalla (o grip + clic)", "And the screen (or grip + click)", "Et l'écran (ou grip + clic)"}, kButton},
 };
-// the giant screen (mode = pantalla): also moved with a grip and scaled with both (wq_xr.cpp), and its 3D
+// the giant screen (Pantalla and Pantalla 3D): also moved with a grip and scaled with both (wq_xr.cpp), the
+// game camera on it, its 3D, and Pantalla 3D's resolution and refresh rate
 const Item kScreen[] = {
     {kXr, "distance", {"Distancia de la pantalla", "Screen distance", "Distance de l'écran"},
      {"O muévela con un grip", "Or move it with a grip", "Ou déplacez-le avec un grip"}, kStepper, nullptr, 0, 0.5f,
@@ -146,27 +150,29 @@ const Item kScreen[] = {
     {kXr, "height", {"Altura de la pantalla", "Screen height", "Hauteur de l'écran"},
      {"Sobre tus ojos; o con un grip", "Above your eyes; or with a grip", "Au-dessus des yeux ; ou avec un grip"},
      kStepper, nullptr, 0, -3.0f, 3.0f, 0.1f, "%.1f m"},
+    {kXr, "screen_cam_depth", {"Cámara del juego", "Game camera", "Caméra du jeu"},
+     {"Más = más cerca; o grip izq. + stick izq.", "More = closer; or left grip + left stick",
+      "Plus = plus près ; ou grip gauche + stick gauche"},
+     kStepper, nullptr, 0, -5.0f, 5.0f, 0.25f, "%+.2f m"},
     {kXr, "passthrough", {"Tu habitación", "Your room", "Votre pièce"},
      {"Alrededor de la pantalla gigante", "Around the giant screen", "Autour de l'écran géant"}, kSwitch},
     {kXr, "screen_frame", {"Marco", "Frame", "Cadre"},
      {"Cuero verde alrededor de la pantalla y la ventana", "Green leather around the screen and the window",
       "Cuir vert autour de l'écran et de la fenêtre"},
      kSwitch},
-    {kXr, "stereo", {"3D en la pantalla", "3D on the screen", "3D sur l'écran"},
-     {"Una imagen para cada ojo", "A picture for each eye", "Une image pour chaque œil"}, kSwitch},
     {kXr, "stereo_strength", {"Profundidad 3D", "3D depth", "Profondeur 3D"},
      {"Más = el fondo más lejos", "More = the background farther", "Plus = le fond plus loin"}, kStepper, nullptr, 0,
      0.004f, 0.30f, 0.004f, "%.3f"},
     {kXr, "stereo_focus", {"Salir de la pantalla", "Out of the screen", "Sortir de l'écran"},
      {"Más = lo cercano sale hacia ti", "More = near things come out at you", "Plus = le proche sort vers vous"},
      kStepper, nullptr, 0, 50.0f, 2500.0f, 100.0f, "%.0f"},
-    {kXr, "cine_3d", {"3D intenso con el Helmaroc", "Stronger 3D with the Helmaroc King", "3D intense avec le Roi Cuirassé"},
-     {"Sale de la pantalla en sus escenas", "It comes out of the screen in its scenes", "Il sort de l'écran dans ses scènes"},
-     kSwitch},
-    {kXr, "flat_edges", {"Bordes planos", "Flat edges", "Bords plats"},
-     {"Los lados de la pantalla 3D, sin doble imagen", "The 3D screen's sides, no double image",
-      "Les côtés de l'écran 3D, sans double image"},
-     kSwitch},
+    {kXr, "stereo_resolution", {"Resolución", "Resolution", "Résolution"},
+     {"La de Pantalla 3D; 1,00 = 1080 líneas", "3D Screen's; 1.00 = 1080 lines", "Celle de l'écran 3D ; 1,00 = 1080 lignes"},
+     kStepper, OPTS(kResolution)},
+    {kXr, "stereo_refresh", {"Frecuencia", "Refresh rate", "Fréquence"},
+     {"La de Pantalla 3D; 90 Hz: más fluido", "3D Screen's; 90 Hz: smoother",
+      "Celle de l'écran 3D ; 90 Hz : plus fluide"},
+     kStepper, OPTS(kRefresh)},
 };
 // the diorama (mode = maqueta): the bubble or the table, its birds, the hole around Link
 const Item kDiorama[] = {
@@ -201,6 +207,13 @@ const Item kDiorama[] = {
     {kXr, "seethrough_radius", {"Tamaño del hueco", "Hole size", "Taille du trou"},
      {"Metros del juego alrededor de Link", "Game metres around Link", "Mètres du jeu autour de Link"}, kStepper,
      nullptr, 0, 0.4f, 4.0f, 0.2f, "%.1f m"},
+    {kXr, "diorama_resolution", {"Resolución", "Resolution", "Résolution"},
+     {"La de Maqueta; 1,00 = 1080 líneas", "The diorama's; 1.00 = 1080 lines", "Celle de la maquette ; 1,00 = 1080 lignes"},
+     kStepper, OPTS(kResolution)},
+    {kXr, "diorama_refresh", {"Frecuencia", "Refresh rate", "Fréquence"},
+     {"La de Maqueta; 90 Hz: más fluido", "The diorama's; 90 Hz: smoother",
+      "Celle de la maquette ; 90 Hz : plus fluide"},
+     kStepper, OPTS(kRefresh)},
 };
 // the window (mode = ventana): its size and place also with the grips
 const Item kWindow[] = {
@@ -240,6 +253,13 @@ const Item kWindow[] = {
      {"A su sitio y tamaño (o clic del stick mientras lo agarras)", "Back to its place and size (or stick click while holding it)",
       "À sa place et sa taille (ou clic du stick en le tenant)"},
      kButton},
+    {kXr, "window_resolution", {"Resolución", "Resolution", "Résolution"},
+     {"La de Ventana; 1,00 = 1080 líneas", "The window's; 1.00 = 1080 lines", "Celle de la fenêtre ; 1,00 = 1080 lignes"},
+     kStepper, OPTS(kResolution)},
+    {kXr, "window_refresh", {"Frecuencia", "Refresh rate", "Fréquence"},
+     {"La de Ventana; 90 Hz: más fluido", "The window's; 90 Hz: smoother",
+      "Celle de la fenêtre ; 90 Hz : plus fluide"},
+     kStepper, OPTS(kRefresh)},
 };
 // the room's ambience (mode = pantalla, pc_vr_diorama.cpp): the game's seagulls, crabs and small birds
 // out of the screen
@@ -300,24 +320,22 @@ const Item kScenes[] = {
      {"El HUD y los diálogos, a su sitio", "The HUD and the dialogues, back in place", "Le HUD et les dialogues à leur place"},
      kButton},
 };
-// the preset and what is drawn when the GPU does not keep up (pc_npc_distance.cpp, pc_veg_distance.cpp,
+// the preset, Pantalla's (2D) resolution and refresh rate (each other mode's on its tab), and what is
+// drawn when the GPU does not keep up (pc_npc_distance.cpp, pc_veg_distance.cpp,
 // pc_vr_dynres.cpp)
 const Item kPerformance[] = {
     {kXr, "perf_preset", {"Rendimiento", "Performance", "Performances"},
-     {"Ahorro: menos calor; Máximo: más nitidez y 3D", "Saving: less heat; Maximum: sharper, 3D",
-      "Économie : moins chaud ; Maximum : plus net, 3D"},
+     {"Ahorro: menos calor; Máximo: más nitidez", "Saving: less heat; Maximum: sharper",
+      "Économie : moins chaud ; Maximum : plus net"},
      kStepper, OPTS(kPerfPreset)},
-    {kGame, "COS_VR_RESOLUTION", {"Resolución", "Resolution", "Résolution"},
-     {"La de este modo (y del 3D); 1,00 = 1080 líneas", "This mode's (and the 3D's); 1.00 = 1080 lines",
-      "Celle de ce mode (et de la 3D) ; 1,00 = 1080 lignes"},
+    {kXr, "resolution", {"Resolución (Pantalla 2D)", "Resolution (2D Screen)", "Résolution (écran 2D)"},
+     {"Los otros modos, en su pestaña; 1,00 = 1080 líneas", "Other modes, on their tabs; 1.00 = 1080 lines",
+      "Autres modes, dans leur onglet ; 1,00 = 1080 lignes"},
      kStepper, OPTS(kResolution)},
-    {kXr, "refresh", {"Frecuencia", "Refresh rate", "Fréquence"},
-     {"72 Hz: menos calor; 90 Hz: más fluido", "72 Hz: less heat; 90 Hz: smoother", "72 Hz : moins chaud ; 90 Hz : plus fluide"},
+    {kXr, "refresh", {"Frecuencia (Pantalla 2D)", "Refresh rate (2D Screen)", "Fréquence (écran 2D)"},
+     {"Los otros modos, en su pestaña; 90 Hz: más fluido", "Other modes, on their tabs; 90 Hz: smoother",
+      "Autres modes, dans leur onglet ; 90 Hz : plus fluide"},
      kStepper, OPTS(kRefresh)},
-    {kXr, "gpu_boost", {"Más potencia de GPU", "More GPU power", "Plus de puissance GPU"},
-     {"Sube el reloj de la GPU; gasta más batería", "Raises the GPU's clock; uses more battery",
-      "Horloge du GPU plus haute ; plus de batterie"},
-     kSwitch},
     {kXr, "dynres", {"Resolución dinámica", "Dynamic resolution", "Résolution dynamique"},
      {"Si aun así no llega, baja la resolución", "If it still cannot keep up, a lower resolution",
       "Si ça ne suit toujours pas, baisse la résolution"},
@@ -350,7 +368,7 @@ const Item kControls[] = {
      {"El stick derecho", "The right stick", "Le stick droit"}, kSwitch},
     {kGame, "COS_CAMERA_INVERT_Y", {"Invertir cámara vertical", "Invert camera vertically", "Caméra inversée (vertical)"},
      {"El stick derecho", "The right stick", "Le stick droit"}, kSwitch},
-    {kAction, "", {"Menús: clic del stick izquierdo", "Menus: left stick click", "Menus : clic du stick gauche"},
+    {kAction, "", {"Menús: grip izquierdo + Y", "Menus: left grip + Y", "Menus : grip gauche + Y"},
      {"Abre y cierra este panel; cierra el menú del juego", "Opens or closes this panel; closes the game's menu",
       "Ouvre et ferme ce panneau ; ferme le menu du jeu"},
      kInfo},
@@ -362,10 +380,16 @@ const Item kControls[] = {
      {"Del mundo (maqueta, ventana) o del ambiente", "Of the world (diorama, window) or the ambience",
       "Du monde (maquette, fenêtre) ou de l'ambiance"},
      kInfo},
-    {kAction, "", {"Grip izq. + Y / X: cruceta arriba / abajo", "Left grip + Y / X: D-pad up / down",
-                   "Grip gauche + Y / X : croix haut / bas"},
-     {"Arriba: mapa y carta náutica; abajo: cerrar", "Up: the map and the sea chart; down: close",
-      "Haut : carte et carte marine ; bas : fermer"},
+    {kAction, "", {"Grip izq. + stick izq.: cámara", "Left grip + left stick: camera", "Grip gauche + stick gauche : caméra"},
+     {"Pantalla: acerca o aleja; ventana: altura", "Screen: closer or farther; window: height",
+      "Écran : distance ; fenêtre : hauteur"},
+     kInfo},
+    {kAction, "", {"Clic del stick izquierdo: cruceta arriba", "Left stick click: D-pad up", "Clic du stick gauche : croix haut"},
+     {"El mapa y la carta náutica", "The map and the sea chart", "La carte et la carte marine"},
+     kInfo},
+    {kAction, "", {"Grip izq. + X: cruceta abajo", "Left grip + X: D-pad down", "Grip gauche + X : croix bas"},
+     {"Cerrar; el botón nada más cerrar el grip", "Close; the button right as the grip closes",
+      "Fermer ; le bouton dès que le grip se ferme"},
      kInfo},
     {kAction, "", {"Grip der. + B / A: cruceta izquierda / derecha", "Right grip + B / A: D-pad left / right",
                    "Grip droit + B / A : croix gauche / droite"},
@@ -395,7 +419,7 @@ struct Tab {
 };
 #define TAB(es, en, fr, items) {{es, en, fr}, items, (int)(sizeof(items) / sizeof(items[0]))}
 constexpr Tab kTabs[] = {TAB("General", "General", "Général", kGeneral),
-                         TAB("Pantalla", "Screen", "Écran", kScreen),
+                         TAB("Pantalla 3D", "3D Screen", "Écran 3D", kScreen),
                          TAB("Maqueta", "Diorama", "Maquette", kDiorama),
                          TAB("Ventana", "Window", "Fenêtre", kWindow),
                          TAB("Ambiente", "Ambience", "Ambiance", kAmbient),
@@ -406,7 +430,7 @@ constexpr Tab kTabs[] = {TAB("General", "General", "Général", kGeneral),
 #undef TAB
 constexpr int kTabCount = (int)(sizeof(kTabs) / sizeof(kTabs[0]));
 constexpr int kTabsFirstRow = 5;  // the tabs in two rows: five, then the rest
-constexpr int kMaxItems = 10;
+constexpr int kMaxItems = 12;
 constexpr bool tabsFit(int i = 0) { return i >= kTabCount || (kTabs[i].count <= kMaxItems && tabsFit(i + 1)); }
 static_assert(tabsFit(), "a tab has more rows than the panel holds (kMaxItems)");
 
@@ -424,7 +448,7 @@ const Tr kOffline{"Error: sin conexión", "Error: no connection", "Erreur : pas 
 const Tr kError{"Error: ", "Error: ", "Erreur : "};
 
 // The game's keys, for the game thread's mirror (wq_xr_panel_game_keys)
-const char* const kGameKeys[] = {"COS_VR_RESOLUTION", "COS_CAMERA_INVERT_X", "COS_CAMERA_INVERT_Y",
+const char* const kGameKeys[] = {"COS_CAMERA_INVERT_X", "COS_CAMERA_INVERT_Y",
                                  "COS_GAME_LANGUAGE", "COS_QOL_SKIP_INTRO", nullptr};
 constexpr int kGameKeyCount = (int)(sizeof(kGameKeys) / sizeof(kGameKeys[0])) - 1;
 
@@ -455,15 +479,16 @@ void queueGameChange(const char* key, const std::string& v) {
 // ---- The panel ---------------------------------------------------------------------------------------
 
 // 1.0.5: wider (the six tabs' names) and larger in the room; the controls on the right as before.
-// Fase 2: the tabs in two rows (nine of them), the rows below them
+// Fase 2: the tabs in two rows (nine of them), the rows below them. 1.1.9: twelve rows at most (lower rows,
+// the panel about the same height)
 const int kTexW = 900;
 const float kRight = kTexW - 640.0f;  // the controls' shift from the 640-wide panel's places
 const float kTabsY0 = 92.0f, kTabH = 56.0f, kTabGap = 8.0f, kTabsX0 = 16.0f, kTabsX1 = kTexW - 16.0f;
-const float kRowsTop = kTabsY0 + 2.0f * kTabH + kTabGap + 24.0f, kRowH = 104.0f;
+const float kRowsTop = kTabsY0 + 2.0f * kTabH + kTabGap + 24.0f, kRowH = 88.0f;
 const int kTexH = (int)(kRowsTop + kMaxItems * kRowH + 24.0f);
 const float kWidthM = 0.8f;
 const float kCloseX0 = 448.0f + kRight, kCloseX1 = 608.0f + kRight, kCloseY0 = 24.0f, kCloseY1 = 70.0f;
-const float kControlY = 36.0f;
+const float kControlY = 34.0f;
 const float kButtonR = 28.0f;
 const float kStepMinusX = 380.0f + kRight, kStepPlusX = 580.0f + kRight;
 const float kSwitchX0 = 520.0f + kRight, kSwitchX1 = 608.0f + kRight, kSwitchR = 22.0f;
@@ -730,8 +755,8 @@ void drawPanel() {
         const float top = rowTop(i), y = top + kControlY;
         if (i == p.focus) c.roundRect(14, top + 3, kTexW - 14, top + kRowH - 3, 16.0f, rgb(34, 39, 52));
         if (i > 0) c.roundRect(32, top - 1.0f, kTexW - 32, top + 1.0f, 1.0f, line);
-        c.text(32, top + 46.0f, kFontSmall, tr(it.label), bright);
-        c.text(32, top + 84.0f, kFontSmall, hintText(it).c_str(), dim);
+        c.text(32, top + 38.0f, kFontSmall, tr(it.label), bright);
+        c.text(32, top + 76.0f, kFontSmall, hintText(it).c_str(), dim);
         const std::string text = valueText(it);
         if (it.kind == kSwitch) {
             const Hit h{kToggle, i};

@@ -44,9 +44,6 @@ const char* pc_vr_resolution_key(void);
    settings.ini's resolution in effect). `lines` as it is when off and elsewhere. Every frame
    (pc_menu.cpp syncVrResolution). */
 int pc_vr_dynres_lines(int lines, int base, bool idle);
-/* The VR resolution (COS_VR_RESOLUTION, in lines) set and applied at once, also when the row already
-   holds it (pc_menu.cpp; a preset's, from the headset layer through pc_vr_panel_frame). */
-void pc_vr_apply_resolution(const char* lines);
 /* The options menu, every frame (pc_menu.cpp menuFrame): for the headset's laser pointer. */
 void pc_vr_menu_state(bool open, float width, float height, bool hovered);
 /* The headset's settings panel (android/xr/wq_panel.cpp), every frame (pc_menu.cpp menuFrame): its game

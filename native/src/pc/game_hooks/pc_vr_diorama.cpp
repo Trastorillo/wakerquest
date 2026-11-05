@@ -665,6 +665,11 @@ void ambientOff() {
     pc_vr_ambient_actor = nullptr;
 }
 
+// screen_cam_depth (1.1.9, the giant screen, wq_xr.cpp): the game camera in effect, game units along its
+// view (more: closer), eased (screenCameraUpdate). For this frame's view delta and the ambience's.
+float sScreenCam = 0.0f;
+uint64_t sScreenCamNs = 0;
+
 // The giant screen's frame (pc_vr_view_begin, mode = pantalla): which actor is ambient, and the
 // ambience's view delta, frustum and mask for this frame's draws.
 // window: the window's frame (its head pose given; the hole is the window's rectangle)
@@ -882,6 +887,11 @@ void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* pl
         sAmbient.worldValid = false;
         sAmbient.placed = false;
         c = mul(mul(headFromStage(head), moved), roomFromCameraView(scr, k));
+        if (!window && sScreenCam != 0.0f) {  // the ambience anchored to the camera follows it
+            M4 cam = identity();
+            cam.m[2][3] = sScreenCam;
+            c = mul(c, cam);
+        }
     }
     toMtx(c, sAmbient.delta);
     projParams(view->mProjMtx, sAmbient.projFrom);
@@ -1331,6 +1341,44 @@ void logDemoStart() {
 
 } // namespace
 
+// The giant screen's game camera (screen_cam_depth): moved along its view as the window's is (the view
+// delta; the game's own culling stays the real camera's). Only while the player plays: no move in the game's
+// cutscenes, dialogues and first-person views, which frame things close up; closer, it stops short of Link.
+static void screenCameraUpdate(const view_class* view, const WqXrTable& table, const fopAc_ac_c* player, bool allowed) {
+    constexpr float kLinkGap = 150.0f;  // game units left between the camera and Link
+    float want = 0.0f;
+    if (allowed && view != nullptr && player != nullptr && view->mProjMtx[3][3] == 0.0f &&
+        !dComIfGp_event_runCheck() && dComIfGp_getMesgStatus() == 0) {
+        want = table.screenCamDepth * kUnitsPerMetre;
+        if (want > 0.0f) {
+            const Vec& p = player->current.pos;
+            const auto& v = view->mViewMtx;
+            const float away = -(v[2][0] * p.x + v[2][1] * p.y + v[2][2] * p.z + v[2][3]);
+            want = std::min(want, std::max(0.0f, away - kLinkGap));
+        }
+    }
+    const uint64_t now = nowNs();
+    const double dt = sScreenCamNs != 0 ? (now - sScreenCamNs) * 1e-9 : 1.0;
+    sScreenCamNs = now;
+    sScreenCam += (want - sScreenCam) * blend(dt, 0.1f);
+    if (want == 0.0f && std::fabs(sScreenCam) < 0.5f) sScreenCam = 0.0f;
+}
+
+// True when the camera moved: this paint's view delta on (the world's; the sky's things stay around the eye)
+static bool screenCameraBegin(view_class* view) {
+    if (view == nullptr || sScreenCam == 0.0f) return false;
+    M4 d = identity();
+    d.m[2][3] = sScreenCam;
+    toMtx(d, s.delta);
+    toMtx(identity(), s.skyDelta);
+    projParams(view->mProjMtx, s.projFrom);
+    memcpy(s.projTo, s.projFrom, sizeof(s.projTo));
+    AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
+    s.on = true;
+    s.skyOn = false;
+    return true;
+}
+
 bool pc_vr_view_begin(view_class* view) {
     s.on = false;
     sSeeOn = sClipOn = sPopClipOn = false;
@@ -1402,11 +1450,11 @@ bool pc_vr_view_begin(view_class* view) {
         sSpecialWas = specialNow;
     }
     wq_xr_set_special(special);
-    const bool firstPerson =
-        table.autoScreen &&
-        (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
-                                            daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
-         dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
+    const bool firstPersonView =
+        dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
+                                           daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
+        dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0;
+    const bool firstPerson = table.autoScreen && firstPersonView;
     // The title screen (intro_2d, fase 2): while its stage (sea_T, Outset behind the logo) is loaded
     // (pc_npc_distance.cpp's introCinematic), the giant screen, flat, whatever the mode, as cine_screen's
     // cutscenes: the layer drops the 3D meanwhile (wq_xr_set_intro_flat), and no ambience. Nothing is
@@ -1459,13 +1507,15 @@ bool pc_vr_view_begin(view_class* view) {
         // the stick as on the screen meanwhile (1.0.9): aiming in first person (the hookshot, the bow...)
         // it keeps the game camera's own axes, not the model's last heading
         wq_xr_set_camera_heading(0.0f, false, dComIfGp_getMesgStatus() != 0);
+        screenCameraUpdate(view, table, player, !modeOn && !intro2d && !cineOnly && !firstPersonView);
         if (!modeOn && !intro2d && !cineOnly) {
             ambientFrame(view, table, player);
         } else {
             ambientOff();
         }
-        return false;
+        return screenCameraBegin(view);
     }
+    sScreenCam = 0.0f;  // the model or the window: their own view delta
     if (!table.window && !special) ambientOff();  // the diorama: none (the window's in windowBegin)
     // the game camera's heading on the model (stage space: the world's heading minus the model's turn),
     // for the left stick relative to the player's view (wq_xr.cpp)
@@ -1646,11 +1696,7 @@ int pc_vr_panel_frame(void) {
     }
     char key[64], value[64];
     while (wq_xr_panel_take_change(key, sizeof key, value, sizeof value)) {
-        if (strcmp(key, "COS_VR_RESOLUTION") == 0) {
-            pc_vr_apply_resolution(value);  // a preset's too, applied even when the row holds it
-        } else {
-            pc_settings_set(key, value);
-        }
+        pc_settings_set(key, value);
     }
     return wq_xr_panel_flags();
 }

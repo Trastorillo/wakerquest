@@ -55,6 +55,7 @@ typedef struct WqXrTable {
     // the giant screen in the room (LOCAL space): its middle, its turn about the vertical (radians,
     // positive to the left) and its width (metres)
     float screenX, screenY, screenDistance, screenYaw, screenWidth;
+    float screenCamDepth;  // the game camera moved along its view on it (metres of the game; more: closer)
     // the window (mode = ventana): the world at its own scale seen through a rectangle in the room, the
     // game camera's eye in front of it looking through it, each eye looking through it from where it is
     bool window;
@@ -132,11 +133,10 @@ const char* wq_xr_resolution_key(void);
 // rotate: the player controls Link freely (no options menu, pause menu or event): only then is the
 // stick turned. dialogue: a message box is open (shown on its own panel above the model).
 void wq_xr_set_camera_heading(float heading, bool rotate, bool dialogue);
-// The game, every frame (pc_vr_diorama.cpp): an event (a cutscene) runs; the giant screen's 3D is
-// stronger meanwhile (cine_3d).
+// The game, every frame (pc_vr_diorama.cpp): an event (a cutscene) runs.
 void wq_xr_set_cinematic(bool cinematic);
 // The game, every frame (pc_vr_diorama.cpp, 1.1.3): a cutscene or a dialogue (the giant screen's 3D keeps
-// everything behind its plane meanwhile), the Helmaroc King's demo (coming out instead, cine_3d), and the
+// everything behind its plane meanwhile), the Helmaroc King's demo (coming out instead), and the
 // view depth of the nearest character the camera sees (game units, 0 none).
 void wq_xr_set_scene_3d(bool scene, bool king, float nearest);
 // The game, every frame (pc_vr_diorama.cpp): a special scene plays, drawn through the window whatever the
