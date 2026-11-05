@@ -18,6 +18,11 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra con grip izquierdo + Y.
 
+### Novedades de la 1.2.1
+
+- **3D con el arco:** al apuntar, el arco queda tan cerca de la cámara que se perdía el foco, sobre todo en un ojo. Ahora, mientras apuntas en primera persona con la pantalla a la vista (también al apuntar desde Ventana), el 3D usa su propia profundidad y al dejar de apuntar vuelve tu valor normal, sin tocarlo. Se ajusta con grip + stick derecho mientras apuntas o con la fila «3D con el arco» de la pestaña Pantalla 3D.
+- **Mira del arco:** punto rojo como el del garfio, en tierra y en el barco. Marca el centro de la cámara y la flecha sale de la mano, así que de cerca puede desviarse un poco.
+
 ### Novedades de la 1.2
 
 - **Modo:** ahora son cuatro, en este orden: Pantalla, Pantalla 3D, Ventana y Maqueta. El interruptor «3D en la

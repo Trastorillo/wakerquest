@@ -950,9 +950,26 @@ BOOL daPy_lk_c::procShipBow() {
         mProcVar6.m3570 = 1;
     } else {
         mProcVar5.m34DA = 0;
+#if defined(__ANDROID__)
+        // WakerQuest: the bow's sight on the boat too (d_a_player_bow.inc)
+        if (setBodyAngleToCamera()) {
+            cXyz sight;
+            checkSightLine(2200.0f, &sight);
+            mSightPacket.setPos(&sight);
+            mSightPacket.onDrawFlg();
+        } else {
+            mSightPacket.offDrawFlg();
+        }
+#else
         setBodyAngleToCamera();
+#endif
         mProcVar6.m3570 = 0;
     }
+#if defined(__ANDROID__)
+    if (checkAttentionLock() && !checkBowMiniGame()) {
+        mSightPacket.offDrawFlg();
+    }
+#endif
     if (mpAttnActorLockOn == NULL) {
         shape_angle.y += (s16)(ship->shape_angle.y - mProcVar2.m34D4);
     }

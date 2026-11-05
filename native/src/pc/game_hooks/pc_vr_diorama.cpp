@@ -1482,6 +1482,10 @@ bool pc_vr_view_begin(view_class* view) {
     wq_xr_set_cine_screen(cineOnly && !specialScene);
     const bool ownView = !specialScene && (intro2d || firstPerson || cineOnly);
     const bool modeOn = table.diorama || table.window || special;
+    // (the first-person camera: not the bow held with Z, in third person, where the 3D stays as it is)
+    wq_xr_set_bow_screen(dComIfGp_checkPlayerStatus0(0, daPyStts0_BOW_AIM_e) != 0 &&
+                         dComIfGp_checkCameraAttentionStatus(0, dCamAttnStts_00000010_e) != 0 && !specialScene &&
+                         (!modeOn || ownView));
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
     if (!want) {
         if (s.wasOn) {

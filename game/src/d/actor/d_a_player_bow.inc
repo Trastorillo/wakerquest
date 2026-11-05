@@ -261,7 +261,20 @@ BOOL daPy_lk_c::procBowSubject() {
     }
 
     if (!checkNextMode(0)) {
+#if defined(__ANDROID__)
+        // WakerQuest: the bow in first person has a sight too, as the boomerang's and the grappling hook's,
+        // for the headset, where aiming along the arrow is hard (the sight packet, off at the next proc)
+        if (setBodyAngleToCamera()) {
+            cXyz sight;
+            checkSightLine(2200.0f, &sight);
+            mSightPacket.setPos(&sight);
+            mSightPacket.onDrawFlg();
+        } else {
+            mSightPacket.offDrawFlg();
+        }
+#else
         setBodyAngleToCamera();
+#endif
         m35EC = mFrameCtrlUpper[UPPER_MOVE2_e].getFrame();
     }
 

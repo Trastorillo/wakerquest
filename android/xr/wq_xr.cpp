@@ -126,6 +126,7 @@ struct Settings {
     bool stereo = true;
     float stereoStrength = 0.1f;    // how far the distance moves per eye, in half picture widths
     float stereoFocus = 200.0f;     // the depth (game units) that stays on the screen; nearer comes out of it
+    float bowStereoStrength = 0.007f;  // 1.2.1: the depth while aiming the bow, as it is (no width nor scale in it)
     float hudWidth = 0.9f;          // the diorama's HUD panel, metres across (behind the model)
     // the game's internal height in pixels in the headset (COS_FB_SCALE = lines / 480), one per mode
     // (activeResolution): resolution for the flat giant screen, diorama_resolution for the bubble,
@@ -292,6 +293,8 @@ const char kDefaultSettings[] =
     "stereo = 1\n"
     "stereo_strength = 0.1\n"
     "stereo_focus = 200\n"
+    "# bow_stereo_strength = the depth while aiming the bow (0-0.3); a grip + the right stick while aiming sets it.\n"
+    "bow_stereo_strength = 0.007\n"
     "# the game's internal height in pixels per mode (864, 918, 1080, 1404...), applied when the mode or\n"
     "# the 3D changes: resolution = the giant screen, diorama_resolution = the bubble (resolution's while\n"
     "# it is not here), stereo_resolution = the giant screen in 3D, window_resolution = the window. The\n"
@@ -469,6 +472,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "stereo")) s.stereo = on;
     else if (!strcmp(key, "stereo_strength")) s.stereoStrength = clampf(f, 0.0f, 0.30f);
     else if (!strcmp(key, "stereo_focus")) s.stereoFocus = clampf(f, 1.0f, 2500.0f);
+    else if (!strcmp(key, "bow_stereo_strength")) s.bowStereoStrength = clampf(f, 0.0f, 0.30f);
     else if (!strcmp(key, "resolution")) s.resolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "diorama_resolution")) s.dioramaResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "stereo_resolution")) s.stereoResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
@@ -601,6 +605,7 @@ int windowLines(int base, float width, int current) {
 // The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
 std::atomic_bool s_introFlat{false};  // wq_xr_set_intro_flat: the title on the flat giant screen
 std::atomic_bool s_cineScreen{false};  // wq_xr_set_cine_screen (1.1.8): a cutscene on the giant screen, in 3D
+std::atomic_bool s_bowScreen{false};  // wq_xr_set_bow_screen (1.2.1): aiming the bow, on the giant screen
 // The giant screen in 3D: as the mode says (Pantalla 3D or Pantalla); a cutscene shown on it from the window or
 // the model (cine_only, "Cinemáticas en pantalla 3D") always, as those modes have no 3D row of their own (1.1.9).
 bool screenStereo(const Settings& s) { return s.stereo || (s_cineScreen.load() && (s.window || s.diorama)); }
@@ -700,6 +705,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "width")) return num(s.width);
     if (!strcmp(key, "screen_scale")) return num(s.screenScale);
     if (!strcmp(key, "screen_cam_depth")) return num(s.screenCamDepth);
+    if (!strcmp(key, "bow_stereo_strength")) return num(s.bowStereoStrength);
     if (!strcmp(key, "height")) return num(s.height);
     if (!strcmp(key, "screen_x")) return num(s.screenX);
     if (!strcmp(key, "screen_yaw")) return num(s.screenYaw);
@@ -854,6 +860,8 @@ struct Xr {
     int stickScale = 0, labelWhat = 0;  // labelWhat 5: the window's camera raised (window_lift)
     bool stickLift = false;             // the left stick raised or lowered the window's camera (unsaved)
     bool stickCam = false;              // the left stick moved the giant screen's camera (labelWhat 6; unsaved)
+    bool stickBow = false;              // the right stick's scale 4 is the bow's depth (it began while aiming)
+    bool stickHold = false;             // the aim ended with the stick in use: nothing scaled until the grips are let go
     float stickTick = 0.0f;
     bool flatWas = false;  // the title's flat screen, as the grips last saw it
     // the right stick's click: the game's Z when pressed with no grip held (a grip's: back in its place)
@@ -2672,7 +2680,10 @@ void cancelGrab(int h, bool window, bool diorama, bool ambient) {
         if (s.stickScale == 1) st.tableSpan = was.tableSpan;
         if (s.stickScale == 2) st.windowScale = was.windowScale;
         if (s.stickScale == 3) st.ambientScale = was.ambientScale;
-        if (s.stickScale == 4) st.screenScale = was.screenScale;
+        if (s.stickScale == 4) {
+            st.screenScale = was.screenScale;
+            st.bowStereoStrength = was.bowStereoStrength;
+        }
         s.stickScale = 0;
         if (s.stickLift) st.windowLift = was.windowLift;
         s.stickLift = false;
@@ -2790,7 +2801,8 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     }
     Settings& st = s.settings;
     // the mode shown: the title's flat screen is the giant screen, with no ambience
-    const bool flat = s_introFlat.load() || s_cineScreen.load();  // (a cutscene: the screen shown, 1.1.8)
+    // (a cutscene: the screen shown, 1.1.8; aiming the bow too, 1.2.1)
+    const bool flat = s_introFlat.load() || s_cineScreen.load() || s_bowScreen.load();
     const bool window = st.window && !flat, diorama = st.diorama && !flat, ambient = st.ambient && !flat;
     if (flat != s.flatWas) {
         // the title began or ended with a grip held: what was held is no longer shown; the drag stops
@@ -2801,6 +2813,13 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         s.whHands = 0;
         s.grabbed[0] = s.grabbed[1] = 0;
         s.grabWindow[0] = s.grabWindow[1] = false;
+        // the aim ended with the bow's depth in the stick: kept, and the stick goes on to nothing else
+        if (s.stickScale == 4 && s.stickBow) {
+            char v[32];
+            snprintf(v, sizeof v, "%.3f", st.bowStereoStrength);
+            wq_xr_set("bow_stereo_strength", v);
+            s.stickHold = true;
+        }
         if (s.dragHands || s.dragAmbient || s.stickScale) {
             s.dragHands = 0;
             s.dragging = s.dragAmbient = false;
@@ -2968,21 +2987,25 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     // With ambient_move (1.1.2): the screen's width when a ray is on the screen as it starts, else the
     // ambience (kept while the grips stay held).
     const bool held = s.gripDown[0] || s.gripDown[1];
+    if (!held) s.stickHold = false;
     if (held && stick != nullptr) {
         const float y = stick->y;
         *stick = {0.0f, 0.0f};
-        if (std::fabs(y) > 0.25f) {
+        if (std::fabs(y) > 0.25f && !s.stickHold) {
             int what = diorama ? 1 : window ? 2 : ambient ? 3 : 4;
             if (what == 3 && ambientHeld)
                 what = s.stickScale == 3 || s.stickScale == 4 ? s.stickScale : aimOnScreen() ? 4 : 3;
-            float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale : &st.screenScale;
-            const float lo = what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.25f;
-            const float hi = what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 20.0f;
+            if (s.stickScale != what) s.stickBow = what == 4 && s_bowScreen.load();
+            const bool bow = what == 4 && s.stickBow;
+            float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale
+                       : bow ? &st.bowStereoStrength : &st.screenScale;
+            const float lo = bow ? 0.004f : what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.25f;
+            const float hi = bow ? 0.30f : what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 20.0f;
             if (s.stickScale != what) {
                 s.stickScale = what;
                 s.stickTick = *v;
                 xrlog("grip: the right stick scales %s", what == 1 ? "the model's world" : what == 2 ? "the window's world"
-                                                         : what == 3 ? "the ambience" : "the screen's world");
+                                                         : what == 3 ? "the ambience" : bow ? "the bow's 3D depth" : "the screen's world");
             }
             const int hz = activeRefresh(st);
             const float dt = hz > 0 ? 1.0f / float(hz) : 1.0f / 72.0f;
@@ -3078,8 +3101,8 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             snprintf(v, sizeof v, "%.2f", st.ambientScale);
             wq_xr_set("ambient_scale", v);
         } else {
-            snprintf(v, sizeof v, "%.2f", st.screenScale);
-            wq_xr_set("screen_scale", v);
+            snprintf(v, sizeof v, s.stickBow ? "%.3f" : "%.2f", s.stickBow ? st.bowStereoStrength : st.screenScale);
+            wq_xr_set(s.stickBow ? "bow_stereo_strength" : "screen_scale", v);
         }
         s.stickScale = 0;
     }
@@ -3259,7 +3282,14 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             st.height = defaults.height;
             st.distance = defaults.distance;
             st.screenYaw = defaults.screenYaw;
-            st.screenScale = defaults.screenScale;
+            if (s_bowScreen.load()) {
+                char v[32];
+                st.bowStereoStrength = defaults.bowStereoStrength;
+                snprintf(v, sizeof v, "%.3f", st.bowStereoStrength);
+                wq_xr_set("bow_stereo_strength", v);
+            } else {
+                st.screenScale = defaults.screenScale;
+            }
             s.dragging = false;
             xrlog("grip: the screen back in its place (and its world's scale)");
         } else {
@@ -3742,7 +3772,10 @@ void updateScreenStereo() {
     // screen's world scale (screen_scale: more, the world smaller, so deeper). At the default width and scale
     // nothing changes. The Helmaroc's scenes (below) go through the same factor.
     const float widthK = (0.65f / clampf(st.width, 0.5f, 40.0f)) * st.screenScale;
-    const float strength = clampf(st.stereoStrength * widthK, 0.0f, 0.30f);
+    // 1.2.1: aiming the bow on the screen, its own depth (bow_stereo_strength), whatever the screen's width and
+    // scale: the bow next to the camera, far nearer than the focus, moves across one eye's picture and the eyes
+    // lose the focus at the normal depth. The normal value is left as it is, and back when the aim ends
+    const float strength = s_bowScreen.load() ? st.bowStereoStrength : clampf(st.stereoStrength * widthK, 0.0f, 0.30f);
     const float userFocus = clampf(st.stereoFocus, 1.0f, 2500.0f);
     float target = userFocus;
     // (1.1.4: the floor of 20 units only for the scenes' focus; the settings' as they are)
@@ -4091,6 +4124,8 @@ void runFrame() {
             snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.windowScale);
         else if (s.labelWhat == 3)
             snprintf(text, sizeof text, "%s x%.2f", kAmbience[lang], st.ambientScale);
+        else if (s.labelWhat == 4 && s.stickBow)
+            snprintf(text, sizeof text, "3D %.3f", st.bowStereoStrength);
         else if (s.labelWhat == 4)
             snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.screenScale);
         else if (s.labelWhat == 5)
@@ -4309,6 +4344,10 @@ extern "C" void wq_xr_set_talk(bool talk) {
 extern "C" void wq_xr_reset_position(void) {
     if (s.settingsPath[0] == '\0') return;
     resetPositions(wq_xr_set);
+}
+
+extern "C" void wq_xr_set_bow_screen(bool on) {
+    if (s_bowScreen.exchange(on) != on) xrlog("the bow on the screen: %s", on ? "its own 3D depth" : "over");
 }
 
 extern "C" void wq_xr_set_cine_screen(bool on) {
