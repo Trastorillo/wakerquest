@@ -16,7 +16,26 @@ de tu propia ISO cada vez que arranca.
    Para actualizar usa siempre `install -r` y no desinstales: al desinstalar se borra tu partida.
 3. Copia la ISO a la carpeta `Download` de las gafas, abre WakerQuest y elígela en el selector.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
-   abre y se cierra apretando el stick izquierdo (L3).
+   abre y se cierra con grip izquierdo + Y.
+
+### Novedades de la 1.2
+
+- **Modo:** ahora son cuatro, en este orden: Pantalla, Pantalla 3D, Ventana y Maqueta. El interruptor «3D en la
+  pantalla» desaparece: Pantalla 3D lleva siempre el 3D y Pantalla nunca. Si ya jugabas en pantalla con el 3D
+  encendido, entrarás en Pantalla 3D sin tocar nada.
+- **Botones:** el panel de ajustes se abre y se cierra con grip izquierdo + Y (también cierra el menú del juego). El
+  clic del stick izquierdo pasa a ser la cruceta arriba: el mapa y la carta náutica.
+- **Cámara del juego en pantalla:** nueva fila en la pestaña Pantalla 3D, también con grip izquierdo + stick
+  izquierdo arriba o abajo, para acercarla o alejarla. No actúa en cinemáticas, diálogos ni primera persona.
+- **Frecuencia y resolución por modo:** cada modo tiene las suyas en su pestaña; las de Rendimiento son las de
+  Pantalla 2D. Al cambiar de modo cambian los Hz de las gafas. Los preajustes siguen poniéndolas en todos los modos.
+- **Fuera:** «Bordes planos», «3D intenso con el Helmaroc» y «Más potencia de GPU», siempre apagados, también en el
+  preajuste Máximo. Los preajustes ya no cambian el 3D.
+- **Cinemáticas:** se ven en la pantalla gigante en 3D en todos los modos y al acabar vuelves a tu modo (fila
+  «Cinemáticas en pantalla 3D»).
+- **Tamaño de la pantalla:** la separación del 3D ya no crece con el ancho de la pantalla, y con un grip + stick
+  derecho se cambia la escala del mundo en ella.
+- **Menos tirones:** el ambiente en modo pantalla ya no obliga a recrear la imagen cada vez que aparece o desaparece.
 
 ### Novedades de la 1.1.7
 
