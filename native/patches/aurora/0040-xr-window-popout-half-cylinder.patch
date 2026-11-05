@@ -1,0 +1,144 @@
+XR window: what comes out of it stays within a half cylinder, not a pyramid
+
+WakerQuest 1.2.2. What came out of the window was cut by the rectangle narrowing toward the game camera's
+eye, which left little of it to see. It now ends on a half cylinder standing on the window, its axis upright
+through the window's middle: the window's width across, the pop-out's depth toward the player (round when
+that is half the width, else an ellipse), the window's height.
+
+- The eyes' mask (stereo.cpp, patch 0030): the half cylinder's round side fades over window_fade, but never at
+  the window's plane, so nothing goes see-through where the picture meets it.
+- The GX shader's discard (patch 0037): the same volume. The command's f32 is now how far it comes out, not
+  the camera's depth.
+- The eye scissor (patch 0033): the rectangle's corners and the half cylinder's arcs, every 30 degrees.
+
+diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -146,10 +146,10 @@ extern "C" {
+ /**
+  * The window's pop-out volume (native/patches/aurora/0037): followed by a u8. 0 turns it off. 1 is followed
+  * by 13 f32: the window's table from the view delta's target space (row-major 3x4: x and y within +-1 over
+- * the window's rectangle, z in metres toward the player), then the game camera's depth in front of it
+- * (metres). While on, the fragments of a draw the view delta applies to that are in front of the window's
+- * plane but outside the rectangle narrowing toward the camera's eye are discarded: what the window's mask
+- * would cut there is not drawn, so what is behind it shows. Off at the end of each frame.
++ * the window's rectangle, z in metres toward the player), then how far it comes out (metres; patch 0040).
++ * While on, the fragments of a draw the view delta applies to that are in front of the window's plane but
++ * outside the half cylinder on it (x^2 + (z / out)^2 <= 1, y within +-1) are discarded: what the window's
++ * mask would cut there is not drawn, so what is behind it shows. Off at the end of each frame.
+  */
+ #define GX_AURORA_SET_POPOUT_CLIP 0x0055
+ 
+@@ -250,7 +250,7 @@ void AuroraSetSeeThrough(const f32* params);
+ void AuroraSetClipPlane(const f32* plane);
+ 
+ /**
+- * GX_AURORA_SET_POPOUT_CLIP, recorded in the command stream: the table (12 f32) and the camera's depth, or
++ * GX_AURORA_SET_POPOUT_CLIP, recorded in the command stream: the table (12 f32) and how far it comes out, or
+  * NULL to turn it off.
+  */
+ void AuroraSetPopoutClip(const f32* tableFromView, f32 depth);
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -310,9 +310,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+     }
+     if (u.fade.w > 1.5) {
+         // patch 0030: the window. Behind its plane: where the line from the eye crosses it, within
+-        // the rectangle; in front (coming out): within the game camera's near frustum (the rectangle
+-        // narrowing toward its eye, eye.w in front of the window), up to the pop-out's depth
+-        // (free_count.y), each edge fading; nothing past the camera's eye.
++        // the rectangle. In front (coming out, patch 0040): within a half cylinder standing on the
++        // window, its axis upright through the middle: the window's width across, the pop-out's depth
++        // (free_count.y) toward the player, the window's height. Its round side fades over fade.z, but
++        // never at the window's plane; nothing past the camera's eye.
+         let e = u.eye.xyz;
+         if (t.z < 0.0) {
+             let k = e.z / max(e.z - t.z, 1e-6);
+@@ -321,11 +322,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+             let ay = (1.0 - abs(q.y)) / u.fade.y;
+             a = select(clamp(min(ax, ay), 0.0, 1.0), 0.0, e.z <= 0.0);
+         } else {
+-            let w = (u.eye.w - t.z) / u.eye.w;
+-            let ax = (w - abs(t.x)) / u.fade.x;
+-            let ay = (w - abs(t.y)) / u.fade.y;
+-            let az = (u.free_count.y - t.z) / u.fade.z;
+-            a = select(clamp(min(min(ax, ay), az), 0.0, 1.0), 0.0, t.z >= u.eye.w);
++            let ay = (1.0 - abs(t.y)) / u.fade.y;
++            let reach = u.free_count.y * sqrt(max(1.0 - t.x * t.x, 0.0));
++            let az = (reach - t.z) / max(min(u.fade.z, reach), 1e-4);
++            a = select(clamp(min(ay, az), 0.0, 1.0), 0.0, t.z >= u.eye.w);
+         }
+     } else if (u.fade.w > 0.5) {
+         // the bubble (patch 0027): a sphere of radius 1 around the origin
+@@ -430,8 +430,8 @@ M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
+ }
+ 
+ // Patch 0033: the window's rectangle in the table's space (x, y within +-1 at z 0) and what may come
+-// out of it (the rectangle narrowing toward the camera's eye, up to the pop-out), into this eye's clip
+-// space; its NDC bounds, or nothing when a corner is at or behind the eye.
++// out of it (patch 0040: the half cylinder on it, up to the pop-out), into this eye's clip space; its
++// NDC bounds, or nothing when a corner is at or behind the eye.
+ void table_scissor_begin(const webgpu::xr_present::DioramaMask& mk) noexcept;
+ 
+ // Patch 0035: the scissors' margin (NDC, a side). The right eye's passes run after the frame's own mask
+@@ -452,14 +452,16 @@ void window_scissor_begin() noexcept {
+   const M4 clipFromTable = inverse(table_from_clip(mk, g_eye < 0 ? 0 : 1));
+   const float depth = std::max(mk.window[1], 1e-3f);
+   const float popout = std::clamp(std::min(mk.window[0], mk.window[1]), 0.f, depth);
+-  const float narrow = (depth - popout) / depth;
++  // patch 0040: the rectangle's corners, then the half cylinder's two arcs, every 30 degrees (the margin
++  // below covers the little the arcs bulge between them)
++  constexpr int kBody = 4 + 2 * 5;
+   float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+   // patch 0034: the free spheres (the room's ambience) are drawn outside the window too
+   const int spheres = std::clamp(mk.freeCount, 0, 16);
+-  for (int i = 0; i < 8 + spheres * 8; i++) {
+-    if (i >= 8) {
+-      const float* f = mk.free[(i - 8) / 8];
+-      const int c = (i - 8) % 8;
++  for (int i = 0; i < kBody + spheres * 8; i++) {
++    if (i >= kBody) {
++      const float* f = mk.free[(i - kBody) / 8];
++      const int c = (i - kBody) % 8;
+       const float p[4] = {f[0] + ((c & 1) ? f[3] : -f[3]), f[1] + ((c & 2) ? f[3] : -f[3]),
+                           f[2] + ((c & 4) ? f[3] : -f[3]), 1.f};
+       float cl[4];
+@@ -476,8 +478,12 @@ void window_scissor_begin() noexcept {
+       }
+       continue;
+     }
+-    const float s = i < 4 ? 1.f : narrow;
+-    const float p[4] = {(i & 1) ? s : -s, (i & 2) ? s : -s, i < 4 ? 0.f : popout, 1.f};
++    float p[4] = {(i & 1) ? 1.f : -1.f, (i & 2) ? 1.f : -1.f, 0.f, 1.f};
++    if (i >= 4) {
++      const float angle = static_cast<float>((i - 4) / 2 + 1) * 0.5235988f;
++      p[0] = std::cos(angle);
++      p[2] = popout * std::sin(angle);
++    }
+     float c[4];
+     for (int r = 0; r < 4; r++) {
+       c[r] = 0.f;
+diff --git a/lib/gx/shader.cpp b/lib/gx/shader.cpp
+--- a/lib/gx/shader.cpp
++++ b/lib/gx/shader.cpp
+@@ -1738,14 +1738,15 @@ std::string build_shader_source(const ShaderConfig& config, DstAlphaMode dstAlph
+         "\n        if (cut_along > 0.0 && cut_side * cut_depth > cut_noise) { discard; }"
+         "\n    }"
+         "\n    if (dot(ubuf.xr_clip.xyz, in.xr_pos) + ubuf.xr_clip.w > 0.0) { discard; }"
+-        // patch 0037: the window's pop-out volume: in front of the window's plane, outside the rectangle
+-        // narrowing toward the game camera's eye (what the window's mask cuts), not drawn
++        // patch 0037: the window's pop-out volume: in front of the window's plane, outside it (patch 0040:
++        // a half cylinder, the pop-out's depth toward the player; what the window's mask cuts), not drawn
+         "\n    if (ubuf.xr_win[3].y > 0.0) {"
+         "\n        let win_p = vec4f(in.xr_pos, 1.0);"
+         "\n        let win_z = dot(ubuf.xr_win[2], win_p);"
+         "\n        if (win_z > 0.0) {"
+-        "\n            let win_w = (ubuf.xr_win[3].x - win_z) / ubuf.xr_win[3].x;"
+-        "\n            if (abs(dot(ubuf.xr_win[0], win_p)) > win_w || abs(dot(ubuf.xr_win[1], win_p)) > win_w) { discard; }"
++        "\n            let win_x = dot(ubuf.xr_win[0], win_p);"
++        "\n            let win_r = win_z / ubuf.xr_win[3].x;"
++        "\n            if (win_x * win_x + win_r * win_r > 1.0 || abs(dot(ubuf.xr_win[1], win_p)) > 1.0) { discard; }"
+         "\n        }"
+         "\n    }");
+   }

@@ -381,9 +381,9 @@ M4 windowTableFromRoom(const WqXrTable& t) {
 
 // A sphere (the window's table space, radius in metres) against what the window shows, conservatively
 // (a margin for the head moving before the frame is shown): behind the plane, the four planes through
-// the head and the window's edges; in front, the pop-out's volume (the camera's near frustum: the
-// rectangle narrowing toward the game camera's eye, depth in front of it). Nothing beyond the pop-out,
-// nor behind the camera, comes out. 1 culled, 0 drawn.
+// the head and the window's edges; in front, the pop-out's volume (a half cylinder standing on the
+// window: its width across, the pop-out toward the player, its height). Nothing beyond the pop-out, nor
+// behind the camera, comes out. 1 culled, 0 drawn.
 const float kWindowCameraGap = 0.02f;  // m: the pop-out stops this short of the game camera's eye
 
 int cullWindow(const float t[3], float r) {
@@ -412,9 +412,10 @@ int cullWindow(const float t[3], float r) {
     }
     const float popout = std::min(s.winPopout, s.winDepth - kWindowCameraGap);
     if (!seen && popout > 0.0f && p[2] + r >= 0.0f && p[2] - r <= popout) {
-        // the rectangle's scale at the sphere's nearest height to the window (the widest it is there)
-        const float narrow = (s.winDepth - std::max(p[2] - r, 0.0f)) / s.winDepth;
-        seen = std::fabs(p[0]) - r <= s.winHalfW * narrow + margin && std::fabs(p[1]) - r <= s.winHalfH * narrow + margin;
+        // the half cylinder grown by the sphere and the margin, from the sphere's middle
+        const float ax = s.winHalfW + r + margin, az = popout + r + margin;
+        const float x = p[0] / ax, z = std::max(p[2], 0.0f) / az;
+        seen = x * x + z * z <= 1.0f && std::fabs(p[1]) - r <= s.winHalfH + margin;
     }
     return seen ? 0 : 1;
 }
@@ -1078,8 +1079,8 @@ int cullSphereView(const float p[3], float radius) {
     return out ? 1 : 0;
 }
 
-// The window's frustum fitted to what it can show (its rectangle, and the pop-out's front: the rectangle
-// narrowed toward the camera's eye at the pop-out's depth), seen from both eyes, as tangents from the
+// The window's frustum fitted to what it can show (its rectangle, and the half cylinder the pop-out comes
+// out into, every 30 degrees), seen from both eyes, as tangents from the
 // head's axes (left and down < 0) with a margin for the head moving before the frame is shown, within
 // the head's own (which has its margin already). False (the head's frustum) when a corner is at or
 // behind the eyes' plane, or the window is out of view. The same pixels then cover only the window:
@@ -1087,7 +1088,7 @@ int cullSphereView(const float p[3], float radius) {
 bool fitWindowFrustum(const WqXrTable& table, const WqXrHead& head, float popout, float out[4]) {
     const M4 headWindow = mul(headFromStage(head), roomFromWindow(table));
     const float hw = 0.5f * table.windowWidth, hh = 0.5f * table.windowHeight;
-    float corners[8][3];
+    float corners[14][3];
     int n = 0;
     for (int sy = -1; sy <= 1; sy += 2)
         for (int sx = -1; sx <= 1; sx += 2) {
@@ -1095,10 +1096,10 @@ bool fitWindowFrustum(const WqXrTable& table, const WqXrHead& head, float popout
             xform(headWindow, c, corners[n++]);
         }
     if (popout > 0.0f) {
-        const float narrow = (table.windowDepth - popout) / table.windowDepth;
         for (int sy = -1; sy <= 1; sy += 2)
-            for (int sx = -1; sx <= 1; sx += 2) {
-                const float c[3] = {sx * hw * narrow, sy * hh * narrow, popout};
+            for (int step = 1; step <= 5; step++) {
+                const float angle = float(step) * 0.5235988f;
+                const float c[3] = {hw * std::cos(angle), sy * hh, popout * std::sin(angle)};
                 xform(headWindow, c, corners[n++]);
             }
     }
@@ -1246,12 +1247,12 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
         AuroraSetClipPlane(plane);
         memcpy(sClipPlane, plane, sizeof(sClipPlane));
         sClipOn = true;
-        // ... and its sides (Aurora patch 0037, 1.1.5): what is in front of the window's plane outside the
-        // rectangle narrowing toward the game camera's eye (where the mask cuts it) is not drawn either, so
-        // the game behind it shows there, not the room in its shape (the branches beside the window)
+        // ... and its sides (Aurora patches 0037, 0040): what is in front of the window's plane outside the
+        // half cylinder on it (where the mask cuts it) is not drawn either, so the game behind it shows
+        // there, not the room in its shape (the branches beside the window)
         if (popout > 0.0f) {
             memcpy(sPopClip, tfh, sizeof(sPopClip));
-            sPopDepth = table.windowDepth;
+            sPopDepth = popout;
             AuroraSetPopoutClip(sPopClip, sPopDepth);
             sPopClipOn = true;
         }

@@ -335,7 +335,8 @@ const char kDefaultSettings[] =
     "# of the window (m); window_popout_on 1 = near things come out of it, up to window_popout m (and\n"
     "# never past the camera); window_draw_distance = the game's metres drawn (at scale 1), the horizon;\n"
     "# window_hud_on 1 = the HUD over the window (else on panels below and above it); window_lift = the\n"
-    "# game camera raised in the window (m of the room, under 0 lowered; grips held + the left stick).\n"
+    "# game camera raised in the window (m of the room, under 0 lowered; right grip held + the left stick).\n"
+    "# The left grip alone + the left stick changes window_depth.\n"
     "window_width = 0.45\n"
     "window_distance = 0.654\n"
     "window_height = -0.176\n"
@@ -859,6 +860,7 @@ struct Xr {
     // label shows (0 the size both hands give, else the stick's)
     int stickScale = 0, labelWhat = 0;  // labelWhat 5: the window's camera raised (window_lift)
     bool stickLift = false;             // the left stick raised or lowered the window's camera (unsaved)
+    bool stickDepth = false;            // the left stick changed the window's depth (unsaved)
     bool stickCam = false;              // the left stick moved the giant screen's camera (labelWhat 6; unsaved)
     bool stickBow = false;              // the right stick's scale 4 is the bow's depth (it began while aiming)
     bool stickHold = false;             // the aim ended with the stick in use: nothing scaled until the grips are let go
@@ -2687,6 +2689,8 @@ void cancelGrab(int h, bool window, bool diorama, bool ambient) {
         s.stickScale = 0;
         if (s.stickLift) st.windowLift = was.windowLift;
         s.stickLift = false;
+        if (s.stickDepth) st.windowDepth = was.windowDepth;
+        s.stickDepth = false;
     }
     if (h == 0 && s.stickCam) {  // the left stick's camera: the left grip's alone
         st.screenCamDepth = was.screenCamDepth;
@@ -3027,13 +3031,33 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             publishSettings();
         }
     }
-    // The window (1.1.1): with a grip held, the left stick up or down raises or lowers the game camera in
-    // it (window_lift; Link does not move meanwhile), 0.1 m of the room a second at full tilt, a soft
-    // tick every 5 cm; saved when the grips are let go
+    // The window (1.1.1): with the right grip held, the left stick up or down raises or lowers the game
+    // camera in it (window_lift; Link does not move meanwhile), 0.1 m of the room a second at full tilt, a
+    // soft tick every 5 cm; saved when the grips are let go. With the left grip alone it changes the
+    // window's depth (window_depth, 1.2.2), as the panel's stepper: up more, 0.3 m a second at full tilt,
+    // a soft tick every 10 cm
     if (held && window && moveStick != nullptr) {
         const float y = moveStick->y;
         *moveStick = {0.0f, 0.0f};
-        if (std::fabs(y) > 0.25f) {
+        if (std::fabs(y) > 0.25f && s.gripDown[0] && !s.gripDown[1]) {
+            if (!s.stickDepth) {
+                s.stickDepth = true;
+                xrlog("grip: the left stick changes the window's depth");
+            }
+            const int hz = activeRefresh(st);
+            const float dt = hz > 0 ? 1.0f / float(hz) : 1.0f / 72.0f;
+            const float before = st.windowDepth;
+            const float speed = (std::fabs(y) - 0.25f) / 0.75f * (y > 0.0f ? 0.3f : -0.3f);
+            // the stepper's range; a larger value written in xr.ini does not jump down to it
+            st.windowDepth = clampf(before + speed * dt, 0.1f, std::max(2.0f, before));
+            if (std::floor(before / 0.1f + 0.5f) != std::floor(st.windowDepth / 0.1f + 0.5f)) {
+                pointerHaptic(0, 0.15f);
+                pointerHaptic(1, 0.15f);
+            }
+            s.sizeShownUntil = SDL_GetTicks() + 1500;
+            s.labelWhat = 7;
+            publishSettings();
+        } else if (std::fabs(y) > 0.25f) {
             if (!s.stickLift) {
                 s.stickLift = true;
                 xrlog("grip: the left stick raises and lowers the window's camera");
@@ -3057,6 +3081,12 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         snprintf(v, sizeof v, "%.3f", st.windowLift);
         wq_xr_set("window_lift", v);
         s.stickLift = false;
+    }
+    if (!held && s.stickDepth) {
+        char v[32];
+        snprintf(v, sizeof v, "%.2f", st.windowDepth);
+        wq_xr_set("window_depth", v);
+        s.stickDepth = false;
     }
     // The giant screen (1.1.9, Pantalla and Pantalla 3D): with the left grip held, the left stick up or down
     // brings the game camera closer or farther (screen_cam_depth; Link does not move meanwhile), a metre of
@@ -4118,6 +4148,7 @@ void runFrame() {
         static const char* const kAmbience[] = {"Ambiente", "Ambience", "Ambiance"};
         static const char* const kMax[] = {"m\xc3\xa1x", "max", "max"};
         static const char* const kCamera[] = {"C\xc3\xa1mara", "Camera", "Cam\xc3\xa9ra"};
+        static const char* const kDepth[] = {"Fondo", "Depth", "Profondeur"};
         if (s.labelWhat == 1)
             snprintf(text, sizeof text, "%s %.0f m", kWorld[lang], st.tableSpan);
         else if (s.labelWhat == 2)
@@ -4132,6 +4163,8 @@ void runFrame() {
             snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.windowLift);
         else if (s.labelWhat == 6)
             snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.screenCamDepth);
+        else if (s.labelWhat == 7)
+            snprintf(text, sizeof text, "%s %.2f m", kDepth[lang], st.windowDepth);
         else if (st.window && lines > 0)
             // the window: its resolution (windowLines) and its limit
             snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 %s %.1f m", st.windowWidth,
