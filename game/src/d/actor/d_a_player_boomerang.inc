@@ -72,7 +72,7 @@ BOOL daPy_lk_c::returnBoomerang() {
 
 /* 801497A4-8014984C       .text checkNextActionBoomerangReady__9daPy_lk_cFv */
 BOOL daPy_lk_c::checkNextActionBoomerangReady() {
-    if (!itemButton() && (mpAttnActorLockOn != NULL || dComIfGp_checkCameraAttentionStatus(mCameraInfoIdx, dCamAttnStts_00000010_e))) {
+    if (!itemButton() && (mpAttnActorLockOn != NULL || pc_vr_immersive() || dComIfGp_checkCameraAttentionStatus(mCameraInfoIdx, dCamAttnStts_00000010_e))) {
         setActAnimeUpper(
             dRes_INDEX_LKANM_BCK_BOOMTHROW_e,
             UPPER_MOVE2_e,

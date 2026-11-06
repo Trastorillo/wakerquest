@@ -99,7 +99,8 @@ constexpr int kLabelMaxW = 640;  // the size label's chain (wq_xr.cpp: the windo
 const Option kMode[] = {{"pantalla", {"Pantalla", "Screen", "Écran"}},
                         {"pantalla3d", {"Pantalla 3D", "3D Screen", "Écran 3D"}},
                         {"ventana", {"Ventana", "Window", "Fenêtre"}},
-                        {"maqueta", {"Maqueta", "Diorama", "Maquette"}}};
+                        {"maqueta", {"Maqueta", "Diorama", "Maquette"}},
+                        {"inmersivo", {"Inmersivo", "Immersive", "Immersif"}}};
 const Option kShape[] = {{"esfera", {"Esfera", "Sphere", "Sphère"}}, {"caja", {"Caja", "Box", "Boîte"}}};
 const Option kRefresh[] = {{"72", {"72 Hz"}}, {"80", {"80 Hz"}}, {"90", {"90 Hz"}}, {"120", {"120 Hz"}}};
 const Option kResolution[] = {{"540", {"0,50", "0.50"}},   {"648", {"0,60", "0.60"}},   {"756", {"0,70", "0.70"}},
@@ -122,7 +123,7 @@ const Option kPanelLanguage[] = {{"es", {"Español"}}, {"en", {"English"}}, {"fr
 // General: the mode, the languages, the game's start
 const Item kGeneral[] = {
     {kXr, "mode", {"Modo", "Mode", "Mode"},
-     {"Pantalla 2D o 3D, ventana, o el mundo en burbuja", "2D or 3D screen, a window, or the world in a bubble",
+     {"Pantalla, ventana, maqueta, o el mundo a tu alrededor", "Screen, window, diorama, or the world around you",
       "Écran 2D ou 3D, fenêtre, ou le monde en bulle"},
      kStepper, OPTS(kMode)},
     {kXr, "language", {"Idioma del panel", "Panel language", "Langue du panneau"},
@@ -218,6 +219,23 @@ const Item kDiorama[] = {
      {"La de Maqueta; 90 Hz: más fluido", "The diorama's; 90 Hz: smoother",
       "Celle de la maquette ; 90 Hz : plus fluide"},
      kStepper, OPTS(kRefresh)},
+};
+// the immersive mode (mode = inmersivo): the world around the player
+const Item kImmersive[] = {
+    {kXr, "immersive_link", {"Altura de Link", "Link's height", "Taille de Link"},
+     {"El tamaño del mundo; o grip + stick derecho", "The world's size; or grip + right stick",
+      "La taille du monde ; ou grip + stick droit"},
+     kStepper, nullptr, 0, 0.3f, 1.0f, 0.05f, "%.2f m"},
+    {kXr, "immersive_depth", {"Cámara adelante / atrás", "Camera forward / back", "Caméra avant / arrière"},
+     {"O grip izquierdo + stick izquierdo", "Or left grip + left stick", "Ou grip gauche + stick gauche"},
+     kStepper, nullptr, 0, -5.0f, 5.0f, 0.25f, "%+.2f m"},
+    {kXr, "immersive_lift", {"Altura de la cámara", "Camera height", "Hauteur de la caméra"},
+     {"O grip derecho + stick izquierdo", "Or right grip + left stick", "Ou grip droit + stick gauche"},
+     kStepper, nullptr, 0, -1.0f, 1.0f, 0.05f, "%+.2f m"},
+    {kXr, "immersive_resolution", {"Resolución", "Resolution", "Résolution"},
+     {"La del modo Inmersivo; 1,00 = 1080 líneas", "The immersive mode's; 1.00 = 1080 lines",
+      "Celle du mode immersif ; 1,00 = 1080 lignes"},
+     kStepper, nullptr, 0, 540.0f, 1620.0f, 54.0f, "%.0f"},
 };
 // the window (mode = ventana): its size and place also with the grips
 const Item kWindow[] = {
@@ -441,6 +459,7 @@ constexpr Tab kTabs[] = {TAB("General", "General", "Général", kGeneral),
                          TAB("Pantalla 3D", "3D Screen", "Écran 3D", kScreen),
                          TAB("Maqueta", "Diorama", "Maquette", kDiorama),
                          TAB("Ventana", "Window", "Fenêtre", kWindow),
+                         TAB("Inmersivo", "Immersive", "Immersif", kImmersive),
                          TAB("Ambiente", "Ambience", "Ambiance", kAmbient),
                          TAB("Escenas", "Scenes", "Scènes", kScenes),
                          TAB("Rendimiento", "Performance", "Performances", kPerformance),

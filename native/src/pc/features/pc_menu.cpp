@@ -614,7 +614,8 @@ const PcSettingChoice kHdStats[] = {{"0", "Desactivadas", "Off"}, {"150", "Cada 
 const PcSettingChoice kVrMode[] = {{"pantalla", "Pantalla", "Screen"},
                                    {"pantalla3d", "Pantalla 3D", "3D screen"},
                                    {"ventana", "Ventana", "Window"},
-                                   {"maqueta", "Maqueta", "Diorama"}};
+                                   {"maqueta", "Maqueta", "Diorama"},
+                                   {"inmersivo", "Inmersivo", "Immersive"}};
 const PcSettingChoice kVrShape[] = {{"esfera", "Esfera", "Sphere"}, {"caja", "Caja (mesa)", "Box (table)"}};
 // (fase 2: the xr.ini defaults among the choices, so syncVrRows shows them; 1.1.5: 60 m, 3 m, 47 cm, 24 cm...)
 const PcSettingChoice kVrSpan[] = {{"10", "10 m de juego"}, {"20", "20 m de juego"}, {"30", "30 m de juego"},

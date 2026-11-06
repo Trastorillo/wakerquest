@@ -80,6 +80,10 @@ typedef struct WqXrTable {
     float seeThroughRadius;    // Link seen through what is in front of him: the game's metres (0 = off)
     bool roofOpen;             // roof_open: the game tells wq_sky.cpp its weather
     bool ambientFlowers;       // ambient_flowers: the flowers on the game's screen, fixed in the room
+    // the immersive mode (mode = inmersivo, 1.4; window is true with it): Link's height in metres, the camera
+    // moved forward and raised (metres of the room)
+    bool immersive;
+    float immersiveLink, immersiveDepth, immersiveLift;
     float windowDrawDistance;  // the window: the game's metres drawn at scale 1 (the horizon)
     float npcDrawDistance;     // the characters drawn within the game's metres from Link, every mode (0 = all)
     // the vegetation's adaptive draw distance (xr.ini vegetation_*, pc_veg_distance.cpp): on; the
@@ -154,6 +158,10 @@ void wq_xr_set_intro_flat(bool flat);
 // The game, every frame (pc_vr_diorama.cpp, 1.1.8): a real cutscene shows on the giant screen in 3D whatever the
 // mode (cine_only): its resolution, the grips and the 3D are the screen's meanwhile; xr.ini unchanged.
 void wq_xr_set_cine_screen(bool on);
+// The immersive mode's laser (1.3.4): the right hand's ray in the room, as of the last frame (false: none); and from
+// the game, every frame, whether it is shown and how long it is (metres).
+bool wq_xr_laser_ray(float* origin, float* direction);
+void wq_xr_set_laser(bool on, float length);
 // The game, every frame (pc_vr_diorama.cpp, 1.2.1): the bow is aimed with the giant screen shown: its 3D at
 // bow_stereo_strength meanwhile, and the grips and the right stick hold the screen and set that depth.
 void wq_xr_set_bow_screen(bool on);

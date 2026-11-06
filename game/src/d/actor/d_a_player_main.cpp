@@ -10,6 +10,8 @@
 
 #include "d/dolzel.h" // IWYU pragma: keep
 #include "d/actor/d_a_player_main.h"
+#include "pc/pc_vr.h"
+#include <cmath>
 #include "d/actor/d_a_demo_item.h"
 #include "d/actor/d_a_npc_fa1.h"
 #include "d/actor/d_a_obj_movebox.h"
@@ -1091,6 +1093,27 @@ void daPy_lk_c::setOutPower(f32 param_1, s16 i_targetAngle, int param_3) {
 
 /* 801056E4-80105814       .text checkSightLine__9daPy_lk_cFfP4cXyz */
 BOOL daPy_lk_c::checkSightLine(f32 param_1, cXyz* param_2) {  
+#if TARGET_PC
+    // the immersive mode: the sight is where the hand's laser lands (1.3.4)
+    {
+        float pcO[3], pcD[3];
+        if (pc_vr_laser(pcO, pcD)) {
+            cXyz pcFrom(pcO[0], pcO[1], pcO[2]);
+            param_2->set(pcO[0] + pcD[0] * param_1, pcO[1] + pcD[1] * param_1, pcO[2] + pcD[2] * param_1);
+            dBgS_LinChk* pcChk;
+            if (mEquipItem == dItemNo_BOOMERANG_e) {
+                pcChk = &mBoomerangLinChk;
+            } else {
+                pcChk = &mRopeLinChk;
+            }
+            pcChk->Set(&pcFrom, param_2, this);
+            const BOOL pcHit = dComIfG_Bgsp()->LineCross(pcChk);
+            if (pcHit) param_2->set(*pcChk->GetCrossP());
+            pc_vr_laser_hit((*param_2 - pcFrom).abs());
+            return pcHit;
+        }
+    }
+#endif
     camera_process_class* cam = dComIfGp_getCamera(mCameraInfoIdx);
     cXyz* pcVar2 = fopCamM_GetEye_p(cam);
     cXyz local_44 = (*fopCamM_GetCenter_p(cam) - *pcVar2);
@@ -1710,7 +1733,12 @@ void daPy_lk_c::onBodyEffect() {
 
 /* 80107308-80108204       .text draw__9daPy_lk_cFv */
 BOOL daPy_lk_c::draw() {
+#if TARGET_PC
+    if (mSightPacket.getDrawFlg() &&
+        !(pc_vr_immersive() && dComIfGp_checkPlayerStatus0(0, daPyStts0_BOW_AIM_e | daPyStts0_BOOMERANG_AIM_e))) {
+#else
     if (mSightPacket.getDrawFlg()) {
+#endif
         mSightPacket.setSight();
     }
     g_env_light.settingTevStruct(TEV_TYPE_PLAYER, &current.pos, &tevStr);
@@ -2727,6 +2755,21 @@ BOOL daPy_lk_c::setBodyAngleToCamera() {
     s16 local_16;
     s16 local_18;
 
+#if TARGET_PC
+    // the immersive mode: Link turns to where the hand's laser lands, so what he shoots goes there (1.3.4)
+    float pcO[3], pcD[3];
+    if (pc_vr_laser(pcO, pcD)) {
+        cXyz pcSight;
+        checkSightLine(2200.0f, &pcSight);
+        const f32 pcDx = pcSight.x - current.pos.x, pcDz = pcSight.z - current.pos.z;
+        const f32 pcDy = pcSight.y - (current.pos.y + 100.0f);
+        const s16 pcYaw = cM_atan2s(pcDx, pcDz);
+        shape_angle.y = pcYaw;
+        current.angle.y = pcYaw;
+        mBodyAngle.x = checkBodyAngleX(cM_atan2s(-pcDy, std::sqrt(pcDx * pcDx + pcDz * pcDz)));
+        return TRUE;
+    }
+#endif
     if (dComIfGp_checkCameraAttentionStatus(mCameraInfoIdx, dCamAttnStts_00000010_e) != 0) {
         bVar1 = dCam_getBody()->CalcSubjectAngle(&local_16, &local_18);
         if (bVar1 != 0) {

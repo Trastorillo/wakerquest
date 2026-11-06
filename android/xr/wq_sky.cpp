@@ -176,20 +176,64 @@ float crestLayer(vec2 w, float cell, float seed) {
     return (1.0 - smoothstep(thick, thick + aa, abs(y))) * smoothstep(0.0, 0.5, life);
 }
 
-// The sea: its colour from the game, soft swells of a slightly paler tone that move, and loose white crests.
+// Compound sines: several at unrelated scales and speeds break up the repetition, and cost next to nothing
+float swellAt(vec2 w) {
+    float rough = 1.0 + 0.8 * u_storm;
+    return (sin(dot(w, vec2(0.8, 0.6)) * 0.35 * rough + u_time * 0.6) +
+            0.6 * sin(dot(w, vec2(-0.5, 0.85)) * 0.61 * rough + u_time * 0.83 + 5.52) +
+            0.35 * sin(dot(w, vec2(0.2, -0.97)) * 1.13 * rough + u_time * 1.21 + 0.93) +
+            0.2 * sin(dot(w, vec2(-0.9, -0.3)) * 2.03 * rough + u_time * 1.57 + 8.94)) / 2.15;
+}
+
+// A net of thin foam lines: the edges between the cells of a slowly moving scatter of points (how close the second
+// nearest point is to the nearest). 0 away from a line, 1 on it.
+float foamNet(vec2 p, float width) {
+    vec2 n = floor(p), f = fract(p);
+    float f1 = 8.0, f2 = 8.0;
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            vec2 g = vec2(float(i), float(j));
+            vec2 o = vec2(hash(n + g), hash(n + g + vec2(5.0, 9.0)));
+            o = 0.5 + 0.42 * sin(u_time * 0.25 + 6.2831853 * o);
+            vec2 r = g + o - f;
+            float d = dot(r, r);
+            if (d < f1) {
+                f2 = f1;
+                f1 = d;
+            } else if (d < f2) {
+                f2 = d;
+            }
+        }
+    }
+    float edge = sqrt(f2) - sqrt(f1);
+    float aa = length(fwidth(p));
+    return 1.0 - smoothstep(width, width + aa + 0.01, edge);
+}
+
+// The sea: its colour from the game, swelling; thin white foam lines over a darker copy of them a little to one
+// side, both rippled by the same sines; and the loose crests that come and go.
 vec3 seaColor(vec3 d) {
     float t = (u_eye.y + kSeaDepth) / max(-d.y, 1e-4);
     vec2 w = u_eye.xz + d.xz * t;
-    vec3 deep = u_seaDif * mix(1.0, 0.55, u_storm);
     float far = exp(-t * 0.012);
-    float rough = 1.0 + 0.8 * u_storm;
-    float s = sin(dot(w, vec2(0.8, 0.6)) * 0.35 * rough + u_time * 0.6) +
-              0.6 * sin(dot(w, vec2(-0.5, 0.85)) * 0.6 * rough + u_time * 0.9) +
-              0.3 * sin(dot(w, vec2(0.2, -0.97)) * 1.1 * rough + u_time * 1.2);
-    vec3 c = mix(deep, deep * 1.25 + vec3(0.006, 0.03, 0.04), smoothstep(-0.3, 1.1, s) * far);
+    // the water rising and falling: what is seen shifts along the ray, more so the flatter it looks
+    float s = swellAt(w);
+    w += d.xz / max(-d.y, 0.08) * s * mix(0.25, 0.7, u_storm) * far;
+    s = swellAt(w);
+    vec3 deep = u_seaDif * mix(1.0, 0.55, u_storm);
+    vec3 c = mix(deep * 0.86, deep * 1.25 + vec3(0.006, 0.03, 0.04), (s * 0.5 + 0.5) * far);
     float light = dot(mix(u_horizon, u_zenith, 0.5), vec3(0.3, 0.6, 0.1));
+    vec3 foam = vec3(0.92, 0.96, 1.0) * clamp(light * 1.6 + 0.12, 0.06, 1.0);
+    float lines = exp(-t * 0.02);
+    if (lines > 0.02) {
+        vec2 q = w / 7.0;
+        q += 0.18 * vec2(sin(q.y * 2.3 + u_time * 0.5) + sin(q.y * 3.7 + u_time * 0.31 + 5.52),
+                         sin(q.x * 2.9 + u_time * 0.43 + 0.93) + sin(q.x * 4.6 + u_time * 0.27 + 8.94));
+        c = mix(c, deep * 0.62, foamNet(q + vec2(0.05, 0.04), 0.035) * lines * 0.8);
+        c = mix(c, foam, foamNet(q, 0.03) * lines * 0.85);
+    }
     float k = max(crestLayer(w, 16.0, 0.0), crestLayer(w, 27.0, 0.37)) * exp(-t * 0.008);
-    c = mix(c, vec3(0.92, 0.96, 1.0) * clamp(light * 1.6 + 0.12, 0.06, 1.0), k * 0.9);
+    c = mix(c, foam, k * 0.9);
     c = mix(skyColor(normalize(vec3(d.x, 0.0, d.z))), c, exp(-t * 0.0035));
     return c + u_flash * vec3(0.55, 0.62, 0.85) * 0.12;
 }

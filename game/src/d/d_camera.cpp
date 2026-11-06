@@ -6,6 +6,7 @@
 #include "d/dolzel.h" // IWYU pragma: keep
 #if TARGET_PC
 #include "pc/pc_aspect.h"
+#include "pc/pc_vr.h"
 #include "pc/pc_harness.h"
 #include "pc/game_hooks.h"
 #include "pc/pc_qol.h"
@@ -1347,9 +1348,10 @@ int dCamera_c::nextMode(s32 i_curMode) {
         else if (check_owner_action(mPadId, daPyStts0_SUBJECT_e)) {
             next_mode = 4;
         }
-        else if (check_owner_action(mPadId, daPyStts0_ROPE_AIM_e | daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOW_AIM_e) && !attn.Lockon()) {
+        else if ((check_owner_action(mPadId, daPyStts0_ROPE_AIM_e | daPyStts0_HOOKSHOT_AIM_e) ||
+                  (check_owner_action(mPadId, daPyStts0_BOW_AIM_e) && !pc_vr_immersive())) && !attn.Lockon()) {
             next_mode = 10;
-        } else if (check_owner_action(mPadId, daPyStts0_BOOMERANG_AIM_e) && !attn.Lockon()) {
+        } else if (check_owner_action(mPadId, daPyStts0_BOOMERANG_AIM_e) && !attn.Lockon() && !pc_vr_immersive()) {
             next_mode = 11;
         } else if (m144 == 0) {
             next_mode = 12;
@@ -1377,7 +1379,7 @@ int dCamera_c::nextMode(s32 i_curMode) {
         else if (attn.Lockon()) {
             next_mode = 1;
         }
-        else if (check_owner_action(mPadId, daPyStts0_BOOMERANG_WAIT_e) && !check_owner_action(mPadId, daPyStts0_UNK37a02371_e & ~daPyStts0_UNK1000000_e) && !check_owner_action1(mPadId, daPyStts1_UNK10_e | daPyStts1_WIND_WAKER_CONDUCT_e)) {
+        else if (!pc_vr_immersive() && check_owner_action(mPadId, daPyStts0_BOOMERANG_WAIT_e) && !check_owner_action(mPadId, daPyStts0_UNK37a02371_e & ~daPyStts0_UNK1000000_e) && !check_owner_action1(mPadId, daPyStts1_UNK10_e | daPyStts1_WIND_WAKER_CONDUCT_e)) {
             mpLockonTarget = get_boomerang_actor(mpPlayerActor);
             next_mode = 2;
             mLockOnActorId = fpcM_ERROR_PROCESS_ID_e;
@@ -3632,7 +3634,7 @@ bool dCamera_c::lockonCamera(s32 param_1) {
     if (m31D != 0) {
         dComIfG_Bgsp()->MoveBgMatrixCrrPos(mBG.m5C.m04, true, &work->m390, NULL, NULL);
     }
-    if (!attn.LockonTruth() && check_owner_action(mPadId, daPyStts0_BOOMERANG_WAIT_e)) {
+    if (!pc_vr_immersive() && !attn.LockonTruth() && check_owner_action(mPadId, daPyStts0_BOOMERANG_WAIT_e)) {
         work->m39C = 1;
     }
     else {

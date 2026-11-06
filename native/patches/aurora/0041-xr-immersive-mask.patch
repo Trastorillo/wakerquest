@@ -1,0 +1,29 @@
+XR immersive mode: the eyes' mask keeps the whole picture (fade[3] 4)
+
+WakerQuest 1.4. The immersive mode draws through the window's frames, with the head's own frustum and no window to
+look through: its mask returns every pixel opaque, and no eye scissor is applied.
+
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -271,6 +271,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+     let h = u.table_from_clip * ndc;
+     let t = h.xyz / h.w;
+     var a: f32;
++    // patch 0041: the immersive mode: the whole picture, nothing of the room
++    if (u.fade.w > 3.5) {
++        return vec4f(c.rgb, 1.0);
++    }
+     if (u.fade.w > 2.5) {
+         // patch 0034: the room's ambience around the giant screen. Hidden where the line from the eye
+         // through the point crosses the screen's rectangle (the screen shows it there), soft over
+@@ -445,6 +449,9 @@ void window_scissor_begin() noexcept {
+   if (g_eye == 0 || !frame_mask(mk)) {
+     return;
+   }
++  if (mk.fade[3] > 3.5f) {
++    return;  // patch 0041: the immersive mode shows it all
++  }
+   if (mk.fade[3] <= 1.5f) {
+     table_scissor_begin(mk);  // patch 0035: the diorama's table (or bubble)
+     return;

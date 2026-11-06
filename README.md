@@ -18,6 +18,26 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra con grip izquierdo + Y.
 
+### Novedades de la 1.4
+
+**Modo Inmersivo** (nuevo, en Modo, pestaña General)
+
+- El mundo te rodea y lo ves desde la cámara del juego moviendo la cabeza, sin pantalla ni ventana. No se ve tu habitación ni el Techo abierto.
+- **Tamaño del mundo:** grip + stick derecho, con Link de 30 cm a 1 m.
+- **Cámara:** grip izquierdo + stick izquierdo la mueve adelante y atrás, y grip derecho + stick izquierdo la sube y la baja.
+- **Pestaña Inmersivo:** los mismos ajustes, más la resolución propia del modo, de 540 a 1620 líneas (1080 de inicio).
+
+**Apuntar con la mano** (solo en modo Inmersivo)
+
+- Con el arco y el bumerán, la cámara se queda como estaba. Apuntas con el mando derecho, sin usar el stick: sale un láser con un punto rojo donde choca, y Link dispara hacia ese punto.
+- El telescopio, la cámara de fotos, el gancho y el garfio siguen usando la pantalla gigante.
+
+**Techo abierto**
+
+- El mar tiene ahora ondulaciones hechas con senos compuestos y una red de líneas de espuma blanca con una copia más oscura al lado, todo calculado, sin texturas. Siguen las crestas que aparecen y se desvanecen.
+
+Sigue pendiente la mancha de rayas amarillas y azules en el HUD, debajo del botón A.
+
 ### Novedades de la 1.3
 
 **Correcciones de texturas**

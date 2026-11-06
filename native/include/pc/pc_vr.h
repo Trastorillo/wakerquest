@@ -111,6 +111,12 @@ extern float pc_vr_moya_alpha, pc_vr_moya_top, pc_vr_moya_bottom;
 void pc_vr_ambient_draw(void);
 /* The game's flowers again for the room (d_flower.cpp, 1.2.6): those it draws now, where they stand in the game
    (kind: bit 0 the second kind, bit 1 cut); and n of them drawn at these position matrices, unfogged. */
+/* The immersive mode's laser (pc_vr_diorama.cpp, 1.3.4): the right hand's ray in the world (game units), for the bow
+   and the boomerang, while it applies: returns 1. pc_vr_laser_hit: how far along it (game units) it met something. */
+int pc_vr_laser(float* origin, float* direction);
+/* 1 in the immersive mode: the bow and the boomerang aim by the hand, with no first-person camera (1.3.5). */
+int pc_vr_immersive(void);
+void pc_vr_laser_hit(float units);
 struct PcVrFlower {
     const void* id;
     float x, y, z;

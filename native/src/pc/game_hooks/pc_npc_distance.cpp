@@ -166,9 +166,9 @@ void npcDistanceFrame(unsigned int frames) {
     // the telescope (the item or an event's scope), looking around, the picto box, aiming (as
     // pc_vr_diorama.cpp's auto_screen): Link looks far, so everyone is drawn
     sFirstPerson = dComIfGp_getPlayer(0) != nullptr &&
-                   (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
-                                                       daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e |
-                                                       daPyStts0_ROPE_AIM_e) != 0 ||
+                   (dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e |
+                                                       daPyStts0_HOOKSHOT_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
+                    (!pc_vr_immersive() && dComIfGp_checkPlayerStatus0(0, daPyStts0_BOW_AIM_e | daPyStts0_BOOMERANG_AIM_e) != 0) ||
                     dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0);
     sFrame = frames + 1;  // never 0 (a free slot)
 #if defined(__ANDROID__)

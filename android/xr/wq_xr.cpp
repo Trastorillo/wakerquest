@@ -183,6 +183,12 @@ struct Settings {
     bool ambientMove = true;
     // the open roof (wq_sky.cpp, 1.2.3): the ceiling opens, the walls come down, the sky and the sea around
     bool ambientFlowers = false;  // the flowers on the game's screen, fixed in the room (1.2.6)
+    // the immersive mode (mode = inmersivo, 1.4): `window` is true with it, without the window's mask
+    bool immersive = false;
+    float immersiveLink = 0.65f;   // m, Link's height: how large the world is around the player
+    float immersiveDepth = 0.0f;   // m, the camera moved forward (grip izquierdo + stick izquierdo)
+    float immersiveLift = 0.0f;    // m, the camera raised (grip derecho + stick izquierdo)
+    int immersiveResolution = 1080;  // lines: 1080 still ran smooth on the headset
     bool roofOpen = false;
     float roofWall = 1.0f;    // m above the floor, the walls once down
     float roofRadius = 2.5f;  // m around the room's middle, where they stand
@@ -406,6 +412,13 @@ const char kDefaultSettings[] =
     "# outside the screen, in the room, fading out ambient_range m from its edge.\n"
     "ambient = 1\n"
     "ambient_range = 4.5\n"
+    "# mode = inmersivo: the world around the player, seen from the game's camera. immersive_link = Link's height\n"
+    "# in m (0.3 to 1; grip + right stick), immersive_depth = the camera moved forward in m (left grip + left stick),\n"
+    "# immersive_lift = raised in m (right grip + left stick), immersive_resolution = its lines.\n"
+    "immersive_link = 0.65\n"
+    "immersive_depth = 0\n"
+    "immersive_lift = 0\n"
+    "immersive_resolution = 1080\n"
     "# ambient_flowers 1 = the flowers on the game's screen in the room, as its characters, each staying where it\n"
     "# first showed while it is on the screen.\n"
     "ambient_flowers = 0\n"
@@ -495,7 +508,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "cpu_low")) s.cpuLow = on;
     else if (!strcmp(key, "mode")) {
         s.diorama = !strcmp(v, "maqueta") || !strcmp(v, "diorama") || !strcmp(v, "table");
-        s.window = !strcmp(v, "ventana") || !strcmp(v, "window");
+        s.immersive = !strcmp(v, "inmersivo") || !strcmp(v, "immersive");
+        s.window = s.immersive || !strcmp(v, "ventana") || !strcmp(v, "window");
         if (!strcmp(v, "pantalla3d")) s.stereo = true;  // (the file's mode = pantalla leaves stereo as it says)
     }
     else if (!strcmp(key, "shape")) s.sphere = strcmp(v, "caja") != 0 && strcmp(v, "box") != 0 && strcmp(v, "table") != 0;
@@ -540,6 +554,10 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "ambient_mask")) s.ambientMask = on;
     else if (!strcmp(key, "ambient_move")) s.ambientMove = on;
     else if (!strcmp(key, "ambient_flowers")) s.ambientFlowers = on;
+    else if (!strcmp(key, "immersive_link")) s.immersiveLink = clampf(f, 0.3f, 1.0f);
+    else if (!strcmp(key, "immersive_depth")) s.immersiveDepth = clampf(f, -5.0f, 5.0f);
+    else if (!strcmp(key, "immersive_lift")) s.immersiveLift = clampf(f, -kWindowLiftMax, kWindowLiftMax);
+    else if (!strcmp(key, "immersive_resolution")) s.immersiveResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "roof_open")) s.roofOpen = on;
     else if (!strcmp(key, "roof_wall")) s.roofWall = clampf(f, 0.3f, 2.0f);
     else if (!strcmp(key, "roof_radius")) s.roofRadius = clampf(f, 1.0f, 8.0f);
@@ -624,6 +642,12 @@ int windowLines(int base, float width, int current) {
 // The resolution key of the mode in effect (the window, the giant screen in 3D, or the rest), and its lines
 std::atomic_bool s_introFlat{false};  // wq_xr_set_intro_flat: the title on the flat giant screen
 std::atomic_bool s_cineScreen{false};  // wq_xr_set_cine_screen (1.1.8): a cutscene on the giant screen, in 3D
+// the immersive mode's laser (wq_xr_laser_ray, wq_xr_set_laser)
+std::atomic_bool s_laserOn{false};
+std::atomic<float> s_laserLength{0.0f};
+std::mutex s_laserLock;
+float s_laserRay[6] = {};
+bool s_laserValid = false;
 std::atomic_bool s_bowScreen{false};  // wq_xr_set_bow_screen (1.2.1): aiming the bow, on the giant screen
 // The giant screen in 3D: as the mode says (Pantalla 3D or Pantalla); a cutscene shown on it from the window or
 // the model (cine_only, "Cinemáticas en pantalla 3D") always, as those modes have no 3D row of their own (1.1.9).
@@ -633,10 +657,11 @@ const char* activeResolutionKey(const Settings& s) {
     if (s_introFlat.load()) return "resolution";
     // a cutscene on the giant screen (cine_only): the screen's 3D resolution, not the model's or the window's
     if (s_cineScreen.load()) return screenStereo(s) ? "stereo_resolution" : "resolution";
-    return s.window ? "window_resolution" : s.diorama ? "diorama_resolution" : s.stereo ? "stereo_resolution" : "resolution";
+    return s.immersive ? "immersive_resolution" : s.window ? "window_resolution" : s.diorama ? "diorama_resolution" : s.stereo ? "stereo_resolution" : "resolution";
 }
 int resolutionOf(const Settings& s, const char* key) {
-    const int v = !strcmp(key, "window_resolution") ? s.windowResolution
+    const int v = !strcmp(key, "immersive_resolution") ? s.immersiveResolution
+                  : !strcmp(key, "window_resolution") ? s.windowResolution
                   : !strcmp(key, "stereo_resolution") ? s.stereoResolution
                   : !strcmp(key, "diorama_resolution") ? s.dioramaResolution
                                                       : s.resolution;
@@ -668,7 +693,7 @@ std::string settingValue(const Settings& s, const char* key) {
     };
     auto flag = [](bool v) { return std::string(v ? "1" : "0"); };
     // (mode = pantalla with stereo = 1, as older files have it too: Pantalla 3D)
-    if (!strcmp(key, "mode")) return s.window ? "ventana" : s.diorama ? "maqueta" : s.stereo ? "pantalla3d" : "pantalla";
+    if (!strcmp(key, "mode")) return s.immersive ? "inmersivo" : s.window ? "ventana" : s.diorama ? "maqueta" : s.stereo ? "pantalla3d" : "pantalla";
     if (!strcmp(key, "shape")) return s.sphere ? "esfera" : "caja";
     if (!strcmp(key, "perf_preset")) return kPresetNames[s.perfPreset];
     if (!strcmp(key, "refresh") || !strcmp(key, "stereo_refresh") || !strcmp(key, "window_refresh") ||
@@ -678,6 +703,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "mode_refresh")) return num(float(activeRefresh(s)));
     if (!strcmp(key, "cpu_low")) return flag(s.cpuLow);
     if (!strcmp(key, "resolution") || !strcmp(key, "stereo_resolution") || !strcmp(key, "window_resolution") ||
+        !strcmp(key, "immersive_resolution") ||
         !strcmp(key, "diorama_resolution"))
         return num(float(resolutionOf(s, key)));
     if (!strcmp(key, "auto_screen")) return flag(s.autoScreen);
@@ -711,6 +737,9 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "ambient_mask")) return flag(s.ambientMask);
     if (!strcmp(key, "ambient_move")) return flag(s.ambientMove);
     if (!strcmp(key, "ambient_flowers")) return flag(s.ambientFlowers);
+    if (!strcmp(key, "immersive_link")) return num(s.immersiveLink);
+    if (!strcmp(key, "immersive_depth")) return num(s.immersiveDepth);
+    if (!strcmp(key, "immersive_lift")) return num(s.immersiveLift);
     if (!strcmp(key, "roof_open")) return flag(s.roofOpen);
     if (!strcmp(key, "roof_wall")) return num(s.roofWall);
     if (!strcmp(key, "roof_radius")) return num(s.roofRadius);
@@ -843,6 +872,7 @@ struct Xr {
     bool hoverWas = false;
     float mouseX = -1.0f, mouseY = -1.0f;
     XrSwapchain cursorSwapchain = XR_NULL_HANDLE, raySwapchain = XR_NULL_HANDLE;
+    XrSwapchain laserDotSwapchain = XR_NULL_HANDLE;  // the immersive mode's red dot
     // the grips: the model moved by one hand, moved, turned and scaled by both, or a panel (the HUD's,
     // the dialogues') moved by the hand whose ray or grip is on it
     XrAction gripL = XR_NULL_HANDLE, handPoseL = XR_NULL_HANDLE;
@@ -1696,7 +1726,9 @@ void onPerfNotification(const XrEventDataPerfSettingsEXT& e) {
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
 bool updatePassthrough() {
     // the diorama and the window sit in the room
-    const bool want = (s.settings.passthrough || s.settings.diorama || s.settings.window || s.settings.roofOpen ||
+    // the immersive mode covers the room whole: none, but in a special scene through its window
+    const bool want = (!s.settings.immersive || s_special.load()) &&
+                      (s.settings.passthrough || s.settings.diorama || s.settings.window || s.settings.roofOpen ||
                        s_special.load()) &&
                       s.hasPassthrough;
     if (want == s.passthroughRunning) return want;
@@ -2160,6 +2192,15 @@ in vec2 v_uv;
 out vec4 o_color;
 void main() {
     float a;
+    if (u_mode == 2) {
+        // the laser's red dot: a solid middle and a soft glow, premultiplied
+        float r = length(v_uv - 0.5) * 2.0;
+        float core = 1.0 - smoothstep(0.35, 0.5, r);
+        float glow = (1.0 - smoothstep(0.4, 1.0, r)) * 0.5;
+        a = max(core, glow);
+        o_color = vec4(a, a * 0.08, a * 0.05, a);
+        return;
+    }
     if (u_mode == 0) {
         float r = length(v_uv - 0.5) * 2.0;
         a = 1.0 - smoothstep(0.75, 1.0, r);
@@ -2713,15 +2754,16 @@ void cancelGrab(int h, bool window, bool diorama, bool ambient) {
     if (held && !s.gripDown[other]) {
         if (s.stickScale == 1) st.tableSpan = was.tableSpan;
         if (s.stickScale == 2) st.windowScale = was.windowScale;
+        if (s.stickScale == 8) st.immersiveLink = was.immersiveLink;
         if (s.stickScale == 3) st.ambientScale = was.ambientScale;
         if (s.stickScale == 4) {
             st.screenScale = was.screenScale;
             st.bowStereoStrength = was.bowStereoStrength;
         }
         s.stickScale = 0;
-        if (s.stickLift) st.windowLift = was.windowLift;
+        if (s.stickLift) st.windowLift = was.windowLift, st.immersiveLift = was.immersiveLift;
         s.stickLift = false;
-        if (s.stickDepth) st.windowDepth = was.windowDepth;
+        if (s.stickDepth) st.windowDepth = was.windowDepth, st.immersiveDepth = was.immersiveDepth;
         s.stickDepth = false;
     }
     if (h == 0 && s.stickCam) {  // the left stick's camera: the left grip's alone
@@ -3028,15 +3070,15 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         const float y = stick->y;
         *stick = {0.0f, 0.0f};
         if (std::fabs(y) > 0.25f && !s.stickHold) {
-            int what = diorama ? 1 : window ? 2 : ambient ? 3 : 4;
+            int what = diorama ? 1 : window ? (st.immersive ? 8 : 2) : ambient ? 3 : 4;
             if (what == 3 && ambientHeld)
                 what = s.stickScale == 3 || s.stickScale == 4 ? s.stickScale : aimOnScreen() ? 4 : 3;
             if (s.stickScale != what) s.stickBow = what == 4 && s_bowScreen.load();
             const bool bow = what == 4 && s.stickBow;
-            float* v = what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale
+            float* v = what == 8 ? &st.immersiveLink : what == 1 ? &st.tableSpan : what == 2 ? &st.windowScale : what == 3 ? &st.ambientScale
                        : bow ? &st.bowStereoStrength : &st.screenScale;
-            const float lo = bow ? 0.004f : what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.25f;
-            const float hi = bow ? 0.30f : what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 20.0f;
+            const float lo = what == 8 ? 0.3f : bow ? 0.004f : what == 1 ? 5.0f : what == 2 ? 0.25f : what == 3 ? 0.1f : 0.25f;
+            const float hi = what == 8 ? 1.0f : bow ? 0.30f : what == 1 ? 300.0f : what == 2 ? 20.0f : what == 3 ? 10.0f : 20.0f;
             if (s.stickScale != what) {
                 s.stickScale = what;
                 s.stickTick = *v;
@@ -3078,11 +3120,15 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             }
             const int hz = activeRefresh(st);
             const float dt = hz > 0 ? 1.0f / float(hz) : 1.0f / 72.0f;
-            const float before = st.windowDepth;
-            const float speed = (std::fabs(y) - 0.25f) / 0.75f * (y > 0.0f ? 0.3f : -0.3f);
+            // the immersive mode's camera: a metre a second, either way
+            float& depth = st.immersive ? st.immersiveDepth : st.windowDepth;
+            const float before = depth;
+            const float top = st.immersive ? 1.0f : 0.3f;
+            const float speed = (std::fabs(y) - 0.25f) / 0.75f * (y > 0.0f ? top : -top);
             // the stepper's range; a larger value written in xr.ini does not jump down to it
-            st.windowDepth = clampf(before + speed * dt, 0.1f, std::max(2.0f, before));
-            if (std::floor(before / 0.1f + 0.5f) != std::floor(st.windowDepth / 0.1f + 0.5f)) {
+            depth = st.immersive ? clampf(before + speed * dt, -5.0f, 5.0f)
+                                 : clampf(before + speed * dt, 0.1f, std::max(2.0f, before));
+            if (std::floor(before / 0.1f + 0.5f) != std::floor(depth / 0.1f + 0.5f)) {
                 pointerHaptic(0, 0.15f);
                 pointerHaptic(1, 0.15f);
             }
@@ -3096,10 +3142,11 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
             }
             const int hz = activeRefresh(st);
             const float dt = hz > 0 ? 1.0f / float(hz) : 1.0f / 72.0f;
-            const float before = st.windowLift;
+            float& lift = st.immersive ? st.immersiveLift : st.windowLift;
+            const float before = lift;
             const float speed = (std::fabs(y) - 0.25f) / 0.75f * (y > 0.0f ? 0.1f : -0.1f);
-            st.windowLift = clampf(st.windowLift + speed * dt, -kWindowLiftMax, kWindowLiftMax);
-            if (std::floor(before / 0.05f + 0.5f) != std::floor(st.windowLift / 0.05f + 0.5f)) {
+            lift = clampf(lift + speed * dt, -kWindowLiftMax, kWindowLiftMax);
+            if (std::floor(before / 0.05f + 0.5f) != std::floor(lift / 0.05f + 0.5f)) {
                 pointerHaptic(0, 0.15f);
                 pointerHaptic(1, 0.15f);
             }
@@ -3110,14 +3157,14 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     }
     if (!held && s.stickLift) {
         char v[32];
-        snprintf(v, sizeof v, "%.3f", st.windowLift);
-        wq_xr_set("window_lift", v);
+        snprintf(v, sizeof v, "%.3f", st.immersive ? st.immersiveLift : st.windowLift);
+        wq_xr_set(st.immersive ? "immersive_lift" : "window_lift", v);
         s.stickLift = false;
     }
     if (!held && s.stickDepth) {
         char v[32];
-        snprintf(v, sizeof v, "%.2f", st.windowDepth);
-        wq_xr_set("window_depth", v);
+        snprintf(v, sizeof v, "%.2f", st.immersive ? st.immersiveDepth : st.windowDepth);
+        wq_xr_set(st.immersive ? "immersive_depth" : "window_depth", v);
         s.stickDepth = false;
     }
     // The giant screen (1.1.9, Pantalla and Pantalla 3D): with the left grip held, the left stick up or down
@@ -3156,6 +3203,9 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         if (s.stickScale == 1) {
             snprintf(v, sizeof v, "%.1f", st.tableSpan);
             wq_xr_set("bubble_span", v);
+        } else if (s.stickScale == 8) {
+            snprintf(v, sizeof v, "%.2f", st.immersiveLink);
+            wq_xr_set("immersive_link", v);
         } else if (s.stickScale == 2) {
             snprintf(v, sizeof v, "%.2f", st.windowScale);
             wq_xr_set("window_scale", v);
@@ -3884,7 +3934,7 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[17];
+    const XrCompositionLayerBaseHeader* layers[19];
     uint32_t layerCount = 0;
     XrCompositionLayerQuad pointerQuads[2], panelQuad, labelQuad, frameQuads[4];
     s.hudShown = s.dialogueShown = false;
@@ -3926,8 +3976,9 @@ void runFrame() {
                 skyRoom.floorY = sl.pose.position.y;
             }
         }
-        wqs::sceneTick(s.instance, s.session, s.space, s.frame.predictedDisplayTime, s.settings.roofOpen);
-        if (wqs::layer(s.session, s.space, s.frame.predictedDisplayTime, s.srgb, s.settings.roofOpen, skyRoom,
+        const bool roof = s.settings.roofOpen && !s.settings.immersive;
+        wqs::sceneTick(s.instance, s.session, s.space, s.frame.predictedDisplayTime, roof);
+        if (wqs::layer(s.session, s.space, s.frame.predictedDisplayTime, s.srgb, roof, skyRoom,
                        activeRefresh(s.settings), &skyLayer, skyViews))
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&skyLayer;
     }
@@ -3972,7 +4023,7 @@ void runFrame() {
         // window's plane around its rectangle, under the eyes' pictures, so what comes out of the window
         // (the pop-out) and what flies in the room are drawn over it; outside the window the pictures'
         // alpha is 0 (Aurora patch 0030), so the frame shows there
-        if (s.hudFrame && s.settings.screenFrame && (drawnFor.windowFrame || s.settings.window)) {
+        if (s.hudFrame && s.settings.screenFrame && !s.settings.immersive && (drawnFor.windowFrame || s.settings.window)) {
             const Settings& st = s.settings;
             const int fl = frameLayers(windowPose(st), {st.windowWidth, st.windowWidth * 9.0f / 16.0f}, frameQuads);
             for (int i = 0; i < fl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&frameQuads[i];
@@ -4051,7 +4102,7 @@ void runFrame() {
                     const bool special = drawnFor.windowFrame && (s_special.load() || !st.window);
                     const float popout =
                         special ? std::min(st.windowPopoutSpecial, st.windowDepthSpecial - 0.02f)
-                                : st.windowPopoutOn ? std::min(st.windowPopout, st.windowDepth - 0.02f) : 0.0f;
+                                : st.windowPopoutOn && !st.immersive ? std::min(st.windowPopout, st.windowDepth - 0.02f) : 0.0f;
                     const float z = 0.01f + clampf(popout, 0.0f, 0.6f);
                     const float shrink = clampf((st.windowDistance - z) / std::max(st.windowDistance, 0.1f), 0.3f, 1.0f);
                     hud.subImage.imageRect = full;
@@ -4176,6 +4227,44 @@ void runFrame() {
         const int pl = updatePanelRays(pointerQuads);
         for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
     }
+    // the immersive mode's laser, from the right hand while aiming (1.3.4): its ray for the game, every frame
+    XrCompositionLayerQuad laserQuad, laserDot;
+    if (s.settings.immersive) {
+        XrVector3f lo, ld;
+        const bool have = aimRay(1, &lo, &ld);
+        {
+            std::lock_guard lock{s_laserLock};
+            s_laserValid = have;
+            if (have) {
+                s_laserRay[0] = lo.x, s_laserRay[1] = lo.y, s_laserRay[2] = lo.z;
+                s_laserRay[3] = ld.x, s_laserRay[4] = ld.y, s_laserRay[5] = ld.z;
+            }
+        }
+        if (have && s_laserOn.load() && !menuOpen) {
+            ensurePointerTextures();
+            const float laserLen = std::max(s_laserLength.load(), 0.3f);
+            if (s.raySwapchain) {
+                rayLayer(lo, ld, laserLen, 0.003f, &laserQuad);
+                layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&laserQuad;
+            }
+            if (!s.laserDotSwapchain) s.laserDotSwapchain = makePointerTexture(64, 64, 2);
+            if (s.laserDotSwapchain) {
+                const XrVector3f at = vadd(lo, vscale(ld, laserLen));
+                laserDot = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+                laserDot.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+                laserDot.space = s.space;
+                laserDot.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+                laserDot.subImage.swapchain = s.laserDotSwapchain;
+                laserDot.subImage.imageRect = {{0, 0}, {64, 64}};
+                laserDot.pose.orientation = facingPlayer(at);
+                laserDot.pose.position = at;
+                // about the same size to the eye, near or far
+                const float size = std::max(0.03f, laserLen * 0.025f);
+                laserDot.size = {size, size};
+                layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&laserDot;
+            }
+        }
+    }
     // the model's (or the window's, or the screen's) size while both hands scale it, above it; or the
     // world's scale while the right stick changes it (a grip held)
     if (SDL_GetTicks() < s.sizeShownUntil) {
@@ -4211,11 +4300,13 @@ void runFrame() {
         else if (s.labelWhat == 4)
             snprintf(text, sizeof text, "%s %.2f", kScale[lang], st.screenScale);
         else if (s.labelWhat == 5)
-            snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.windowLift);
+            snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.immersive ? st.immersiveLift : st.windowLift);
         else if (s.labelWhat == 6)
             snprintf(text, sizeof text, "%s %+.2f m", kCamera[lang], st.screenCamDepth);
         else if (s.labelWhat == 7)
-            snprintf(text, sizeof text, "%s %.2f m", kDepth[lang], st.windowDepth);
+            snprintf(text, sizeof text, "%s %.2f m", kDepth[lang], st.immersive ? st.immersiveDepth : st.windowDepth);
+        else if (s.labelWhat == 8)
+            snprintf(text, sizeof text, "Link %.2f m", st.immersiveLink);
         else if (st.window && lines > 0)
             // the window: its resolution (windowLines) and its limit
             snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 %s %.1f m", st.windowWidth,
@@ -4387,7 +4478,7 @@ extern "C" int wq_xr_resolution(int* base) {
     }
     // the window: fewer lines as it grows (windowLines), from the lines it has now
     static int last = 0;
-    const int now = windowLines(lines, st.windowWidth, s_windowLines.load());
+    const int now = st.immersive ? lines : windowLines(lines, st.windowWidth, s_windowLines.load());
     if (now != last) {
         xrlog("window: %.2f m wide (limit %.1f m): %d lines of window_resolution %d", st.windowWidth,
               kWindowMaxWidth, now, lines);
@@ -4428,6 +4519,18 @@ extern "C" void wq_xr_set_talk(bool talk) {
 extern "C" void wq_xr_reset_position(void) {
     if (s.settingsPath[0] == '\0') return;
     resetPositions(wq_xr_set);
+}
+
+extern "C" bool wq_xr_laser_ray(float* origin, float* direction) {
+    std::lock_guard lock{s_laserLock};
+    if (!s_laserValid) return false;
+    for (int i = 0; i < 3; i++) origin[i] = s_laserRay[i], direction[i] = s_laserRay[3 + i];
+    return true;
+}
+
+extern "C" void wq_xr_set_laser(bool on, float length) {
+    s_laserOn.store(on);
+    s_laserLength.store(length);
 }
 
 extern "C" void wq_xr_set_bow_screen(bool on) {
@@ -4501,6 +4604,10 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->ambientWorld = st.ambientWorld;
     out->roofOpen = st.roofOpen;
     out->ambientFlowers = st.ambientFlowers;
+    out->immersive = st.immersive;
+    out->immersiveLink = st.immersiveLink;
+    out->immersiveDepth = st.immersiveDepth;
+    out->immersiveLift = st.immersiveLift;
     out->screenX = st.screenX;
     out->screenY = st.height;
     out->screenDistance = st.distance;
@@ -4568,7 +4675,7 @@ extern "C" bool wq_xr_start(void) {
     // frame twice. Later mode and 3D changes: pc_menu.cpp syncVrResolution.
     int lines = activeResolution(s.settings);
     if (s.settings.window) {
-        lines = windowLines(lines, s.settings.windowWidth, 0);
+        lines = s.settings.immersive ? lines : windowLines(lines, s.settings.windowWidth, 0);
         s_windowLines.store(lines);
     }
     if (lines > 0 && getenv("COS_FB_SCALE") == nullptr) {

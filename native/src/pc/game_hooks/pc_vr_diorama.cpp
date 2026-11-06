@@ -147,6 +147,13 @@ struct State {
     float winHalfW = 0.8f, winHalfH = 0.45f;
     float winHead[3] = {0, 0, 1};
     float winDepth = 0.5f, winPopout = 1.0f;
+    bool immersive = false;  // the immersive mode (mode = inmersivo): the window's frames, nothing masked
+    bool immersiveMode = false;  // the mode in effect, whatever this frame draws
+    bool laserAim = false;   // aiming the bow or the boomerang there: the hand's laser aims (pc_vr_laser)
+    float laserUnits = 0.0f;
+    M4 worldFromRoom = identity();
+    bool worldFromRoomValid = false;
+    float immFwd[3] = {0.0f, 0.0f, -1.0f};  // where the head looks, in the room
     float winDrawUnits = 80000.0f;  // the window's draw distance (game units from the camera)
     unsigned long cullFarHidden = 0;
     // the bubble's focus (the talk zoom, a special scene): the pivot drawn toward `focus` and the span
@@ -389,6 +396,12 @@ const float kWindowCameraGap = 0.02f;  // m: the pop-out stops this short of the
 int cullWindow(const float t[3], float r) {
     const float margin = 0.25f;
     const float p[3] = {t[0] * s.winHalfW, t[1] * s.winHalfH, t[2]};  // metres
+    if (s.immersive) {
+        // all around the player: only what is well behind the head is left out (it may turn before it shows)
+        const float along = (p[0] - s.winHead[0]) * s.immFwd[0] + (p[1] - s.winHead[1]) * s.immFwd[1] +
+                            (p[2] - s.winHead[2]) * s.immFwd[2];
+        return along < -r - 2.0f ? 1 : 0;
+    }
     const float* e = s.winHead;
     bool seen = false;
     if (p[2] - r < 0.0f) {
@@ -1166,6 +1179,13 @@ void seeThrough(const M4& headFromWorld, const fopAc_ac_c* player, float radiusM
 // the eyes' mask as the window (Aurora patch 0030) and the culling against what it shows.
 bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head, const fopAc_ac_c* player) {
     s.window = true;
+    s.immersive = table.immersive;
+    if (s.immersive) {
+        const float* q = head.rot;
+        s.immFwd[0] = -2.0f * (q[0] * q[2] + q[3] * q[1]);
+        s.immFwd[1] = -2.0f * (q[1] * q[2] - q[3] * q[0]);
+        s.immFwd[2] = -(1.0f - 2.0f * (q[0] * q[0] + q[1] * q[1]));
+    }
     s.k = 1.0f / (table.windowScale * kUnitsPerMetre);  // metres per game unit
     s.winHalfW = 0.5f * table.windowWidth;
     s.winHalfH = 0.5f * table.windowHeight;
@@ -1175,6 +1195,18 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
     s.winDrawUnits = table.windowDrawDistance * table.windowScale * kUnitsPerMetre;
     const M4 roomView = roomFromCameraView(table, s.k);
     const M4 tableRoom = windowTableFromRoom(table);
+    if (table.immersive) {
+        // the world from the room: roomView (a turn, a move and the scale s.k) undone, then the camera's view
+        const float k2 = s.k * s.k;
+        M4 viewFromRoom = identity();
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) viewFromRoom.m[r][c] = roomView.m[c][r] / k2;
+            viewFromRoom.m[r][3] = 0.0f;
+            for (int c = 0; c < 3; c++) viewFromRoom.m[r][3] -= viewFromRoom.m[r][c] * roomView.m[c][3];
+        }
+        s.worldFromRoom = mul(rigidInverse(view->mViewMtx), viewFromRoom);
+        s.worldFromRoomValid = true;
+    }
     // the culling's table from the world (cullSetup takes the current camera's view off again)
     s.tableFromWorld = mul(mul(tableRoom, roomView), fromMtx(view->mViewMtx));
     s.tableValid = true;
@@ -1201,7 +1233,7 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
     // with the frame's tag: wq_xr_set_frame_view), else the head's
     const float popout = std::max(0.0f, std::min(table.windowPopout, table.windowDepth - kWindowCameraGap));
     float fov[4] = {head.tanLeft, head.tanRight, head.tanDown, head.tanUp};
-    const bool fitted = fitWindowFrustum(table, head, popout, fov);
+    const bool fitted = !table.immersive && fitWindowFrustum(table, head, popout, fov);
     wq_xr_set_frame_view(head.tag, true, fitted ? fov : nullptr);
     Mtx44 p;
     C_MTXFrustum(p, kNear * fov[3], kNear * fov[2], kNear * fov[0], kNear * fov[1], kNear, far);
@@ -1218,7 +1250,7 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
         // the shader's least, 1e-3 of the half width); what comes out is opaque up to a thin edge
         // (window_fade) at the pop-out's front; with the pop-out off (window_popout_on 0) nothing in
         // front of the window's plane is shown
-        float fade[4] = {1e-3f, 1e-3f, std::max(table.windowFade, 0.005f), 2.0f};
+        float fade[4] = {1e-3f, 1e-3f, std::max(table.windowFade, 0.005f), table.immersive ? 4.0f : 2.0f};
         memcpy(tfh, tfhIn, sizeof(tfh));
         aurora_xr_set_diorama_mask(tfhIn, s.projTo, eyeShift, fade);
         aurora_xr_set_diorama_window(popout, table.windowDepth);
@@ -1226,7 +1258,7 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
     // the birds fly in the world behind the window, at its size; with the room's ambience (ambient) the
     // game's ambient actors near the window are kept outside its frame too, fading away from it
     sBirds.n = 0;
-    if (table.ambient && table.window) {  // not in a special scene through the window
+    if (table.ambient && table.window && !table.immersive) {  // not in a special scene through the window
         ambientFrame(view, table, player, &head);  // as the screen's, the window its hole
     } else {
         ambientOff();
@@ -1235,7 +1267,7 @@ bool windowBegin(view_class* view, const WqXrTable& table, const WqXrHead& head,
     aurora_xr_set_frame_info(head.tag, true);
     AuroraSetViewDelta(&s.delta[0][0], s.projFrom, s.projTo);
     seeThrough(mul(c, fromMtx(view->mViewMtx)), player, table.seeThroughRadius, s.k);
-    {
+    if (!table.immersive) {
         // what the game camera sees in front of the pop-out's front (the window's plane with the pop-out
         // off) is not drawn at all (Aurora patch 0031's clip plane), so what is behind it shows, rather
         // than the mask fading it into a see-through hole: the window's +z (toward the player) in the
@@ -1486,7 +1518,11 @@ bool pc_vr_view_begin(view_class* view) {
         dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e | daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e |
                                            daPyStts0_HOOKSHOT_AIM_e | daPyStts0_BOOMERANG_AIM_e | daPyStts0_ROPE_AIM_e) != 0 ||
         dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e) != 0 || dComIfGp_getScopeType() != 0;
-    const bool firstPerson = table.autoScreen && firstPersonView;
+    // the immersive mode stays itself while aiming the bow or the boomerang: the hand's laser aims (1.3.4)
+    s.immersiveMode = table.immersive;
+    s.laserAim = table.immersive && dComIfGp_checkPlayerStatus0(0, daPyStts0_BOW_AIM_e | daPyStts0_BOOMERANG_AIM_e) != 0;
+    wq_xr_set_laser(s.laserAim, s.laserUnits * s.k);
+    const bool firstPerson = table.autoScreen && firstPersonView && !s.laserAim;
     // The title screen (intro_2d, fase 2): while its stage (sea_T, Outset behind the logo) is loaded
     // (pc_npc_distance.cpp's introCinematic), the giant screen, flat, whatever the mode, as cine_screen's
     // cutscenes: the layer drops the 3D meanwhile (wq_xr_set_intro_flat), and no ambience. Nothing is
@@ -1515,7 +1551,7 @@ bool pc_vr_view_begin(view_class* view) {
     const bool ownView = !specialScene && (intro2d || firstPerson || cineOnly);
     const bool modeOn = table.diorama || table.window || special;
     // (the first-person camera: not the bow held with Z, in third person, where the 3D stays as it is)
-    wq_xr_set_bow_screen(dComIfGp_checkPlayerStatus0(0, daPyStts0_BOW_AIM_e) != 0 &&
+    wq_xr_set_bow_screen(!s.laserAim && dComIfGp_checkPlayerStatus0(0, daPyStts0_BOW_AIM_e) != 0 &&
                          dComIfGp_checkCameraAttentionStatus(0, dCamAttnStts_00000010_e) != 0 && !specialScene &&
                          (!modeOn || ownView));
     const bool want = modeOn && view != nullptr && player != nullptr && !ownView && wq_xr_head(&head);
@@ -1573,6 +1609,7 @@ bool pc_vr_view_begin(view_class* view) {
         if (special) {
             WqXrTable w = table;
             w.windowScale = 1.0f;
+            w.immersive = false;
             w.windowDepth = table.windowDepthSpecial;
             w.windowPopout = table.windowPopoutSpecial;
             if (!table.window) w.windowLift = 0.0f;  // the window's camera height only in the window mode
@@ -1580,6 +1617,14 @@ bool pc_vr_view_begin(view_class* view) {
         }
         WqXrTable w = table;
         w.windowPopout *= sPopK;
+        if (table.immersive) {
+            // the game's camera where the player stands, in the world at Link's chosen height (he is 125 units tall)
+            w.windowScale = 125.0f / (table.immersiveLink * kUnitsPerMetre);
+            w.windowDepth = table.immersiveDepth;
+            w.windowLift = table.immersiveLift;
+            w.windowX = w.windowY = w.windowDistance = w.windowYaw = 0.0f;
+            w.windowPopout = 0.0f;
+        }
         return windowBegin(view, w, head, player);
     }
     if (s.window) {
@@ -1719,6 +1764,27 @@ void pc_vr_reset_position(void) { wq_xr_reset_position(); }
 bool pc_vr_value(const char* key, char* out, int size) { return wq_xr_value(key, out, size); }
 const char* pc_vr_perf_preset(void) { return wq_xr_perf_preset(); }
 int pc_vr_resolution(int* base) { return wq_xr_resolution(base); }
+// The immersive mode's laser: the hand's ray from the room into the world of the last frame drawn
+int pc_vr_laser(float* origin, float* direction) {
+    if (!s.immersiveMode || !s.immersive || !s.laserAim || !s.worldFromRoomValid) return 0;
+    float o[3], d[3];
+    if (!wq_xr_laser_ray(o, d)) return 0;
+    xform(s.worldFromRoom, o, origin);
+    float dw[3];
+    for (int r = 0; r < 3; r++) {
+        dw[r] = 0.0f;
+        for (int c = 0; c < 3; c++) dw[r] += s.worldFromRoom.m[r][c] * d[c];
+    }
+    const float len = std::sqrt(dw[0] * dw[0] + dw[1] * dw[1] + dw[2] * dw[2]);
+    if (len < 1e-6f) return 0;
+    for (int r = 0; r < 3; r++) direction[r] = dw[r] / len;
+    return 1;
+}
+
+void pc_vr_laser_hit(float units) { s.laserUnits = units; }
+
+int pc_vr_immersive(void) { return s.immersiveMode ? 1 : 0; }
+
 const char* pc_vr_resolution_key(void) { return wq_xr_resolution_key(); }
 void pc_vr_menu_state(bool open, float width, float height, bool hovered) {
     wq_xr_menu_state(open, width, height, hovered);
@@ -2317,6 +2383,9 @@ void pc_vr_reset_position(void) {}
 bool pc_vr_value(const char*, char*, int) { return false; }
 const char* pc_vr_perf_preset(void) { return ""; }
 int pc_vr_resolution(int*) { return -1; }
+int pc_vr_laser(float*, float*) { return 0; }
+int pc_vr_immersive(void) { return 0; }
+void pc_vr_laser_hit(float) {}
 const char* pc_vr_resolution_key(void) { return "resolution"; }
 void pc_vr_menu_state(bool, float, float, bool) {}
 int pc_vr_panel_frame(void) { return 0; }
