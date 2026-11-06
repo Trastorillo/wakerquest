@@ -268,6 +268,21 @@ const Item kWindow[] = {
 // the room's ambience (mode = pantalla, pc_vr_diorama.cpp): the game's seagulls, crabs and small birds
 // out of the screen
 const Item kAmbient[] = {
+    {kXr, "roof_open", {"Techo abierto", "Open roof", "Toit ouvert"},
+     {"Cielo y mar del juego sobre tus paredes", "The game's sky and sea over your walls",
+      "Le ciel et la mer du jeu au-dessus de vos murs"},
+     kSwitch},
+    {kXr, "roof_wall", {"Altura de las paredes", "Wall height", "Hauteur des murs"},
+     {"Con el techo abierto", "With the open roof", "Avec le toit ouvert"}, kStepper, nullptr, 0, 0.3f, 2.0f, 0.1f,
+     "%.1f m"},
+    {kXr, "ambient_flowers", {"Flores en tu habitación", "Flowers in your room", "Fleurs dans votre pièce"},
+     {"Las de la pantalla, fijas mientras se vean", "Those on the screen, fixed while they show",
+      "Celles de l'écran, fixes tant qu'on les voit"},
+     kSwitch},
+    {kXr, "roof_radius", {"Tamaño de la habitación", "Room size", "Taille de la pièce"},
+     {"Solo si las Quest no conocen tus paredes", "Only if the Quest doesn't know your walls",
+      "Seulement si le Quest ne connaît pas vos murs"},
+     kStepper, nullptr, 0, 1.0f, 8.0f, 0.25f, "%.2f m"},
     {kXr, "ambient", {"Ambiente", "Ambience", "Ambiance"},
      {"Gaviotas, cangrejos y pajarillos en tu habitación", "Seagulls, crabs and small birds in your room",
       "Mouettes, crabes et oiseaux dans votre pièce"},

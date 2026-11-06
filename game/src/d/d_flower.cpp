@@ -620,3 +620,75 @@ void dFlower_packet_c::setAnm(int param_1, s16 angle) {
     anm->field_0x02 = angle;
     anm->field_0x04 = 0;
 }
+
+#if TARGET_PC
+// The flowers the game draws now, in the room Link is in (not culled by its camera): for the room of the headset.
+int pc_vr_flowers_visible(PcVrFlower* out, int max) {
+    dFlower_packet_c* packet = dComIfGp_getFlower();
+    const int stay = dComIfGp_roomControl_getStayNo();
+    if (packet == NULL || stay < 0 || stay >= 64) return 0;
+    int n = 0;
+    for (dFlower_data_c* d = packet->pcRoomFlowers(stay); d != NULL && n < max; d = d->field_0x40) {
+        if (cLib_checkBit<u8>(d->field_0x00, 0x4)) continue;
+        out[n].id = d;
+        out[n].x = d->field_0x04.x, out[n].y = d->field_0x04.y, out[n].z = d->field_0x04.z;
+        out[n].kind = (cLib_checkBit<u8>(d->field_0x00, 0x20) ? 1 : 0) | (cLib_checkBit<u8>(d->field_0x00, 0x8) ? 2 : 0);
+        n++;
+    }
+    return n;
+}
+
+// As dFlower_packet_c::draw, with the given matrices: kinds' bit 0 the second kind, bit 1 cut. Unfogged.
+void pc_vr_flowers_draw(const float (*mtx)[3][4], const unsigned char* kinds, int n) {
+    dFlower_packet_c* packet = dComIfGp_getFlower();
+    if (packet == NULL) return;
+    int stay = dComIfGp_roomControl_getStayNo();
+    if (stay < 0) stay = 0;
+    dKy_tevstr_c* tevstr = dComIfGp_roomControl_getTevStr(stay);
+    const GXColor black = {0, 0, 0, 0};
+    j3dSys.reinitGX();
+    GXSetNumIndStages(0);
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_CLR0, GX_INDEX8);
+    GXSetVtxDesc(GX_VA_TEX0, GX_INDEX8);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
+    for (int second = 0; second < 2; second++) {
+        if (second == 0) {
+            GXSETARRAY(GX_VA_POS, l_pos, sizeof(l_pos), 0xC, true);
+            GXSETARRAY(GX_VA_CLR0, l_color, sizeof(l_color), 0x4, true);
+            GXSETARRAY(GX_VA_TEX0, l_texCoord, sizeof(l_texCoord), 0x8, true);
+            mDoLib_loadDLTexImage(l_matDL, 0xA0, l_Txo_ob_flower_white_64x64TEX);
+            GXCallDisplayList(l_matDL, 0xA0);
+        } else {
+            GXSETARRAY(GX_VA_POS, packet->mPosArray,
+                       packet->mPosArray == l_pos3 ? sizeof(l_pos3) : packet->mPosArray == l_pos2 ? sizeof(l_pos2) : 0, 0xC, true);
+            GXSETARRAY(GX_VA_CLR0, packet->mColorArray,
+                       packet->mColorArray == l_color3 ? sizeof(l_color3) : packet->mColorArray == l_color2 ? sizeof(l_color2) : 0, 0x4, true);
+            GXSETARRAY(GX_VA_TEX0, packet->mTexCoordArray,
+                       packet->mTexCoordArray == l_texCoord3 ? sizeof(l_texCoord3) : packet->mTexCoordArray == l_texCoord2 ? sizeof(l_texCoord2) : 0, 0x8, true);
+            mDoLib_loadDLTexImage(packet->mDL1, packet->mDL1Size,
+                                  packet->mDL1 == l_matDL3 ? l_Txq_bessou_hanaTEX : l_Txo_ob_flower_pink_64x64TEX);
+            GXCallDisplayList(packet->mDL1, packet->mDL1Size);
+        }
+        GXSetTevColorS10(GX_TEVREG0, tevstr->mColorC0);
+        GXSetTevColor(GX_TEVREG1, tevstr->mColorK0);
+        GXSetFog(GX_FOG_NONE, 0.0f, 1.0f, 0.1f, 1.0f, black);
+        for (int i = 0; i < n; i++) {
+            if ((kinds[i] & 1) != second) continue;
+            const bool gone = (kinds[i] & 2) != 0;
+            GXLoadPosMtxImm(const_cast<float(*)[4]>(mtx[i]), 0);
+            if (second == 0) {
+                if (gone) GXCallDisplayList(l_Ohana_gutDL, 0xA0);
+                else GXCallDisplayList(l_OhanaDL, 0x100);
+            } else {
+                if (gone) GXCallDisplayList(packet->mDL3, packet->mDL3Size);
+                else GXCallDisplayList(packet->mDL2, packet->mDL2Size);
+            }
+        }
+    }
+    J3DShape::resetVcdVatCache();
+}
+#endif

@@ -31,6 +31,7 @@
 // changes (checked every second). Every step goes to switchwaker.log as "[xr] ...".
 #include "wq_xr.h"
 #include "wq_panel.h"
+#include "wq_sky.h"
 
 #include <aurora/xr.h>
 
@@ -180,6 +181,11 @@ struct Settings {
     // the giant screen's ambience moved and sized by hand (ambient_move: the grips hold it instead of
     // the screen): metres in the room, degrees about the vertical through the screen's middle, a scale
     bool ambientMove = true;
+    // the open roof (wq_sky.cpp, 1.2.3): the ceiling opens, the walls come down, the sky and the sea around
+    bool ambientFlowers = false;  // the flowers on the game's screen, fixed in the room (1.2.6)
+    bool roofOpen = false;
+    float roofWall = 1.0f;    // m above the floor, the walls once down
+    float roofRadius = 2.5f;  // m around the room's middle, where they stand
     bool ambientWorld = true;  // anchored in the room (the world's, around Link); false: the game camera's view
     float ambientX = 0.236f, ambientY = 0.394f, ambientZ = -0.244f, ambientYaw = -26.3f, ambientScale = 1.05f;
     float tableX = 0.096f;                       // m, to the right of straight ahead (the grip moves it)
@@ -400,6 +406,14 @@ const char kDefaultSettings[] =
     "# outside the screen, in the room, fading out ambient_range m from its edge.\n"
     "ambient = 1\n"
     "ambient_range = 4.5\n"
+    "# ambient_flowers 1 = the flowers on the game's screen in the room, as its characters, each staying where it\n"
+    "# first showed while it is on the screen.\n"
+    "ambient_flowers = 0\n"
+    "# roof_open 1 = the room's ceiling opens and its walls come down to roof_wall m, the sky and the sea of the\n"
+    "# game over them. The walls are the headset's Space Setup; without one, a circle of roof_radius m.\n"
+    "roof_open = 0\n"
+    "roof_wall = 1.0\n"
+    "roof_radius = 2.5\n"
     "# tests: ambient_test = seagull (the nearest to Link) or link; ambient_mask 0 = drawn over the screen too.\n"
     "ambient_test = seagull\n"
     "ambient_mask = 1\n"
@@ -525,6 +539,10 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "ambient_test")) s.ambientTestLink = !strcmp(v, "link");
     else if (!strcmp(key, "ambient_mask")) s.ambientMask = on;
     else if (!strcmp(key, "ambient_move")) s.ambientMove = on;
+    else if (!strcmp(key, "ambient_flowers")) s.ambientFlowers = on;
+    else if (!strcmp(key, "roof_open")) s.roofOpen = on;
+    else if (!strcmp(key, "roof_wall")) s.roofWall = clampf(f, 0.3f, 2.0f);
+    else if (!strcmp(key, "roof_radius")) s.roofRadius = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "ambient_anchor")) s.ambientWorld = strcmp(v, "camera") != 0;
     else if (!strcmp(key, "ambient_x")) s.ambientX = clampf(f, -10.0f, 10.0f);
     else if (!strcmp(key, "ambient_y")) s.ambientY = clampf(f, -10.0f, 10.0f);
@@ -692,6 +710,10 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "ambient_test")) return s.ambientTestLink ? "link" : "seagull";
     if (!strcmp(key, "ambient_mask")) return flag(s.ambientMask);
     if (!strcmp(key, "ambient_move")) return flag(s.ambientMove);
+    if (!strcmp(key, "ambient_flowers")) return flag(s.ambientFlowers);
+    if (!strcmp(key, "roof_open")) return flag(s.roofOpen);
+    if (!strcmp(key, "roof_wall")) return num(s.roofWall);
+    if (!strcmp(key, "roof_radius")) return num(s.roofRadius);
     if (!strcmp(key, "ambient_anchor")) return s.ambientWorld ? "world" : "camera";
     if (!strcmp(key, "ambient_x")) return num(s.ambientX);
     if (!strcmp(key, "ambient_y")) return num(s.ambientY);
@@ -1100,6 +1122,14 @@ bool initInstance() {
     if (s.hasRefreshRate) enable.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
     s.hasPassthrough = hasExtension(exts, XR_FB_PASSTHROUGH_EXTENSION_NAME);
     if (s.hasPassthrough) enable.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    // the room the headset knows, for the open roof and the flowers (wq_sky.cpp)
+    for (const char* name : {XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME,
+                             XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME, XR_FB_SCENE_EXTENSION_NAME})
+        if (hasExtension(exts, name)) {
+            enable.push_back(name);
+        } else {
+            xrlog("room: the headset does not offer %s", name);
+        }
     s.hasPerf = hasExtension(exts, XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     if (s.hasPerf) enable.push_back(XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME);
     s.hasPerfMetrics = hasExtension(exts, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
@@ -1666,7 +1696,8 @@ void onPerfNotification(const XrEventDataPerfSettingsEXT& e) {
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
 bool updatePassthrough() {
     // the diorama and the window sit in the room
-    const bool want = (s.settings.passthrough || s.settings.diorama || s.settings.window || s_special.load()) &&
+    const bool want = (s.settings.passthrough || s.settings.diorama || s.settings.window || s.settings.roofOpen ||
+                       s_special.load()) &&
                       s.hasPassthrough;
     if (want == s.passthroughRunning) return want;
     if (want && !s.passthrough) {
@@ -1731,6 +1762,7 @@ void logInteractionProfiles() {
 void pollEvents() {
     XrEventDataBuffer ev{XR_TYPE_EVENT_DATA_BUFFER};
     while (xrPollEvent(s.instance, &ev) == XR_SUCCESS) {
+        wqs::sceneEvent(s.session, ev);
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             const auto& sc = *reinterpret_cast<XrEventDataSessionStateChanged*>(&ev);
             s.state = sc.state;
@@ -3852,7 +3884,7 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[16];
+    const XrCompositionLayerBaseHeader* layers[17];
     uint32_t layerCount = 0;
     XrCompositionLayerQuad pointerQuads[2], panelQuad, labelQuad, frameQuads[4];
     s.hudShown = s.dialogueShown = false;
@@ -3879,6 +3911,25 @@ void runFrame() {
     if (s.frame.shouldRender && updatePassthrough()) {  // the room first, the screen over it
         room.layerHandle = s.passthroughLayer;
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&room;
+    }
+    // the open roof (wq_sky.cpp): right over the room, under all the rest. It keeps drawing while it closes.
+    XrCompositionLayerProjection skyLayer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    XrCompositionLayerProjectionView skyViews[2];
+    if (s.frame.shouldRender) {
+        wqs::Room skyRoom{{0.0f, 0.0f}, -1.5f, s.settings.roofRadius, s.settings.roofWall};
+        if (s.stageSpace != XR_NULL_HANDLE) {
+            XrSpaceLocation sl{XR_TYPE_SPACE_LOCATION};
+            if (XR_SUCCEEDED(xrLocateSpace(s.stageSpace, s.space, s.frame.predictedDisplayTime, &sl)) &&
+                (sl.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {
+                skyRoom.centre[0] = sl.pose.position.x;
+                skyRoom.centre[1] = sl.pose.position.z;
+                skyRoom.floorY = sl.pose.position.y;
+            }
+        }
+        wqs::sceneTick(s.instance, s.session, s.space, s.frame.predictedDisplayTime, s.settings.roofOpen);
+        if (wqs::layer(s.session, s.space, s.frame.predictedDisplayTime, s.srgb, s.settings.roofOpen, skyRoom,
+                       activeRefresh(s.settings), &skyLayer, skyViews))
+            layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&skyLayer;
     }
     // The screen: one quad for both eyes, or in 3D one per eye over its half of the picture, at the
     // same place, so each eye sees its own picture of the scene.
@@ -4448,6 +4499,8 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->ambientMove[3] = st.ambientYaw * 0.0174532925f;
     out->ambientScale = st.ambientScale;
     out->ambientWorld = st.ambientWorld;
+    out->roofOpen = st.roofOpen;
+    out->ambientFlowers = st.ambientFlowers;
     out->screenX = st.screenX;
     out->screenY = st.height;
     out->screenDistance = st.distance;

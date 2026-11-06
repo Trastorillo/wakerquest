@@ -481,6 +481,7 @@ struct Ambient {
     unsigned n[8] = {};  // KAMOME (and KAMOME2, the same process here), DEMO_KMM, KN, KT, FF; [7] NH
     uint64_t lastLogNs = 0;
     bool on = false;      // this frame's painter draws the ambience (pc_vr_ambient_draw)
+    bool flowers = false;  // and the room's flowers
     bool wasOn = false;
     Mtx delta;            // the game camera's view space to the head's
     f32 projFrom[6], projTo[6];
@@ -675,6 +676,7 @@ uint64_t sScreenCamNs = 0;
 // ambience's view delta, frustum and mask for this frame's draws.
 // window: the window's frame (its head pose given; the hole is the window's rectangle)
 void ambientFrame(view_class* view, const WqXrTable& table, const fopAc_ac_c* player, const WqXrHead* given = nullptr) {
+    sAmbient.flowers = table.ambientFlowers;
     WqXrHead head;
     const bool window = given != nullptr;
     if (window) head = *given;
@@ -1380,11 +1382,40 @@ static bool screenCameraBegin(view_class* view) {
     return true;
 }
 
+// The open roof's sky (roof_open, wq_sky.cpp): the game's colours and weather while outdoors, nothing new elsewhere.
+void roofWeather() {
+    stage_stag_info_class* stag = dComIfGp_getStageStagInfo();
+    const u32 type = stag != nullptr ? dStage_stagInfo_GetSTType(stag) : u32(dStageType_MISC_e);
+    if (type != dStageType_OUTDOORS_e && type != dStageType_SEA_e) {
+        wq_xr_set_weather(nullptr, -1.0f, 0.0f, 0.0f);
+        return;
+    }
+    const dScnKy_env_light_c& e = dKy_getEnvlight();
+    const GXColorS10* from[4] = {&e.mVrSkyColor, &e.mVrKasumiMaeColor, &e.mVrkumoColor, &e.mVrUsoUmiColor};
+    float colors[12];
+    int total = 0;
+    for (int i = 0; i < 4; i++) {
+        colors[i * 3 + 0] = from[i]->r, colors[i * 3 + 1] = from[i]->g, colors[i * 3 + 2] = from[i]->b;
+        total += from[i]->r + from[i]->g + from[i]->b;
+    }
+    float storm = std::min(float(e.mRainCount) / 200.0f, 1.0f);
+    if (e.mThunderEff.mMode != 0) storm = 1.0f;
+    {
+        GXColor amb, dif;
+        dKy_get_seacolor(&amb, &dif);
+        const float d3[3] = {(float)dif.r, (float)dif.g, (float)dif.b};
+        wq_xr_set_sea_color(d3);
+    }
+    // a stage without a sky of its own has them all black: keep the last ones
+    wq_xr_set_weather(total > 0 ? colors : nullptr, storm, e.mThunderEff.mFlashTimer, e.mCurTime);
+}
+
 bool pc_vr_view_begin(view_class* view) {
     s.on = false;
     sSeeOn = sClipOn = sPopClipOn = false;
     WqXrTable table;
     wq_xr_table(&table);
+    if (table.roofOpen) roofWeather();
     WqXrHead head;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
     // the game's own first-person views, which the model cannot show: the giant screen meanwhile
@@ -1793,6 +1824,7 @@ void pc_vr_ambient_record(void* matPacket, void* shapePacket) {
 // The ambience's own size: everything 0.35 of the world's scale about where it is (half of 1.0.3's;
 // Tamaño del ambiente on top); the Helmaroc King, a giant, far smaller (some 2 m across)
 const float kAmbientSize = 0.35f;
+const float kGullSize = 0.5f * kAmbientSize;  // the seagulls are large in the game: half of the rest (1.2.4)
 const float kHelmarocSize = 0.12f;
 // the forest fireflies (1.1.2): twice the ambience's size (the game's model is some 10 units across,
 // 3 cm at 0.35; without its halo it would hardly be seen)
@@ -2002,6 +2034,76 @@ constexpr float kHousiSize = 3.0f;  // the spores in the room: their quads this 
 constexpr float kMoyaAlpha = 1.5f;   // the moya mist in the room: its alpha this much of the game's
 constexpr float kMoyaLift = -0.6f;   // and its middle this far from the eyes (metres, below them)
 
+// The game's flowers in the room (ambient_flowers, 1.2.6), as its characters: each flower the game shows takes a
+// place about the anchor when it first shows (its offset from Link as the camera sees it, within reach, on the
+// floor, at their size), and stays there while it is on the game's screen. Their matrices are the room's own: the
+// view delta is only the head's move.
+void ambientFlowers() {
+    constexpr int kMax = 48;
+    constexpr u32 kLostFrames = 15;  // off the screen this long: its place is free
+    struct Place {
+        const void* id;
+        float x, z, yaw;
+        unsigned char kind;
+        u32 seen;
+    };
+    static Place sPlaces[kMax];
+    static int sStay = -1;
+    static u32 sFrame = 0;
+    const int stay = dComIfGp_roomControl_getStayNo();
+    if (stay != sStay) {
+        sStay = stay;
+        memset(sPlaces, 0, sizeof(sPlaces));
+    }
+    sFrame++;
+    PcVrFlower shown[kMax];
+    const int nShown = pc_vr_flowers_visible(shown, kMax);
+    for (int i = 0; i < nShown; i++) {
+        Place* place = nullptr;
+        Place* free = nullptr;
+        for (Place& p : sPlaces) {
+            if (p.id == shown[i].id) place = &p;
+            if (p.id == nullptr && free == nullptr) free = &p;
+        }
+        if (place == nullptr && free != nullptr) {
+            const float w[3] = {shown[i].x, shown[i].y, shown[i].z};
+            float at[3];
+            ambientFacingAt(6, w, at);
+            place = free;
+            place->id = shown[i].id;
+            place->x = at[0], place->z = at[2];
+            place->yaw = (float)(((uintptr_t)shown[i].id >> 4) % 628) * 0.01f;
+        }
+        if (place != nullptr) {
+            place->seen = sFrame;
+            place->kind = shown[i].kind;
+        }
+    }
+    static Mtx sMtx[kMax];
+    static unsigned char sKinds[kMax];
+    int n = 0;
+    const float k = kAmbientSize * sAmbient.k;
+    for (Place& p : sPlaces) {
+        if (p.id == nullptr) continue;
+        if (sFrame - p.seen > kLostFrames) {
+            p.id = nullptr;
+            continue;
+        }
+        const float c = std::cos(p.yaw) * k, sn = std::sin(p.yaw) * k;
+        Mtx& m = sMtx[n];
+        m[0][0] = c, m[0][1] = 0.0f, m[0][2] = sn, m[0][3] = p.x;
+        m[1][0] = 0.0f, m[1][1] = k, m[1][2] = 0.0f, m[1][3] = sAmbient.floorY;
+        m[2][0] = -sn, m[2][1] = 0.0f, m[2][2] = c, m[2][3] = p.z;
+        sKinds[n++] = p.kind;
+    }
+    if (n == 0) return;
+    Mtx d;
+    toMtx(sAmbient.headStage, d);
+    AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
+    pc_vr_flowers_draw(sMtx, sKinds, n);
+    j3dSys.reinitGX();
+}
+
 void pc_vr_ambient_draw(void) {
     // the painter runs after the game frame's counter has moved on (fapGm_Execute): the packets taken
     // in this frame's actor draws are one count behind
@@ -2063,7 +2165,8 @@ void pc_vr_ambient_draw(void) {
             } else {
                 float mv[3];
                 ambientPlace(sAmbient.kinds[a], sAmbient.pos[a], mv);
-                ambientDelta(sAmbient.pos[a], mv, d, sAmbient.kinds[a] == 7 ? kFireflySize : kAmbientSize);
+                const int kind = sAmbient.kinds[a];
+                ambientDelta(sAmbient.pos[a], mv, d, kind == 7 ? kFireflySize : kind == 0 || kind == 1 ? kGullSize : kAmbientSize);
             }
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
             deltaActor = who;
@@ -2097,7 +2200,7 @@ void pc_vr_ambient_draw(void) {
         // over it
         if (sAmbient.placed) {
             Mtx d;
-            ambientCenteredDelta(eye, d, 0.0012f * kAmbientSize, 0.6f);
+            ambientCenteredDelta(eye, d, 0.0012f * kGullSize, 0.6f);  // the far seagulls
             AuroraSetViewDelta(&d[0][0], sAmbient.projFrom, sAmbient.projTo);
         } else {
             AuroraSetViewDelta(&sAmbient.delta[0][0], sAmbient.projFrom, sAmbient.projTo);
@@ -2186,6 +2289,7 @@ void pc_vr_ambient_draw(void) {
         }
         GXSetProjection(view->mProjMtx, GX_PERSPECTIVE);
     }
+    if (sAmbient.flowers && sAmbient.placed) ambientFlowers();
     AuroraSetAmbient(false);
     // the paint's own view delta again: the window's, or 60 fps's (or none)
     if (s.on) {

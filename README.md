@@ -18,6 +18,31 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra con grip izquierdo + Y.
 
+### Novedades de la 1.3
+
+**Correcciones de texturas**
+
+- **Mar del juego:** con el mar en calma, sobre todo alrededor de las islas, salían franjas rectas de rayitas y puntos que aparecían y desaparecían cada pocos segundos. La malla del mar enviaba las coordenadas de textura desalineadas tras un índice de 16 bits, y la gráfica de las Quest las leía mal. Ahora van alineadas y las olas se ven bien.
+- **Cielo y mar del Techo abierto:** un cálculo daba resultados distintos en la gráfica de las Quest y dejaba cortes rectos en las nubes y cuadrados en el mar. Ahora usa enteros de 32 bits y calcula la dirección de cada píxel por separado. El mar y las nubes de esta opción son calculados, sin texturas.
+
+Sigue pendiente una mancha de rayas amarillas y azules en el HUD, debajo del botón A.
+
+**Techo abierto** (pestaña Ambiente, apagado de inicio)
+
+- El techo de tu habitación se abre, las paredes bajan hasta la altura que elijas (1 m de inicio) y alrededor ves cielo y mar. Al asomarte, se ve el mar por debajo del suelo.
+- Usa las paredes, el suelo y el techo guardados en la configuración de espacio de las Quest. La primera vez pide permiso, y al concederlo el juego se cierra: vuelve a abrirlo. Sin esos datos, usa un círculo de tamaño ajustable.
+- El mar tiene el color del juego, ondulaciones suaves y crestas que aparecen y se desvanecen. El cielo sigue los colores y la hora del juego, con sol, luna, estrellas y nubes.
+- Con tormenta, las nubes se vuelven negras y hay más oleaje y crestas. Los rayos caen a la vez que los del juego. Dentro de cuevas y casas se mantiene el último cielo.
+
+**Modo ambiente**
+
+- **Flores:** nueva opción «Flores en tu habitación». Las flores que salen en la pantalla del juego aparecen en tu suelo como los personajes, y se quedan fijas mientras sigan en pantalla.
+- **Gaviotas:** ahora miden la mitad.
+
+**Fluidez**
+
+- Cuando baja el framerate, la hierba y las flores del juego se recortan antes que el resto, y de la parte más lejana solo se dibuja una de cada dos. Si la caída es fuerte, el recorte es mayor y más rápido.
+
 ### Novedades de la 1.2.2
 
 - **Lo que sale de la ventana:** ya no se corta en forma de pirámide. Ahora llega hasta un límite redondo, como medio cilindro delante de la ventana, con su ancho y su alto. Hacia ti llega lo que marquen «Fondo de la ventana» y «Cuánto sale», el menor de los dos. Con el fondo muy bajo sale muy poco, así que súbelo para notarlo.

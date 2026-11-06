@@ -20,6 +20,9 @@
 // - While cut, also by projected size: a plant of radius r goes from r * kSizeRatio on if that is
 //   nearer (grass and flowers before the bushes), and grass and trees lose the game's wider far plane
 //   for them (x1.6 and x1.8 of the camera's): what is too small to see goes first.
+// - The grass and the flowers first of all (1.2.4): as soon as anything is cut they end at kSmallShare of
+//   the distance, and past half of that only one in two is drawn. A window far under the rate (kSevereFps,
+//   or kLostSevere frames lost) takes a longer step (kDownSevere) and waits less for the next one.
 // - Never in an event (a cutscene, a dialogue) nor in a first-person view (the telescope, the picto
 //   box, aiming): everything drawn, as pc_npc_distance.cpp does for the characters.
 // - pc_veg_distance_saturated: at vegetation_min and still overloaded (or the adaptive cut off), for
@@ -48,6 +51,9 @@ constexpr float kLowFps = 28.0f;
 constexpr float kBusyLow = 82.0f;
 constexpr unsigned kLostHigh = 2;
 constexpr float kDown = 0.8f, kUp = 1.15f;
+constexpr float kSevereFps = 24.0f, kDownSevere = 0.6f;
+constexpr unsigned kLostSevere = 6;
+constexpr float kSmallRadius = 100.0f, kSmallShare = 0.6f;
 constexpr unsigned kSettleWindows = 2;   // after a step down
 constexpr unsigned kUpWindows = 6;       // 3 s relaxed
 constexpr unsigned kUpWindowsMax = 60;   // 30 s
@@ -89,7 +95,13 @@ float pc_veg_draw_scale(float x, float y, float z, float radius) {
     const float dx = x - sLinkX, dy = y - sLinkY, dz = z - sLinkZ;
     const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
     float outer = sOuterUnits;
+    const bool small = radius <= kSmallRadius;
+    if (small) outer *= kSmallShare;
     if (radius * kSizeRatio < outer) outer = radius * kSizeRatio;
+    if (small && d > outer * 0.5f && ((((int)x * 73856093) ^ ((int)z * 19349663)) >> 7 & 1) != 0) {
+        sCut++;
+        return 0.0f;
+    }
     float band = sBandUnits;
     if (band > outer * 0.5f) band = outer * 0.5f;
     if (d >= outer) {
@@ -190,9 +202,11 @@ void vegDistanceFrame(unsigned int frames) {
         } else if (sOverloaded && sDist > sMin) {
             if (sUpNs != 0 && now - sUpNs < kUnstableNs)
                 sUpWait = sUpWait * 2 > kUpWindowsMax ? kUpWindowsMax : sUpWait * 2;
-            const float to = sDist * kDown < sMin ? sMin : sDist * kDown;
-            step(to, "load", b, lostIn);
-            sSettle = kSettleWindows;
+            const bool severe = lostIn >= kLostSevere || fps < kSevereFps;
+            const float down = severe ? kDownSevere : kDown;
+            const float to = sDist * down < sMin ? sMin : sDist * down;
+            step(to, severe ? "heavy load" : "load", b, lostIn);
+            sSettle = severe ? 1 : kSettleWindows;
             sDownNs = now;
             sRelaxed = 0;
         } else if (relaxed && sDist < sMax) {

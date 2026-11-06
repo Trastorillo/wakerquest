@@ -60,6 +60,7 @@ public:
     int newAnm();
     void setAnm(int, s16);
     void deleteRoom(int roomNo) { mRoom[roomNo].deleteData(); }
+    dFlower_data_c* pcRoomFlowers(int roomNo) const { return mRoom[roomNo].field_0x0; }
 
     virtual void draw();
     virtual ~dFlower_packet_c();

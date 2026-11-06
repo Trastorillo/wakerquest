@@ -109,6 +109,15 @@ extern float pc_vr_housi_size;
 extern int pc_vr_moya_room;
 extern float pc_vr_moya_alpha, pc_vr_moya_top, pc_vr_moya_bottom;
 void pc_vr_ambient_draw(void);
+/* The game's flowers again for the room (d_flower.cpp, 1.2.6): those it draws now, where they stand in the game
+   (kind: bit 0 the second kind, bit 1 cut); and n of them drawn at these position matrices, unfogged. */
+struct PcVrFlower {
+    const void* id;
+    float x, y, z;
+    unsigned char kind;
+};
+int pc_vr_flowers_visible(struct PcVrFlower* out, int max);
+void pc_vr_flowers_draw(const float (*mtx)[3][4], const unsigned char* kinds, int n);
 
 class J3DModel;
 int pc_vr_clip_sphere(const f32 m[3][4], const Vec* center, f32 radius);

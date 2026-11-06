@@ -78,6 +78,8 @@ typedef struct WqXrTable {
     float specialZoom;
     float talkZoom;            // cutscenes and dialogues: the bubble's span times this (0 = off)
     float seeThroughRadius;    // Link seen through what is in front of him: the game's metres (0 = off)
+    bool roofOpen;             // roof_open: the game tells wq_sky.cpp its weather
+    bool ambientFlowers;       // ambient_flowers: the flowers on the game's screen, fixed in the room
     float windowDrawDistance;  // the window: the game's metres drawn at scale 1 (the horizon)
     float npcDrawDistance;     // the characters drawn within the game's metres from Link, every mode (0 = all)
     // the vegetation's adaptive draw distance (xr.ini vegetation_*, pc_veg_distance.cpp): on; the
@@ -155,6 +157,12 @@ void wq_xr_set_cine_screen(bool on);
 // The game, every frame (pc_vr_diorama.cpp, 1.2.1): the bow is aimed with the giant screen shown: its 3D at
 // bow_stereo_strength meanwhile, and the grips and the right stick hold the screen and set that depth.
 void wq_xr_set_bow_screen(bool on);
+// The game, every frame with roof_open (pc_vr_diorama.cpp, 1.2.3; wq_sky.cpp): the sky of the open roof. colors:
+// sky, horizon, clouds and sea as 4 x RGB, 0-255 (NULL keeps them); storm 0-1, the lightning's flash 0-1, the
+// clock in degrees (15 an hour). NULL and a negative storm: not outdoors, all as it was but the lightning.
+void wq_xr_set_weather(const float* colors, float storm, float flash, float daytime);
+// The open roof's sea (1.2.12): every frame outdoors, the colour of the game's sea (RGB, 0-255).
+void wq_xr_set_sea_color(const float* color);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);

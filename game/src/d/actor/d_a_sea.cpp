@@ -879,6 +879,15 @@ void daSea_packet_c::draw() {
 
     pVtx = m_draw_vtx;
 
+#if TARGET_PC
+    // A 16-bit index followed by the texture coordinates leaves those floats at an odd place in the vertex (2 bytes
+    // in). The headset's GPU then read the calm sea's texture wrong: dashes in straight strips, around the islands,
+    // coming and going. Whole positions keep every float aligned.
+    GXClearVtxDesc();
+    GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
+    GXSetVtxDesc(GX_VA_TEX0, GX_DIRECT);
+    const cXyz* pcVtx = this->m_draw_vtx;
+#endif
     f32 prevTexZ;
     f32 texZ = frac * (*pVtx).z;
     for (z = 0; z < GRID_CELLS - 1; z++) {
@@ -889,10 +898,17 @@ void daSea_packet_c::draw() {
 
         for (int x = 0; x < GRID_CELLS; x++) {
             f32 texX = frac * (*pVtx).x;
+#if TARGET_PC
+            GXPosition3f32(pcVtx[idx2].x, pcVtx[idx2].y, pcVtx[idx2].z);
+            GXTexCoord2f32(texX, texZ);
+            GXPosition3f32(pcVtx[idx1].x, pcVtx[idx1].y, pcVtx[idx1].z);
+            GXTexCoord2f32(texX, prevTexZ);
+#else
             GXPosition1x16(idx2);
             GXTexCoord2f32(texX, texZ);
             GXPosition1x16(idx1);
             GXTexCoord2f32(texX, prevTexZ);
+#endif
             idx1++;
             idx2++;
 
