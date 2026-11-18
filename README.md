@@ -11,12 +11,29 @@ de tu propia ISO cada vez que arranca.
 
 ### Instalación en las Quest
 
-1. Saca la ISO de tu propio disco europeo (GZLP01, revisión 0) sin comprimir (`.iso`, no `.rvz` ni `.ciso`).
+1. Saca la ISO de tu propio disco europeo (GZLP01, revisión 0): `.iso` y, desde la 1.5, también `.ciso` y
+   `.nkit.iso` (no `.rvz`).
 2. Instala el APK de la sección *Releases* con SideQuest o con `adb install -r WakerQuest-<versión>.apk`.
    Para actualizar usa siempre `install -r` y no desinstales: al desinstalar se borra tu partida.
 3. Copia la ISO a la carpeta `Download` de las gafas, abre WakerQuest y elígela en el selector.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra con grip izquierdo + Y.
+
+### Novedades de la 1.5
+
+- **Quitarse el visor ya no cierra el juego:** al quitártelo (o si salta un aviso del sistema, como el permiso de
+  la configuración de espacio) el juego se queda en pausa, con la música parada, y sigue donde estaba al volver a
+  ponértelo. Cerrar la app desde el menú de las gafas sigue cerrando el juego.
+- **Inglés por defecto:** en una instalación nueva, el panel de ajustes y los textos del juego salen en inglés.
+  Si ya tenías elegido el español (en el panel o en *Idioma del juego*), se queda como estaba.
+- **Aviso al arrancar:** durante 5 s se ve «Grip izquierdo + Y: menú VR», en el idioma del panel.
+- **Maqueta:** el stick derecho con un grip pulsado solo cambia la escala del mundo si lo mueves después de cerrar
+  el grip; si ya lo estabas moviendo para girar la cámara, no hace nada hasta que vuelva al centro. Antes, apoyar
+  el dedo en el grip mientras girabas la cámara encogía el mundo hasta casi desaparecer y solo se veían los
+  bocadillos. *Recolocar* y grip + clic del stick derecho devuelven también su tamaño (3 m) y su escala (60 m).
+- **Pantalla a 90 Hz:** en una instalación nueva, el modo Pantalla arranca a 90 Hz; a 72 Hz los 30 fps del juego
+  daban saltos al girar la cámara. Si ya tenías una frecuencia elegida, se queda.
+- **Discos:** además de `.iso`, se aceptan `.ciso` y `.nkit.iso`.
 
 ### Novedades de la 1.4
 
@@ -50,7 +67,7 @@ Sigue pendiente una mancha de rayas amarillas y azules en el HUD, debajo del bot
 **Techo abierto** (pestaña Ambiente, apagado de inicio)
 
 - El techo de tu habitación se abre, las paredes bajan hasta la altura que elijas (1 m de inicio) y alrededor ves cielo y mar. Al asomarte, se ve el mar por debajo del suelo.
-- Usa las paredes, el suelo y el techo guardados en la configuración de espacio de las Quest. La primera vez pide permiso, y al concederlo el juego se cierra: vuelve a abrirlo. Sin esos datos, usa un círculo de tamaño ajustable.
+- Usa las paredes, el suelo y el techo guardados en la configuración de espacio de las Quest. La primera vez pide permiso (hasta la 1.4, al concederlo el juego se cerraba; desde la 1.5 sigue donde estaba). Sin esos datos, usa un círculo de tamaño ajustable.
 - El mar tiene el color del juego, ondulaciones suaves y crestas que aparecen y se desvanecen. El cielo sigue los colores y la hora del juego, con sol, luna, estrellas y nubes.
 - Con tormenta, las nubes se vuelven negras y hay más oleaje y crestas. Los rayos caen a la vez que los del juego. Dentro de cuevas y casas se mantiene el último cielo.
 
@@ -110,12 +127,15 @@ Sigue pendiente una mancha de rayas amarillas y azules en el HUD, debajo del bot
 
   | Mandos | Cruceta | Para qué |
   |---|---|---|
-  | Grip izquierdo + Y | Arriba | Mapa de la mazmorra y carta náutica |
+  | Grip izquierdo + Y (desde la 1.2: clic del stick izquierdo, L3) | Arriba | Mapa de la mazmorra y carta náutica |
   | Grip izquierdo + X | Abajo | Cerrar el mapa |
   | Grip derecho + B | Izquierda | Minimapa |
   | Grip derecho + A | Derecha | Minimapa |
 
   Mientras aprietas un grip, los botones de esa mano no llegan al juego como A/B/X/Y.
+
+  Desde la 1.2, grip izquierdo + Y abre y cierra el panel de ajustes, y la cruceta arriba pasa al clic del stick
+  izquierdo (L3).
 
 ### Novedades de la 1.1.5
 
@@ -154,7 +174,8 @@ Sigue pendiente una mancha de rayas amarillas y azules en el HUD, debajo del bot
 
 ### Novedades de la 1.1
 
-- **Mandos:** L3 abre y cierra el panel de ajustes (y cierra el menú de opciones del juego); ≡ del mando
+- **Mandos:** L3 abre y cierra el panel de ajustes (desde la 1.2 es grip izquierdo + Y; L3 es la cruceta
+  arriba) (y cierra el menú de opciones del juego); ≡ del mando
   izquierdo es START. Los grips, en todos los modos, mueven y giran lo que agarras (pantalla, ventana, maqueta,
   ambiente o paneles) y los dos a la vez lo escalan; grip + clic del stick derecho lo devuelve a su sitio;
   grip + stick derecho cambia la escala del mundo. El Z del juego está en el clic del stick derecho.
@@ -169,6 +190,62 @@ Sigue pendiente una mancha de rayas amarillas y azules en el HUD, debajo del bot
 - **Maqueta:** al apuntar en primera persona (gancho, arco, catalejo...) el stick sigue la cámara del juego.
 - **Valores por defecto nuevos:** arranca en maqueta (con más resolución que la pantalla), con la cámara
   invertida en horizontal y la intro saltada.
+
+### Agradecimientos / Credits
+
+- **[mrchrisster](https://github.com/mrchrisster)**, por avisar de los fallos que arregla la 1.5 (el idioma, la maqueta que se alejaba,
+  el juego que se cerraba al quitarse el visor, el menú VR, el mapa y la cámara libre) / for reporting the bugs 1.5 fixes.
+- **T-Bone**, por su aportación sobre los formatos `.ciso` y `.nkit.iso` de Vimm's Lair / for the help with the
+  `.ciso` and `.nkit.iso` formats from Vimm's Lair.
+
+## WakerQuest (English)
+
+WakerQuest brings a 2002 GameCube adventure game (disc GZLP01) to the Meta Quest 3 without emulation: the
+game built from its decompilation, on a giant screen, in 3D, as a diorama or through a window in your room.
+
+**It includes nothing from Nintendo; you need your own copy of the European disc GZLP01.** This repository and
+the APK hold only code: no disc image, graphics, sounds or game text. The APK reads your own ISO each time it
+starts.
+
+### Installing on the Quest
+
+1. Dump your own European disc (GZLP01, revision 0): `.iso`, and from 1.5 also `.ciso` and `.nkit.iso`
+   (not `.rvz`).
+2. Install the APK from *Releases* with SideQuest or `adb install -r WakerQuest-<version>.apk`. To update, always
+   use `install -r` and do not uninstall: uninstalling deletes your save.
+3. Copy the disc image to the headset's `Download` folder, open WakerQuest and pick it in the selector.
+4. The screen, 3D, diorama, window and ambience options are in the headset's settings panel (the VR menu):
+   **left grip + Y** opens and closes it. The panel and the game's text are in English by default; the panel's
+   General tab changes both (*Panel language*, *Game language*).
+
+### Controls
+
+| Controllers | Does |
+|---|---|
+| Left stick | Moves Link |
+| Right stick | The game's camera (C stick) |
+| A, B, X, Y | The GameCube's A, B, X, Y |
+| Triggers | L and R |
+| Right stick click | Z |
+| ≡ (left controller) | START |
+| **Left grip + Y** | Opens and closes the VR menu (and closes the game's options menu) |
+| Left stick click (L3) | D-pad up: the dungeon map and the sea chart (up to 1.1.x it opened the panel) |
+| Left grip + X | D-pad down: closes the map |
+| Right grip + B / + A | D-pad left / right: the minimap |
+| A grip on the screen, window, diorama or a panel | Holds it: moves and turns it; both grips also size it |
+| Grip + right stick | The world's scale (move the stick after closing the grip) |
+| Grip + right stick click | Puts what is held back in its place |
+
+Taking the headset off pauses the game (from 1.5); it goes on where it was when you put it back on. Closing the
+app from the headset's menu ends it; the game saves only when you save.
+
+### Credits
+
+- **[mrchrisster](https://github.com/mrchrisster)**, for reporting the bugs 1.5 fixes: the language, the diorama zooming out, the game
+  ending when the headset came off, the VR menu, the map and the free camera icon.
+- **T-Bone**, for the help with the `.ciso` and `.nkit.iso` formats from Vimm's Lair.
+
+## About this repository
 
 WakerQuest is a branch of [SwitchWaker](https://github.com/centollOS/SwitchWaker) that runs the same
 native port on the Meta Quest (Android + OpenXR): the game on a big screen or a window in the room,

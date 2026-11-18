@@ -77,6 +77,7 @@
 
 #include <pthread.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -128,6 +129,8 @@ struct AIState {
 };
 
 AIState sAI;
+// COSAISetPaused (WakerQuest 1.5, the headset's session stopped): the DMA thread holds the engine
+std::atomic<bool> sPaused{false};
 
 u32 RateHz(u32 rate) {
     return rate == AI_SAMPLERATE_32KHZ ? 32000 : 48000;
@@ -308,8 +311,28 @@ void* DmaThreadMain(void*) {
     auto base = Clock::now();
     u64 played = 0; // frames since `base`
     std::vector<s16> frames;
+    bool paused = false;
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // COSAISetPaused: no steps (no DMA interrupt, so the game's audio waits too), the device
+        // paused and what it held dropped; back from the clock's present, as after a rate change
+        if (sPaused.load(std::memory_order_relaxed) != paused) {
+            paused = !paused;
+            if (sStream != nullptr) {
+                if (paused) {
+                    SDL_PauseAudioStreamDevice(sStream);
+                    SDL_ClearAudioStream(sStream);
+                } else {
+                    SDL_ResumeAudioStreamDevice(sStream);
+                }
+            }
+            base = Clock::now();
+            played = 0;
+        }
+        if (paused) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            continue;
+        }
         u32 rate;
         std::string newDump;
         bool reopenDump = false;
@@ -562,6 +585,10 @@ void COSAIGetOutputStats(u64* frames, u64* sumSquares) {
     Guard guard;
     *frames = sAI.outFrames;
     *sumSquares = sAI.outSumSquares;
+}
+
+void COSAISetPaused(bool paused) {
+    sPaused.store(paused, std::memory_order_relaxed);
 }
 
 void AIReset(void) {

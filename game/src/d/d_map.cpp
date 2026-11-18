@@ -3778,7 +3778,14 @@ void dMap_2DMtMapSpcl_c::setPos(s16 param_1, s16 param_2, s16 param_3, s16 param
 void dMap_2DMtMapSpcl_c::draw() {
     GXVtxAttrFmtList fmtList[GX_VA_MAX_ATTR + 1];
     GXGetVtxAttrFmtv(GX_VTXFMT0, fmtList);
+#if TARGET_PC
+    // Whole float positions: s16 ones (6 bytes) leave the texture coordinates' floats at an odd place in
+    // the vertex, which the headset's GPU read wrong (as d_a_sea.cpp's calm sea). This draws the free
+    // camera icon, the minimap's frame and the player's icon.
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+#else
     GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
+#endif
     GXClearVtxDesc();
     GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
     GXSetZMode(GX_DISABLE, GX_LEQUAL, GX_DISABLE);
@@ -3829,28 +3836,44 @@ void dMap_2DMtMapSpcl_c::draw() {
     }
     GXSetAlphaCompare(GX_GREATER, 0, GX_AOP_AND, GX_ALWAYS, 0);
     GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+#if TARGET_PC
+    GXPosition3f32(field_0xc, field_0xe, 0.0f);
+#else
     GXPosition3s16(field_0xc, field_0xe, 0);
+#endif
     r27 = field_0x8;
     for (int i = 0; i < field_0x4; r27++, i++) {
         if (r27->check()) {
             GXTexCoord2f32(r27->getS(), r27->getT());
         }
     }
+#if TARGET_PC
+    GXPosition3f32(field_0x10, field_0xe, 0.0f);
+#else
     GXPosition3s16(field_0x10, field_0xe, 0);
+#endif
     r27 = field_0x8;
     for (int i = 0; i < field_0x4; r27++, i++) {
         if (r27->check()) {
             GXTexCoord2f32(r27->getS() + r27->getSw(), r27->getT());
         }
     }
+#if TARGET_PC
+    GXPosition3f32(field_0x10, field_0x12, 0.0f);
+#else
     GXPosition3s16(field_0x10, field_0x12, 0);
+#endif
     r27 = field_0x8;
     for (int i = 0; i < field_0x4; r27++, i++) {
         if (r27->check()) {
             GXTexCoord2f32(r27->getS() + r27->getSw(), r27->getT() + r27->getTw());
         }
     }
+#if TARGET_PC
+    GXPosition3f32(field_0xc, field_0x12, 0.0f);
+#else
     GXPosition3s16(field_0xc, field_0x12, 0);
+#endif
     r27 = field_0x8;
     for (int i = 0; i < field_0x4; r27++, i++) {
         if (r27->check()) {
@@ -4818,7 +4841,13 @@ void dMap_Dmap_c::draw() {
                 if (field_0x2b0) {
                     GXLoadTexObj(&field_0x600, GX_TEXMAP4);
                 }
+#if TARGET_PC
+                // Whole float positions, as dMap_2DMtMapSpcl_c::draw's: s16 ones put the eight texture coordinates'
+                // floats at odd places in the vertex (the minimap drawn wrong in the headset).
+                GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+#else
                 GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
+#endif
                 GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
                 GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX1, GX_TEX_ST, GX_F32, 0);
                 GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX2, GX_TEX_ST, GX_F32, 0);
@@ -4929,7 +4958,11 @@ void dMap_Dmap_c::draw() {
                 GXSetCullMode(GX_CULL_NONE);
                 GXSetAlphaCompare(GX_GREATER, 0, GX_AOP_OR, GX_GREATER, 0);
                 GXBegin(GX_QUADS, GX_VTXFMT0, 4);
+#if TARGET_PC
+                GXPosition3f32(r25, r23, 0.0f);
+#else
                 GXPosition3s16(r25, r23, 0);
+#endif
                 GXTexCoord2f32(0.0f, 0.0f);
                 GXTexCoord2f32(-f24, 0.0f);
                 GXTexCoord2f32(f24, 0.0f);
@@ -4938,7 +4971,11 @@ void dMap_Dmap_c::draw() {
                 GXTexCoord2f32(0.0f, 0.0f);
                 GXTexCoord2f32(0.0f, f25);
                 GXTexCoord2f32(0.0f, f29);
+#if TARGET_PC
+                GXPosition3f32(r24, r23, 0.0f);
+#else
                 GXPosition3s16(r24, r23, 0);
+#endif
                 GXTexCoord2f32(f27, 0.0f);
                 GXTexCoord2f32(1.0f - f24, 0.0f);
                 GXTexCoord2f32(1.0f + f24, 0.0f);
@@ -4951,7 +4988,11 @@ void dMap_Dmap_c::draw() {
                 GXTexCoord2f32(6.0f - f23, f25);
 #endif
                 GXTexCoord2f32(1.0f, f29);
+#if TARGET_PC
+                GXPosition3f32(r24, r22, 0.0f);
+#else
                 GXPosition3s16(r24, r22, 0);
+#endif
                 GXTexCoord2f32(f27, f26);
                 GXTexCoord2f32(1.0f - f24, 1.0f);
                 GXTexCoord2f32(1.0f + f24, 1.0f);
@@ -4964,7 +5005,11 @@ void dMap_Dmap_c::draw() {
                 GXTexCoord2f32(6.0f - f23, 6.0f);
 #endif
                 GXTexCoord2f32(1.0f, f28);
+#if TARGET_PC
+                GXPosition3f32(r25, r22, 0.0f);
+#else
                 GXPosition3s16(r25, r22, 0);
+#endif
                 GXTexCoord2f32(0.0f, f26);
                 GXTexCoord2f32(-f24, 1.0f);
                 GXTexCoord2f32(f24, 1.0f);

@@ -17,6 +17,11 @@ extern "C" {
 // level over an interval is sqrt(d(sumSquares) / (2 * d(frames))).
 void COSAIGetOutputStats(u64* frames, u64* sumSquares);
 
+// WakerQuest 1.5 (pc_frame.cpp, the headset's session stopped): the AI DMA engine held, its output paused
+// and emptied, while `paused`; it starts again from the clock's present (nothing missed is replayed). Any
+// thread.
+void COSAISetPaused(bool paused);
+
 #ifdef __cplusplus
 }
 #endif

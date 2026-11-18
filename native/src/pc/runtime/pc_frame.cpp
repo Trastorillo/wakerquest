@@ -40,6 +40,8 @@
 #include "pc/pc_gpu_opts.h"
 #include "pc/pc_dynres.h"
 #include "pc/pc_hd_textures.h"
+#include "pc/pc_vr.h"
+#include "cos_sdk/audio.h"
 
 #include "JSystem/JAudio/osdsp_task.h"
 #include "JSystem/JKernel/JKRHeap.h"
@@ -1051,6 +1053,28 @@ void pumpEvents() {
     }
 }
 
+// WakerQuest 1.5: while the headset's session is stopped without the app ending (pc_vr_paused: the
+// headset taken off, a system dialog over it), no game frame runs and the AI DMA is held, so the game,
+// its music and its clock wait for the player; Aurora's events are still drained (a quit still ends the
+// process) and the stall watchdog is told the wait is wanted. Nothing elsewhere (pc_vr_paused is false).
+void headsetPause() {
+    if (!pc_vr_paused()) {
+        return;
+    }
+    writef(STDERR_FILENO, "[cos] headset session stopped at frame %u: the game paused\n", pc_frame_count());
+    COSAISetPaused(true);
+    const uint64_t startNs = monotonicNs();
+    while (pc_vr_paused()) {
+        usleep(50 * 1000);
+        watchdogPulse();
+        pumpEvents();
+    }
+    COSAISetPaused(false);
+    writef(STDERR_FILENO, "[cos] headset session running again after %.1f s: the game resumed\n",
+           (monotonicNs() - startNs) / 1e9);
+    sFrameStartNs = monotonicNs();  // the pause is not this frame's time (FPS overlay, pacing CSV)
+}
+
 } // namespace
 
 void writePacing(int fd) {
@@ -1590,6 +1614,7 @@ void pc_frame_begin(void) {
         sEndCallNs = sSplitEndCallNs = 0;
     }
     pumpEvents();
+    headsetPause();
     sEventsDoneNs = monotonicNs();
     // COS_GPU_GROUPS / COS_DRAW_CENSUS (pc_gpu_opts.h): before Aurora starts recording the frame.
     pc_gpu_groups_frame_begin(pc_frame_count() + 1);

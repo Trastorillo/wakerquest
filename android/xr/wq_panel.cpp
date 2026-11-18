@@ -53,22 +53,24 @@ void plog(const char* what, const char* detail = "") {
 
 // ---- The languages -----------------------------------------------------------------------------------
 
-// A text in the panel's three languages: Spanish, English, French (nullptr: the Spanish one, for numbers
-// and names that do not change)
+// A text in the panel's three languages: Spanish, English, French (nullptr: the English one, else the
+// Spanish one, for numbers and names that do not change)
 struct Tr {
     const char* es;
     const char* en;
     const char* fr;
 };
 
-int sLang = 0;  // xr.ini language: 0 es, 1 en, 2 fr (read when the panel is drawn)
+// xr.ini language: 0 es, 1 en, 2 fr (read when the panel is drawn); English unless the file says (1.5)
+int sLang = 1;
 
 const char* tr(const Tr& t) {
     const char* s = sLang == 1 ? t.en : sLang == 2 ? t.fr : t.es;
+    if (s == nullptr) s = t.en;
     return s != nullptr ? s : t.es;
 }
 
-int languageOf(const std::string& v) { return v == "en" ? 1 : v == "fr" ? 2 : 0; }
+int languageOf(const std::string& v) { return v == "es" ? 0 : v == "fr" ? 2 : 1; }
 
 // ---- The settings ------------------------------------------------------------------------------------
 

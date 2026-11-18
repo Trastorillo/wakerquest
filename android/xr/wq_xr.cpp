@@ -117,8 +117,10 @@ struct Settings {
     int perfPreset = 0;
     // Hz, the headset's nearest at or below; 72 runs cooler (90 shows 30 fps evenly). One per mode (1.1.9,
     // activeRefresh): refresh for the flat giant screen, stereo_refresh for it in 3D, window_refresh,
-    // diorama_refresh. -1 (a file without the key, older ones): refresh's.
-    int refresh = 72;
+    // diorama_refresh. -1 (a file without the key, older ones): refresh's. 1.5: the flat giant screen at 90
+    // by default (at 72 its 30 fps came in uneven steps, 3 and 2 frames: the picture jerked as the camera
+    // turned); a file's refresh stays as it is
+    int refresh = 90;
     int stereoRefresh = -1, windowRefresh = -1, dioramaRefresh = -1;
     bool cpuLow = false;     // the CPU at its sustained low level (Ahorro); else the CPU is left as it is
     // stereoscopic 3D (Aurora patch 0024): each eye its own picture of the scene
@@ -205,7 +207,9 @@ struct Settings {
     // m, the settings panel from the eyes when it opens (right, up, and ahead negative, in the head's
     // heading); a grip moves it (wq_panel.cpp)
     float panelOffset[3] = {0.034f, 0.160f, -1.622f};
-    int language = 0;  // the settings panel's (language = es, en or fr): 0 Spanish, 1 English, 2 French
+    // the settings panel's (language = es, en or fr): 0 Spanish, 1 English, 2 French. English by default
+    // (1.5; Spanish before): a file's language = es, written by an older version or chosen, stays
+    int language = 1;
     // the window (mode = ventana, pc_vr_diorama.cpp): the world at its own scale through a rectangle in
     // the room (16:9), the game camera's eye window_depth in front of it looking through it (what it sees
     // nearer than that comes out, up to window_popout); each eye looks through it from
@@ -285,7 +289,7 @@ const char kDefaultSettings[] =
     "screen_frame = 1\n"
     "passthrough = 1\n"
     "# language = es, en or fr: the settings panel's.\n"
-    "language = es\n"
+    "language = en\n"
     "# perf_preset = ahorro, equilibrado, maximo or personal: the settings panel's Rendimiento, which sets\n"
     "# the refresh rates, cpu_low, the resolutions, bubble_span, window_draw_distance and\n"
     "# npc_draw_distance\n"
@@ -294,7 +298,7 @@ const char kDefaultSettings[] =
     "perf_preset = personal\n"
     "# the refresh rate per mode in Hz (72, 80, 90, 120), applied when the mode changes: refresh = the giant\n"
     "# screen, stereo_refresh = the giant screen in 3D, window_refresh = the window, diorama_refresh = the bubble.\n"
-    "refresh = 72\n"
+    "refresh = 90\n"
     "stereo_refresh = 72\n"
     "window_refresh = 72\n"
     "diorama_refresh = 72\n"
@@ -480,6 +484,13 @@ const char* presetValue(int preset, const char* key) {
     return nullptr;
 }
 
+// 1.5: the world's scale a reset gives the model: the Rendimiento preset's when one is chosen (so the
+// reset keeps it), else the default
+float resetSpan(int preset) {
+    const char* v = presetValue(preset, "bubble_span");
+    return v != nullptr ? float(atof(v)) : Settings{}.tableSpan;
+}
+
 void applySetting(Settings& s, const char* key, const char* v) {
     const float f = (float)atof(v);
     const bool on = !(!strcmp(v, "0") || !strcmp(v, "off") || !strcmp(v, "no") || !strcmp(v, "false"));
@@ -528,7 +539,7 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "auto_screen")) s.autoScreen = on;
     else if (!strcmp(key, "window_hud_on")) s.windowHudOn = on;
     else if (!strcmp(key, "cine_only")) s.cineScreen = on;
-    else if (!strcmp(key, "language")) s.language = !strcmp(v, "en") ? 1 : !strcmp(v, "fr") ? 2 : 0;
+    else if (!strcmp(key, "language")) s.language = !strcmp(v, "es") ? 0 : !strcmp(v, "fr") ? 2 : 1;
     else if (!strcmp(key, "talk_zoom_on")) s.talkZoomOn = on;
     else if (!strcmp(key, "talk_zoom")) s.talkZoom = clampf(f, 0.1f, 1.0f);
     else if (!strcmp(key, "talk_screen")) s.talkScreen = on;
@@ -711,7 +722,7 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "window_hud_scale")) return num(s.windowHudScale);
     if (!strcmp(key, "window_hud_move")) return flag(s.windowHudMove);
     if (!strcmp(key, "cine_only")) return flag(s.cineScreen);
-    if (!strcmp(key, "language")) return s.language == 1 ? "en" : s.language == 2 ? "fr" : "es";
+    if (!strcmp(key, "language")) return s.language == 0 ? "es" : s.language == 2 ? "fr" : "en";
     if (!strcmp(key, "talk_zoom_on")) return flag(s.talkZoomOn);
     if (!strcmp(key, "talk_zoom")) return num(s.talkZoom);
     if (!strcmp(key, "talk_screen")) return flag(s.talkScreen);
@@ -910,12 +921,15 @@ struct Xr {
     // the right stick with a grip held (updateGrips): what it scales (0 none, 1 the model's span, 2 the
     // window's scale, 3 the ambience, 4 the screen's width), its value at the last tick; and what the
     // label shows (0 the size both hands give, else the stick's)
-    int stickScale = 0, labelWhat = 0;  // labelWhat 5: the window's camera raised (window_lift)
+    // labelWhat 5: the window's camera raised (window_lift); 9: the settings panel's combination (1.5, at start)
+    int stickScale = 0, labelWhat = 0;
     bool stickLift = false;             // the left stick raised or lowered the window's camera (unsaved)
     bool stickDepth = false;            // the left stick changed the window's depth (unsaved)
     bool stickCam = false;              // the left stick moved the giant screen's camera (labelWhat 6; unsaved)
     bool stickBow = false;              // the right stick's scale 4 is the bow's depth (it began while aiming)
     bool stickHold = false;             // the aim ended with the stick in use: nothing scaled until the grips are let go
+    bool stickHeldWas = false;          // a grip was held at the last look (1.5)
+    bool stickOffAtGrip = false;        // the stick was off its centre as the grip closed: not a scale yet (1.5)
     float stickTick = 0.0f;
     bool flatWas = false;  // the title's flat screen, as the grips last saw it
     // the right stick's click: the game's Z when pressed with no grip held (a grip's: back in its place)
@@ -1003,6 +1017,9 @@ std::atomic_bool s_dialogue{false};      // a message box is open
 std::atomic_bool s_menuOpen{false};      // wq_xr_menu_state: the options menu
 std::atomic<float> s_menuW{0.0f}, s_menuH{0.0f};
 std::atomic_bool s_menuHovered{false};
+// 1.5: the session stopped without the app ending (the headset taken off, its sleep, a system dialog such
+// as USE_SCENE's): the game waits (wq_xr_paused, pc_frame.cpp) until the session runs again
+std::atomic_bool s_paused{false};
 float s_viewHeading = 0.0f;  // the player's view of the model, smoothed (the layer's thread)
 bool s_viewHeadingValid = false;
 
@@ -1813,21 +1830,48 @@ void pollEvents() {
                     }
                     xrlog("session running; Aurora presents to the headset (device support %s)",
                           aurora_xr_present_supported() ? "yes" : "not yet known or no");
+                    if (s_paused.exchange(false)) xrlog("session running again: resumed");
+                    // 1.5: the first time, the panel's combination on the size label for 5 s
+                    static bool hinted = false;
+                    if (!hinted) {
+                        hinted = true;
+                        s.labelWhat = 9;
+                        s.sizeShownUntil = SDL_GetTicks() + 5000;
+                    }
+                } else if (s_paused.exchange(false)) {
+                    // 1.5: no session to go back to: the game goes on rather than wait for ever
+                    xrlog("session could not begin again: the game no longer paused");
                 }
                 break;
             }
             case XR_SESSION_STATE_STOPPING:
+                // 1.5: the session stops without the app ending: the headset taken off (its proximity
+                // sensor, then its sleep), or a system dialog over it (the USE_SCENE permission's). Up
+                // to 1.4 the game ended here, the progress since the last save lost. Now it waits: no
+                // frames to the headset, the game and its sound held (wq_xr_paused, pc_frame.cpp), until
+                // the runtime makes the session READY again (the headset put on) and it begins anew. The
+                // app closed from the headset's menu goes on to EXITING (below), or the activity ends
+                // (SDL's quit: pc_frame.cpp's AURORA_EXIT), and that still ends the game.
+                aurora_xr_present_enable(false);
+                xrEndSession(s.session);
+                s.running = false;
+                {
+                    std::lock_guard lock{s_shared};
+                    s_sharedRunning = false;
+                }
+                s_paused.store(true);
+                xrlog("session stopping: paused");
+                break;
             case XR_SESSION_STATE_EXITING:
             case XR_SESSION_STATE_LOSS_PENDING:
                 // The player closed the app or left it from the headset's menu (the Meta button's
                 // menu alone only makes the session VISIBLE). The game would go on in the background,
                 // music and all, and there is no window to come back to: it ends here, as on a quit.
-                // Saves are written when the game saves, so nothing is lost; the next start is fresh.
+                // Saves are written when the game saves; the next start is fresh.
                 aurora_xr_present_enable(false);
-                if (sc.state == XR_SESSION_STATE_STOPPING) xrEndSession(s.session);
                 s.running = false;
                 s.exiting = true;
-                xrlog("session %s: the game ends", sc.state == XR_SESSION_STATE_STOPPING ? "stopping" : "exiting");
+                xrlog("session %s: the game ends", sc.state == XR_SESSION_STATE_EXITING ? "exiting" : "lost");
                 pc_exit(0);
             default:
                 break;
@@ -3066,10 +3110,19 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
     // ambience (kept while the grips stay held).
     const bool held = s.gripDown[0] || s.gripDown[1];
     if (!held) s.stickHold = false;
+    // 1.5: the stick already off its centre as the grip closed (the camera being turned, the grip only
+    // rested on): no scale until it comes back to the centre. A grip resting while the stick turned the
+    // camera shrank the model's world to its 300 m, to all but nothing, saved on release.
+    {
+        const bool off = stick != nullptr && (std::fabs(stick->x) > 0.25f || std::fabs(stick->y) > 0.25f);
+        if (held && !s.stickHeldWas && off) s.stickOffAtGrip = true;
+        if (!held || !off) s.stickOffAtGrip = false;
+        s.stickHeldWas = held;
+    }
     if (held && stick != nullptr) {
         const float y = stick->y;
         *stick = {0.0f, 0.0f};
-        if (std::fabs(y) > 0.25f && !s.stickHold) {
+        if (std::fabs(y) > 0.25f && !s.stickHold && !s.stickOffAtGrip) {
             int what = diorama ? 1 : window ? (st.immersive ? 8 : 2) : ambient ? 3 : 4;
             if (what == 3 && ambientHeld)
                 what = s.stickScale == 3 || s.stickScale == 4 ? s.stickScale : aimOnScreen() ? 4 : 3;
@@ -3440,12 +3493,20 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
         st.tableHeight = defaults.tableHeight;
         st.tableDistance = defaults.tableDistance;
         st.tableYaw = defaults.tableYaw;
+        // 1.5: its size and its world's scale too (bubble_size, bubble_span), saved at once
+        st.tableWidth = defaults.tableWidth;
+        st.tableSpan = resetSpan(s.settings.perfPreset);
         s.dragging = false;
-        xrlog("grip: the model back in its place");
+        saveModel();
+        char v[32];
+        snprintf(v, sizeof v, "%.1f", st.tableSpan);
+        wq_xr_set("bubble_span", v);
+        xrlog("grip: the model back in its place, its size and its world's scale");
     } else {
         st.tableX = s.dragX + (at.x - s.dragHand.x);
         st.tableHeight = s.dragHeight - (at.y - s.dragHand.y);
-        st.tableDistance = std::max(0.2f, s.dragDistance - (at.z - s.dragHand.z));
+        // (1.5: up to 5 m, as xr.ini's bubble_distance)
+        st.tableDistance = clampf(s.dragDistance - (at.z - s.dragHand.z), 0.2f, 5.0f);
         st.tableYaw = s.dragYaw - wrapPi(heading - s.dragHandYaw) * 57.2957795f;
         if (hands == 3 && s.dragSpan > 0.05f) {
             st.tableWidth = clampf(s.dragSize * span / s.dragSpan, 0.4f, 3.0f);
@@ -3554,6 +3615,11 @@ void hostSet(const char* key, const char* value) {
 // `set`: the panel's hostSet (applied at once) or wq_xr_set (the options menu's: wq_xr_reset_position)
 void resetPositions(void (*set)(const char*, const char*)) {
     const Settings defaults;
+    int preset;
+    {
+        std::lock_guard lock{s_shared};
+        preset = s_sharedSettings.perfPreset;
+    }
     char v[32];
     snprintf(v, sizeof v, "%g", defaults.tableX);
     set("bubble_x", v);
@@ -3563,6 +3629,12 @@ void resetPositions(void (*set)(const char*, const char*)) {
     set("bubble_distance", v);
     snprintf(v, sizeof v, "%g", defaults.tableYaw);
     set("bubble_yaw", v);
+    // 1.5: the model's size and its world's scale too (a grip resting while the stick turned the camera
+    // could leave the world all but gone)
+    snprintf(v, sizeof v, "%g", defaults.tableWidth);
+    set("bubble_size", v);
+    snprintf(v, sizeof v, "%g", resetSpan(preset));
+    set("bubble_span", v);
     // and the window
     snprintf(v, sizeof v, "%g", defaults.windowX);
     set("window_x", v);
@@ -4307,6 +4379,10 @@ void runFrame() {
             snprintf(text, sizeof text, "%s %.2f m", kDepth[lang], st.immersive ? st.immersiveDepth : st.windowDepth);
         else if (s.labelWhat == 8)
             snprintf(text, sizeof text, "Link %.2f m", st.immersiveLink);
+        else if (s.labelWhat == 9)
+            // 1.5: at the start, how the settings panel opens (L3 did up to 1.1.9)
+            snprintf(text, sizeof text, "%s", lang == 0 ? "Grip izquierdo + Y: men\xc3\xba VR"
+                                              : lang == 2 ? "Grip gauche + Y : menu VR" : "Left grip + Y: VR menu");
         else if (st.window && lines > 0)
             // the window: its resolution (windowLines) and its limit
             snprintf(text, sizeof text, "%.2f m \xc2\xb7 %.2f \xc2\xb7 %s %.1f m", st.windowWidth,
@@ -4647,6 +4723,7 @@ extern "C" void wq_xr_table(WqXrTable* out) {
     out->intro2d = st.intro2d;
 }
 
+extern "C" bool wq_xr_paused(void) { return s_paused.load(); }
 extern "C" float wq_xr_gpu_busy(void) { return s_gpuBusy.load(std::memory_order_relaxed); }
 extern "C" uint32_t wq_xr_frames_lost(void) { return s_framesLost.load(std::memory_order_relaxed); }
 extern "C" uint32_t wq_xr_frames_shown(void) { return s_framesShown.load(std::memory_order_relaxed); }

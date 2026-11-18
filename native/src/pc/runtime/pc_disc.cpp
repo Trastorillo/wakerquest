@@ -6,6 +6,9 @@
 // magic 0xC2339F3D at 0x1C, all big-endian. Anything else exits 14 before the SDK starts.
 // Opening the disc for the game (aurora_dvd_open) is step 6.1; the SHA-1 check of the image on
 // first use is done by native/tools/run.sh (main.dol SHA-1 against the supported revision).
+// WakerQuest 1.5: the image may also be a GameCube CISO (its header read through the block map, as
+// switch/native/nod/nod_gcn.cpp reads the whole disc) or an NKit image (a plain one, shorter); no size
+// is required. The format is logged ("[cos] disc: ... iso|ciso|nkit").
 #include "pc_internal.h"
 
 #include "pc/pc_game_id.h"
@@ -30,6 +33,18 @@
 namespace pc {
 
 namespace {
+// Exactly len bytes of the file at offset (Horizon's C library has no pread).
+bool readFd(int fd, uint64_t offset, void* out, size_t len) {
+#if defined(__SWITCH__)
+    if (lseek(fd, (off_t)offset, SEEK_SET) != (off_t)offset) {
+        return false;
+    }
+    return read(fd, out, len) == (ssize_t)len;
+#else
+    return pread(fd, out, len, (off_t)offset) == (ssize_t)len;
+#endif
+}
+
 char sDiscError[512];
 // For the player's message (exitDisc): COS_DISC does not exist; COS_DISC is the other region's disc
 // (revision 0), so the player started the other build or misnamed the image.
@@ -158,22 +173,49 @@ int checkDisc() {
     }
     struct stat st;
     unsigned char header[0x20];
-    ssize_t got = -1;
+    // a GameCube CISO (nod_gcn.cpp): its block size at 4 and one byte per block from 8; the disc's
+    // first block (boot.bin, the NKit mark at 0x200) is the first stored one, at 0x8000
+    const char* format = "iso";
+    uint64_t base = 0;
+    bool got = false;
+    bool cisoBad = false;
+    bool nkit = false;
     if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode)) {
-#if defined(__SWITCH__)
-        // Horizon's C library has no pread.
-        got = lseek(fd, 0, SEEK_SET) == 0 ? read(fd, header, sizeof(header)) : -1;
-#else
-        got = pread(fd, header, sizeof(header), 0);
-#endif
+        unsigned char ciso[9];
+        if (st.st_size >= 0x8000 && readFd(fd, 0, ciso, sizeof ciso) && memcmp(ciso, "CISO", 4) == 0) {
+            const uint32_t block = (uint32_t)ciso[4] | (uint32_t)ciso[5] << 8 | (uint32_t)ciso[6] << 16 |
+                                   (uint32_t)ciso[7] << 24;
+            // PSP's CSO also starts with "CISO", with its header's size (0x18) there; the disc's first
+            // block must be stored
+            cisoBad = block < 0x800 || (block & (block - 1)) != 0 || ciso[8] != 1;
+            format = "ciso";
+            base = 0x8000;
+        }
+        if (!cisoBad) {
+            got = readFd(fd, base, header, sizeof header);
+            unsigned char mark[4];
+            nkit = got && readFd(fd, base + 0x200, mark, sizeof mark) && memcmp(mark, "NKIT", 4) == 0;
+            if (nkit && base == 0) {
+                format = "nkit";
+            }
+        }
     }
     close(fd);
-    if (got != (ssize_t)sizeof(header)) {
+    if (cisoBad) {
+        discMessage("%s is a CISO image this build cannot read (PSP's CSO, or no disc header); convert it to a "
+                    "plain .iso with Dolphin",
+                    path);
+        return PC_EXIT_DISC;
+    }
+    if (!got) {
         discMessage("%s is not a regular file with a disc header", path);
         return PC_EXIT_DISC;
     }
-    if (memcmp(header, "CISO", 4) == 0) {
-        discMessage("%s is a CISO image; convert it to a plain .iso (decision H9)", path);
+    if (memcmp(header, "RVZ\x01", 4) == 0 || memcmp(header, "WIA\x01", 4) == 0 ||
+        (header[0] == 0x01 && header[1] == 0xC0 && header[2] == 0x0B && header[3] == 0xB1)) {
+        discMessage("%s is a compressed image (%s); convert it to a plain .iso with Dolphin (right-click the "
+                    "game, Convert File, ISO)",
+                    path, header[0] == 'R' ? "RVZ" : header[0] == 'W' ? "WIA" : "GCZ");
         return PC_EXIT_DISC;
     }
     const uint32_t magic = ((uint32_t)header[0x1C] << 24) | ((uint32_t)header[0x1D] << 16) |
@@ -203,8 +245,8 @@ int checkDisc() {
         }
         return PC_EXIT_DISC;
     }
-    writef(STDERR_FILENO, "[cos] disc: %s %s revision 0, %lld bytes\n", path, COS_GAME_ID_STR,
-           (long long)st.st_size);
+    writef(STDERR_FILENO, "[cos] disc: %s %s revision 0, %lld bytes, %s%s\n", path, COS_GAME_ID_STR,
+           (long long)st.st_size, format, nkit && base != 0 ? " (nkit)" : "");
     return 0;
 }
 

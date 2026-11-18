@@ -26,7 +26,8 @@ import java.io.OutputStream;
 // state start fresh afterwards): WakerQuestActivity opens it when files/<ID>.iso is missing or wrong,
 // and the native side when its disc check fails (EXTRA_REASON, the "[cos] DISC:" line). The player
 // picks the ISO with the system's file picker (no storage permission), it is checked, copied to
-// files/<ID>.iso.part and renamed; the source stays where it was.
+// files/<ID>.iso.part and renamed; the source stays where it was. 1.5: a GameCube CISO or an NKit image
+// too, copied as it is (the native side reads both, whatever the name).
 public class DiscSetupActivity extends Activity {
     static final String EXTRA_REASON = "reason";
     private static final int PICK_REQUEST_CODE = 0x5751;
@@ -123,8 +124,8 @@ public class DiscSetupActivity extends Activity {
         }
     }
 
-    // A right ISO in Download/ or the storage's root, when the app can read them without a permission
-    // (often it cannot: then only the picker).
+    // A right ISO (or CISO, or NKit .nkit.iso) in Download/ or the storage's root, when the app can read
+    // them without a permission (often it cannot: then only the picker).
     private File findIso() {
         File root = Environment.getExternalStorageDirectory();
         File[] dirs = { new File(root, Environment.DIRECTORY_DOWNLOADS), root };
@@ -135,7 +136,7 @@ public class DiscSetupActivity extends Activity {
             }
             for (File f : files) {
                 String name = f.getName().toLowerCase();
-                if (!f.isFile() || !f.canRead() || !(name.endsWith(".iso") || name.endsWith(".gcm"))) {
+                if (!f.isFile() || !f.canRead() || !(name.endsWith(".iso") || name.endsWith(".gcm") || name.endsWith(".ciso"))) {
                     continue;
                 }
                 try (InputStream in = new FileInputStream(f)) {
@@ -203,7 +204,8 @@ public class DiscSetupActivity extends Activity {
         InputStream open() throws IOException;
     }
 
-    // Copies to <ID>.iso.part on a thread, then checks the copy's header and size and renames it.
+    // Copies to <ID>.iso.part on a thread, then checks the copy's header and that its files are in it
+    // (DiscCheck.fstProblem) and renames it.
     private void startCopy(Source source, long size) {
         if (copying) {
             return;
@@ -247,6 +249,9 @@ public class DiscSetupActivity extends Activity {
             if (error == null) {
                 try (InputStream in = new FileInputStream(part)) {
                     error = DiscCheck.problem(this, DiscCheck.readHeader(in), part.length());
+                    if (error == null) {
+                        error = DiscCheck.fstProblem(part);
+                    }
                 } catch (IOException e) {
                     error = e.getMessage();
                 }

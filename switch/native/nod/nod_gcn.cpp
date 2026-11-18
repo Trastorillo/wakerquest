@@ -10,6 +10,17 @@
 //
 // All reads go through the caller's stream (Aurora's SDL_IOStream on the SD card), one at a time:
 // the stream is a seek and a read, and Aurora reads from its DVD worker and the game threads.
+//
+// WakerQuest 1.5: two more images of the same disc.
+// - CISO (GameCube/Wii's, as Dolphin's CISOBlob reads it): a 0x8000-byte header ("CISO", the block
+//   size as a little-endian u32 at 4, then one byte per block, 1 = stored), the stored blocks one after
+//   another from 0x8000, the others zeros. Every read (boot.bin, bi2.bin, the apploader, main.dol,
+//   fst.bin and the files) goes through that map (Disc::readAt). Not PSP's CSO, which also starts with
+//   "CISO" but has its header's size (0x18) at 4 and deflated blocks: a block size that is not a power
+//   of two of at least 0x800 is refused.
+// - NKit (.nkit.iso): a plain image without the padding between files, its fst.bin rewritten for the
+//   shorter file; nothing to translate (files are read where fst.bin puts them, and the image's size is
+//   only a bound for them).
 #include "nod.h"
 
 #include <algorithm>
@@ -44,12 +55,23 @@ constexpr uint32_t kApploaderOffset = 0x2440;
 constexpr uint32_t kApploaderHeaderSize = 0x20;
 constexpr uint32_t kDolHeaderSize = 0x100;
 constexpr uint8_t kGcnMagic[4] = {0xC2, 0x33, 0x9F, 0x3D};
+constexpr uint32_t kCisoHeaderSize = 0x8000;
+constexpr uint32_t kCisoMapSize = kCisoHeaderSize - 8;
+constexpr uint64_t kGcnDiscSize = 1459978240; // a full GameCube disc
+
+uint32_t le32(const uint8_t* p) {
+  return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
 
 struct Disc {
   NodDiscStream stream{};
-  uint64_t size = 0;
+  uint64_t size = 0;     // the disc's (a CISO's: its blocks', at least a full disc's)
+  uint64_t fileSize = 0; // the image file's
   std::mutex lock;
   std::vector<uint8_t> boot, bi2, apploader, dol, fst;
+  // CISO: the block size and, per block of the disc, its place in the file (-1: not stored, zeros)
+  uint32_t cisoBlock = 0;
+  std::vector<int64_t> cisoMap;
 
   ~Disc() {
     if (stream.close != nullptr) {
@@ -57,10 +79,8 @@ struct Disc {
     }
   }
 
-  // Reads exactly len bytes at offset; false on a short read or an error.
-  bool readAt(uint64_t offset, void* out, size_t len) {
-    std::lock_guard guard(lock);
-    auto* dst = static_cast<uint8_t*>(out);
+  // Exactly len bytes of the file at offset (the lock held); false on a short read or an error.
+  bool readFile(uint64_t offset, uint8_t* dst, size_t len) {
     while (len > 0) {
       const int64_t got = stream.read_at(stream.user_data, offset, dst, len);
       if (got <= 0) {
@@ -69,6 +89,69 @@ struct Disc {
       dst += got;
       offset += (uint64_t)got;
       len -= (size_t)got;
+    }
+    return true;
+  }
+
+  // The CISO header at the start of the file, when it is one: the block map. False if it is not a
+  // GameCube CISO (a plain image), with error set when it looks like one that cannot be read.
+  bool openCiso(std::string& error) {
+    uint8_t head[8];
+    if (fileSize < kCisoHeaderSize || !readFile(0, head, sizeof head) || std::memcmp(head, "CISO", 4) != 0) {
+      return false;
+    }
+    const uint32_t block = le32(head + 4);
+    if (block < 0x800 || (block & (block - 1)) != 0) {
+      error = "a CISO image with a block size of " + std::to_string(block) +
+              " (PSP's CSO, or damaged): convert it to a plain .iso";
+      return false;
+    }
+    std::vector<uint8_t> map(kCisoMapSize);
+    if (!readFile(8, map.data(), map.size())) {
+      error = "cannot read the CISO header";
+      return false;
+    }
+    cisoBlock = block;
+    cisoMap.assign(kCisoMapSize, -1);
+    uint64_t stored = 0;
+    uint32_t blocks = 0;
+    for (uint32_t i = 0; i < kCisoMapSize; i++) {
+      if (map[i] == 1) {
+        cisoMap[i] = (int64_t)(kCisoHeaderSize + stored * block);
+        stored++;
+        blocks = i + 1;
+      }
+    }
+    size = std::max<uint64_t>((uint64_t)blocks * block, std::min<uint64_t>(kGcnDiscSize, (uint64_t)kCisoMapSize * block));
+    return true;
+  }
+
+  // Reads exactly len bytes of the disc at offset; false on a short read or an error.
+  bool readAt(uint64_t offset, void* out, size_t len) {
+    std::lock_guard guard(lock);
+    auto* dst = static_cast<uint8_t*>(out);
+    if (cisoBlock == 0) {
+      return readFile(offset, dst, len);
+    }
+    while (len > 0) {
+      const uint64_t block = offset / cisoBlock;
+      const uint64_t within = offset % cisoBlock;
+      const size_t n = (size_t)std::min<uint64_t>(len, cisoBlock - within);
+      const int64_t at = block < cisoMap.size() ? cisoMap[block] : -1;
+      if (at < 0) {
+        std::memset(dst, 0, n);
+      } else {
+        // a last block cut short in the file (some tools do not pad it): zeros past the file's end
+        const uint64_t from = (uint64_t)at + within;
+        const size_t have = from >= fileSize ? 0 : (size_t)std::min<uint64_t>(n, fileSize - from);
+        if (have > 0 && !readFile(from, dst, have)) {
+          return false;
+        }
+        std::memset(dst + have, 0, n - have);
+      }
+      dst += n;
+      offset += n;
+      len -= n;
     }
     return true;
   }
@@ -124,13 +207,22 @@ NodResult nod_disc_open_stream(const NodDiscStream* stream, const NodDiscOptions
     return fail(NOD_RESULT_ERR_FORMAT, "too small for a GameCube disc");
   }
   disc->size = (uint64_t)size;
+  disc->fileSize = (uint64_t)size;
+  {
+    std::string cisoError;
+    std::lock_guard guard(disc->lock);
+    if (!disc->openCiso(cisoError) && !cisoError.empty()) {
+      return fail(NOD_RESULT_ERR_FORMAT, cisoError);
+    }
+  }
 
   if (!disc->readBlob(0, kBootSize, disc->boot) || !disc->readBlob(kBi2Offset, kBi2Size, disc->bi2)) {
     return fail(NOD_RESULT_ERR_IO, "cannot read the disc header");
   }
   const uint8_t* boot = disc->boot.data();
-  if (std::memcmp(boot, "CISO", 4) == 0 || std::memcmp(boot + 0x1C, kGcnMagic, 4) != 0) {
-    return fail(NOD_RESULT_ERR_FORMAT, "not a plain GameCube disc image");
+  if (std::memcmp(boot + 0x1C, kGcnMagic, 4) != 0) {
+    return fail(NOD_RESULT_ERR_FORMAT, disc->cisoBlock != 0 ? "a CISO image without a GameCube disc in it"
+                                                            : "not a GameCube disc image (ISO, CISO or NKit)");
   }
 
   // The apploader: header, code, trailer.

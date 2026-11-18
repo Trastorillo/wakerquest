@@ -590,7 +590,13 @@ void dDlst_2DMt_c::draw() {
     GXVtxAttrFmtList fmtList[GX_VA_MAX_ATTR + 1];
 
     GXGetVtxAttrFmtv(GX_VTXFMT0, fmtList);
+#if TARGET_PC
+    // Whole float positions: s16 ones (6 bytes) leave the texture coordinates' floats at an odd place in
+    // the vertex, which the headset's GPU read wrong (as d_a_sea.cpp's calm sea).
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+#else
     GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
+#endif
     GXClearVtxDesc();
     GXSetVtxDesc(GX_VA_POS, GX_DIRECT);
 
@@ -626,25 +632,41 @@ void dDlst_2DMt_c::draw() {
         GXSetBlendMode(GX_BM_BLEND, GX_BL_SRC_ALPHA, GX_BL_INV_SRC_ALPHA, GX_LO_SET);
         GXBegin(GX_QUADS, GX_VTXFMT0, 4);
 
+#if TARGET_PC
+        GXPosition3f32(mX0, mY0, 0.0f);
+#else
         GXPosition3s16(mX0, mY0, 0);
+#endif
         pTex = &mTex[0];
         for (s32 i = 0; i < mTexNum; pTex++, i++)
             if (pTex->check())
                 GXTexCoord2f32(pTex->getS(), pTex->getT());
 
+#if TARGET_PC
+        GXPosition3f32(mX1, mY0, 0.0f);
+#else
         GXPosition3s16(mX1, mY0, 0);
+#endif
         pTex = &mTex[0];
         for (s32 i = 0; i < mTexNum; pTex++, i++)
             if (pTex->check())
                 GXTexCoord2f32(pTex->getS() + pTex->getSw(), pTex->getT());
 
+#if TARGET_PC
+        GXPosition3f32(mX1, mY1, 0.0f);
+#else
         GXPosition3s16(mX1, mY1, 0);
+#endif
         pTex = &mTex[0];
         for (s32 i = 0; i < mTexNum; pTex++, i++)
             if (pTex->check())
                 GXTexCoord2f32(pTex->getS() + pTex->getSw(), pTex->getT() + pTex->getTw());
 
+#if TARGET_PC
+        GXPosition3f32(mX0, mY1, 0.0f);
+#else
         GXPosition3s16(mX0, mY1, 0);
+#endif
         pTex = &mTex[0];
         for (s32 i = 0; i < mTexNum; pTex++, i++)
             if (pTex->check())

@@ -1761,6 +1761,7 @@ void pc_vr_sky_end(void) {
 
 void pc_vr_setting(const char* key, const char* value) { wq_xr_set(key, value); }
 void pc_vr_reset_position(void) { wq_xr_reset_position(); }
+bool pc_vr_paused(void) { return wq_xr_paused(); }
 bool pc_vr_value(const char* key, char* out, int size) { return wq_xr_value(key, out, size); }
 const char* pc_vr_perf_preset(void) { return wq_xr_perf_preset(); }
 int pc_vr_resolution(int* base) { return wq_xr_resolution(base); }
@@ -2380,6 +2381,7 @@ void pc_vr_sky_begin(void) {}
 void pc_vr_sky_end(void) {}
 void pc_vr_setting(const char*, const char*) {}
 void pc_vr_reset_position(void) {}
+bool pc_vr_paused(void) { return false; }
 bool pc_vr_value(const char*, char*, int) { return false; }
 const char* pc_vr_perf_preset(void) { return ""; }
 int pc_vr_resolution(int*) { return -1; }

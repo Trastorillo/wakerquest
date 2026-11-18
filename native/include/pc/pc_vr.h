@@ -28,6 +28,9 @@ void pc_vr_setting(const char* key, const char* value);
 /* The model, the window and the giant screen back where xr.ini's defaults put them (android/xr/wq_xr.h
    wq_xr_reset_position); nothing elsewhere. */
 void pc_vr_reset_position(void);
+/* 1.5: the headset's session stopped without the app ending (taken off, a system dialog over it): the game
+   waits while true (pc_frame.cpp); false elsewhere. Any thread. */
+bool pc_vr_paused(void);
 /* One xr.ini key's value in effect, as the file would hold it (into out, size bytes); false elsewhere or for a key
    the layer does not show. */
 bool pc_vr_value(const char* key, char* out, int size);

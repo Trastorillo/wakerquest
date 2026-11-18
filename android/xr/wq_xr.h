@@ -99,6 +99,10 @@ typedef struct WqXrTable {
     bool intro2d;
 } WqXrTable;
 
+// 1.5: the session stopped without the app ending (the headset taken off, a system dialog over it): the
+// game waits while true (pc_frame.cpp), until the session runs again. Any thread.
+bool wq_xr_paused(void);
+
 // The latest head pose and frustum (false while the session does not run).
 bool wq_xr_head(WqXrHead* out);
 void wq_xr_table(WqXrTable* out);
