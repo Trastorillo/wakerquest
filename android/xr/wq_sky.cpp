@@ -9,6 +9,7 @@
 #include "wq_xr.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -23,6 +24,14 @@ constexpr int kEyeSize = 1152;       // pixels a side, per eye
 constexpr int kMaxWalls = 24;
 constexpr float kCeiling = 2.6f;     // m above the floor, where the ceiling opens
 constexpr float kOpenSeconds = 5.0f;  // the ceiling, then the walls
+// 1.6: the virtual mode (wq_sky_set_virtual): the ceiling opens faster, then the walls come down to the floor, the
+// island and the sea rise, and the floor parts; going back, the same backwards, then the grey room fades out
+constexpr float kVirtualRoofSeconds = 2.0f;
+constexpr float kVirtualSeconds = 4.0f;
+constexpr float kVirtualFadeSeconds = 0.6f;
+constexpr float kSeaDepth = 4.0f;       // m, the shader's kSeaDepth
+constexpr float kVirtualSea = 0.45f;    // m under the floor, the sea in the virtual mode
+constexpr float kIsleDeep = -6.5f;      // m, the island's lawn before it rises: all of it under the sea
 
 const char* const kVs = R"(#version 300 es
 void main() {
@@ -49,8 +58,14 @@ uniform vec4 u_sun;    // direction, strength
 uniform vec4 u_bolt;   // azimuth, seed, strength
 uniform float u_time, u_storm, u_flash, u_night, u_encode;
 uniform vec3 u_seaDif;
+// 1.6: the virtual mode (passthrough off): x how solid the room's own surfaces are (0: the 1.5 path, none of the
+// rest is read), y the floor's gap half width (m, < 0: the room is gone), z the sea's depth under the floor (m),
+// w the island's lift (m, 0 when its lawn is at floor level)
+uniform vec4 u_virt;
+uniform vec4 u_isle;  // 1.6: the island's radii from the room's middle: lawn top, lawn's foot, beach's foot, its base
 
 const float kSeaDepth = 4.0;  // m, the sea under the floor
+const vec3 kIsleH = vec3(-0.2, -0.75, -6.5);  // 1.6: the island's heights at u_isle.y, .z, .w (the top: 0)
 
 // In integers: the same corner gives the very same value from every cell. (A float hash here left seams on the
 // headset's GPU, which rounds the same sum differently from one place in the code to another.)
@@ -213,7 +228,8 @@ float foamNet(vec2 p, float width) {
 // The sea: its colour from the game, swelling; thin white foam lines over a darker copy of them a little to one
 // side, both rippled by the same sines; and the loose crests that come and go.
 vec3 seaColor(vec3 d) {
-    float t = (u_eye.y + kSeaDepth) / max(-d.y, 1e-4);
+    float seaDepth = u_virt.x > 0.0 ? u_virt.z : kSeaDepth;  // 1.6: it rises in the virtual mode
+    float t = (u_eye.y + seaDepth) / max(-d.y, 1e-4);
     vec2 w = u_eye.xz + d.xz * t;
     float far = exp(-t * 0.012);
     // the water rising and falling: what is seen shifts along the ray, more so the flatter it looks
@@ -238,14 +254,205 @@ vec3 seaColor(vec3 d) {
     return c + u_flash * vec3(0.55, 0.62, 0.85) * 0.12;
 }
 
-void main() {
-    vec2 pix = (gl_FragCoord.xy - u_view.xy) / u_view.zw;
-    vec3 d = normalize(u_rot * vec3(mix(u_tan.x, u_tan.y, pix.x), mix(u_tan.z, u_tan.w, pix.y), -1.0));
-    float m = roomOpen(d);
-    if (m <= 0.001) {
-        o_color = vec4(0.0);
-        return;
+// ---- 1.6: the virtual mode. No passthrough behind: the room's walls, ceiling and floor are drawn (a warm grey),
+// the walls come down, the floor parts, and under it an island: a lawn at floor level, a beach, the sea risen.
+
+// 1.6: the island's height at r from the room's middle (cones between the radii; far below past its base)
+float isleH(float r) {
+    float l = u_virt.w;
+    if (r < u_isle.x) return l;
+    if (r < u_isle.y) return l + kIsleH.x * (r - u_isle.x) / (u_isle.y - u_isle.x);
+    if (r < u_isle.z) return l + mix(kIsleH.x, kIsleH.y, (r - u_isle.y) / (u_isle.z - u_isle.y));
+    if (r < u_isle.w) return l + mix(kIsleH.y, kIsleH.z, (r - u_isle.z) / (u_isle.w - u_isle.z));
+    return -1e4;
+}
+
+// 1.6: the slope there, eased around each bend (for the light only: the shape keeps its straight cones)
+float isleSlope(float r) {
+    float s1 = kIsleH.x / (u_isle.y - u_isle.x);
+    float s2 = (kIsleH.y - kIsleH.x) / (u_isle.z - u_isle.y);
+    float s3 = (kIsleH.z - kIsleH.y) / (u_isle.w - u_isle.z);
+    float s = mix(0.0, s1, smoothstep(u_isle.x - 0.6, u_isle.x + 0.6, r));
+    s = mix(s, s2, smoothstep(u_isle.y - 0.8, u_isle.y + 0.8, r));
+    return mix(s, s3, smoothstep(u_isle.z - 0.8, u_isle.z + 0.8, r));
+}
+
+// 1.6: the ray against one cone of the island, from (ra, ha) to (rb, hb): along it the radius would be A + B t, and
+// the ray's own radius squared is a t^2 + 2 b t + e2
+void isleCone(float ra, float ha, float rb, float hb, vec3 d, float a, float b, float e2, inout float best,
+              inout float rHit) {
+    float s = (hb - ha) / (rb - ra);
+    float A = ra + (u_eye.y - ha) / s, B = d.y / s;
+    float qa = a - B * B, qb = b - A * B, qc = e2 - A * A;
+    float t1 = -1.0, t2 = -1.0;
+    if (abs(qa) < 1e-6) {
+        if (abs(qb) > 1e-9) t1 = -qc / (2.0 * qb);
+    } else {
+        float disc = qb * qb - qa * qc;
+        if (disc < 0.0) return;
+        float sq = sqrt(disc);
+        t1 = (-qb - sq) / qa;
+        t2 = (-qb + sq) / qa;
     }
+    float r1 = A + B * t1, r2 = A + B * t2;
+    if (t1 > 0.0 && t1 < best && r1 >= ra && r1 <= rb) {
+        best = t1;
+        rHit = r1;
+    }
+    if (t2 > 0.0 && t2 < best && r2 >= ra && r2 <= rb) {
+        best = t2;
+        rHit = r2;
+    }
+}
+
+// 1.6: where a ray going down meets the island (1e9: it misses), and the radius there
+float isleHit(vec3 d, out float rHit) {
+    float best = 1e9;
+    rHit = 0.0;
+    float l = u_virt.w;
+    float tt = (u_eye.y - l) / -d.y;
+    vec2 q = u_eye.xz + d.xz * tt;
+    if (tt > 0.0 && dot(q, q) <= u_isle.x * u_isle.x) {
+        best = tt;
+        rHit = length(q);
+    }
+    float a = dot(d.xz, d.xz), b = dot(u_eye.xz, d.xz), e2 = dot(u_eye.xz, u_eye.xz);
+    isleCone(u_isle.x, l, u_isle.y, l + kIsleH.x, d, a, b, e2, best, rHit);
+    isleCone(u_isle.y, l + kIsleH.x, u_isle.z, l + kIsleH.y, d, a, b, e2, best, rHit);
+    isleCone(u_isle.z, l + kIsleH.y, u_isle.w, l + kIsleH.z, d, a, b, e2, best, rHit);
+    return best;
+}
+
+// 1.6: the water's edge rising and falling a little along the shore
+float shoreLap(vec2 p) {
+    return 0.03 * sin(u_time * 0.8 + noise(p * 0.35) * 6.2831853);
+}
+
+float skyLight() {
+    return clamp(dot(mix(u_horizon, u_zenith, 0.5), vec3(0.3, 0.6, 0.1)) * 1.6 + 0.12, 0.06, 1.0);
+}
+
+// 1.6: the island where the ray meets it: lawn on top, sand below, wet and foamy at the water's edge
+vec3 isleColor(vec3 p, float r, float t, float seaY) {
+    vec2 dir = p.xz / max(r, 1e-3);
+    float sl = isleSlope(r);
+    vec3 n = normalize(vec3(-sl * dir.x, 1.0, -sl * dir.y));
+    float fine = exp(-t * 0.25);  // the finest grain fades with distance, toward its average
+    float border = u_isle.y - 0.35 + 0.7 * noise(p.xz * 0.45 + vec2(3.0, 7.0));
+    float grassK = 1.0 - smoothstep(border - 0.08, border + 0.08, r);
+    float patchK = smoothstep(0.42, 0.58, noise(p.xz * 0.55));
+    vec3 grass = mix(vec3(0.05, 0.19, 0.022), vec3(0.10, 0.33, 0.035), patchK);
+    grass *= 1.0 + (hash(floor(p.xz * 24.0)) - 0.5) * 0.35 * fine;
+    grass *= mix(0.9, 1.05, noise(p.xz * 2.3 + vec2(11.0, 2.0)));
+    vec3 sand = vec3(0.80, 0.66, 0.42) * mix(0.92, 1.0, noise(p.xz * 1.7 + vec2(5.0, 1.0)));
+    sand *= 1.0 + (hash(floor(p.xz * 40.0) + vec2(3.0, 1.0)) - 0.5) * 0.18 * fine;
+    float dh = p.y - seaY - shoreLap(p.xz);
+    sand = mix(sand, sand * vec3(0.55, 0.52, 0.5), 1.0 - smoothstep(0.03, 0.16, dh));
+    vec3 c = mix(sand, grass, grassK);
+    float sunK = u_sun.w * (1.0 - 0.8 * u_storm);
+    c *= skyLight() * (0.62 + 0.5 * sunK * max(dot(n, u_sun.xyz), 0.0));
+    vec3 foam = vec3(0.92, 0.96, 1.0) * skyLight();
+    c = mix(c, foam, (1.0 - smoothstep(0.0, 0.035, dh)) * 0.85);
+    return c + u_flash * vec3(0.55, 0.62, 0.85) * 0.12;
+}
+
+// 1.6: down there with the island up: the island, or the sea with shallows and foam along the shore
+vec3 groundColor(vec3 d) {
+    float seaY = -u_virt.z;
+    float tSea = (u_eye.y - seaY) / max(-d.y, 1e-4);
+    if (u_virt.w > seaY - 0.9) {  // any of it above the water, or near enough to tint the shallows
+        float rHit;
+        float t = isleHit(d, rHit);
+        if (t < tSea) return isleColor(u_eye + d * t, rHit, t, seaY);
+    }
+    vec3 c = seaColor(d);
+    vec3 p = u_eye + d * tSea;
+    float r = length(p.xz);
+    if (r < u_isle.w) {
+        float depth = seaY - isleH(r) - shoreLap(p.xz);  // the water over the sand
+        if (depth < 0.9) {
+            float sh = 1.0 - smoothstep(0.0, 0.9, depth);
+            c = mix(c, vec3(0.05, 0.30, 0.28) * skyLight(), sh * 0.55);
+            vec3 foam = vec3(0.92, 0.96, 1.0) * skyLight();
+            float rim = 1.0 - smoothstep(0.02, 0.07, depth);
+            float net = foamNet(p.xz * 1.6, 0.05) * (1.0 - smoothstep(0.05, 0.5, depth));
+            c = mix(c, foam, max(rim, net * 0.7) * 0.9);
+        }
+    }
+    return c;
+}
+
+// 1.6: like roomOpen, with the room's surfaces solid: 1 where the ray leaves it, else the surface's normal and
+// distance. The floor is met first inside the walls; its two halves slide apart along x by u_virt.y.
+float roomVirtual(vec3 d, out vec3 n, out float tHit) {
+    n = vec3(0.0, 1.0, 0.0);
+    tHit = 0.0;
+    if (u_virt.y < 0.0) return 1.0;
+    float t = -1.0;
+    vec2 wn = vec2(0.0);
+    if (u_wallCount > 0) {
+        for (int i = 0; i < u_wallCount; i++) {
+            vec2 s = u_walls[i].zw - u_walls[i].xy;
+            vec2 o = u_eye.xz - u_walls[i].xy;
+            float den = d.x * s.y - d.z * s.x;
+            if (abs(den) < 1e-6) continue;
+            float hit = -(o.x * s.y - o.y * s.x) / den;
+            float along = (o.x * d.z - o.y * d.x) / (s.x * d.z - s.y * d.x);
+            if (hit > 0.0 && along >= -0.01 && along <= 1.01 && (t < 0.0 || hit < t)) {
+                t = hit;
+                wn = vec2(-s.y, s.x);
+            }
+        }
+    } else {
+        float a = max(dot(d.xz, d.xz), 1e-5);
+        float b = dot(u_eye.xz, d.xz);
+        float c = dot(u_eye.xz, u_eye.xz) - u_room.x * u_room.x;
+        float disc = b * b - a * c;
+        if (disc >= 0.0) {
+            t = (-b + sqrt(disc)) / a;
+            wn = u_eye.xz + d.xz * t;
+        }
+    }
+    if (d.y < -1e-4) {
+        float tf = u_eye.y / -d.y;
+        if (t < 0.0 || tf < t) {
+            vec3 p = u_eye + d * tf;
+            tHit = tf;
+            float e = 0.004 + 0.0015 * tf;
+            return u_virt.y <= 0.0 ? 0.0 : 1.0 - smoothstep(u_virt.y - e, u_virt.y, abs(p.x));
+        }
+    }
+    if (t <= 0.0) return 1.0;  // a gap in the walls
+    float h = u_eye.y + d.y * t;
+    if (h > u_room.z && d.y > 1e-4) {
+        float tc = (u_room.z - u_eye.y) / d.y;
+        vec3 p = u_eye + d * tc;
+        n = vec3(0.0, -1.0, 0.0);
+        tHit = tc;
+        return (1.0 - smoothstep(u_room.w - 0.02, u_room.w + 0.02, abs(p.x))) * clamp(u_room.w * 25.0, 0.0, 1.0);
+    }
+    wn = normalize(wn);
+    if (dot(wn, d.xz) > 0.0) wn = -wn;  // facing the eye
+    n = vec3(wn.x, 0.0, wn.y);
+    tHit = t;
+    float e = 0.015 + 0.002 * t;
+    return smoothstep(u_room.y - e, u_room.y + e, h);
+}
+
+// 1.6: the room's own surfaces, a neutral warm grey lit from above; the floor's boards slide with their half
+vec3 roomColor(vec3 d, vec3 n, float t) {
+    vec3 c = vec3(0.33, 0.29, 0.25) * (0.62 + 0.3 * dot(n, vec3(0.35, 0.8, 0.45)));
+    if (n.y > 0.5) {
+        vec3 p = u_eye + d * t;
+        float xs = p.x - sign(p.x) * max(u_virt.y, 0.0);
+        float f = abs(fract(xs * 4.0) - 0.5);
+        float w = 4.0 * (0.004 + 0.0012 * t);
+        c *= 1.0 - 0.25 * smoothstep(0.5 - w, 0.5, f);
+    }
+    return c * mix(0.35, 1.0, skyLight());
+}
+
+vec3 outsideColor(vec3 d) {
     vec3 c;
     if (d.y >= 0.0) {
         c = skyColor(d);
@@ -260,7 +467,7 @@ void main() {
         if (u_night > 0.01) c = withMoon(c, d);
         c = withClouds(c, d);
     } else {
-        c = seaColor(d);
+        c = u_virt.x > 0.0 ? groundColor(d) : seaColor(d);
     }
     if (u_bolt.z > 0.01 && d.y > 0.0 && d.y < 0.5) {
         float az = atan(d.x, d.z);
@@ -270,6 +477,34 @@ void main() {
         c += u_bolt.z * (vec3(0.95, 0.97, 1.0) * (1.0 - smoothstep(0.001, 0.004, da)) * 2.0 +
                          vec3(0.4, 0.45, 0.7) * (1.0 - smoothstep(0.0, 0.05, da)) * 0.35);
     }
+    return c;
+}
+
+void main() {
+    vec2 pix = (gl_FragCoord.xy - u_view.xy) / u_view.zw;
+    vec3 d = normalize(u_rot * vec3(mix(u_tan.x, u_tan.y, pix.x), mix(u_tan.z, u_tan.w, pix.y), -1.0));
+    if (u_virt.x > 0.0) {
+        // 1.6: the virtual mode: opaque wherever the room is solid, the rest as outside
+        vec3 n;
+        float th;
+        float mv = roomVirtual(d, n, th);
+        vec3 co = vec3(0.0);
+        if (mv > 0.001) co = outsideColor(d);
+        vec3 cr = roomColor(d, n, th);
+        if (u_encode > 0.5) {
+            co = pow(max(co, vec3(0.0)), vec3(1.0 / 2.2));
+            cr = pow(max(cr, vec3(0.0)), vec3(1.0 / 2.2));
+        }
+        float solid = (1.0 - mv) * u_virt.x;
+        o_color = vec4(co * mv + cr * solid, mv + solid);
+        return;
+    }
+    float m = roomOpen(d);
+    if (m <= 0.001) {
+        o_color = vec4(0.0);
+        return;
+    }
+    vec3 c = outsideColor(d);
     if (u_encode > 0.5) c = pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
     o_color = vec4(c * m, m);
 }
@@ -289,11 +524,15 @@ struct {
     std::vector<XrSwapchainImageOpenGLESKHR> images;
     GLuint prog = 0, fbo = 0;
     float amount = 0.0f;  // 0 shut, 1 open
+    float virt = 0.0f;    // 1.6: the virtual mode's sequence, 0 none, 1 the room gone
+    float solid = 0.0f;   // 1.6: how solid the room's own surfaces are (1 all through the virtual mode)
     float clock = 0.0f;
     Weather now;  // eased, sRGB 0-255 colours
     bool wasFlash = false;
     float boltAzimuth = 0.0f, boltSeed = 0.0f;
 } g;
+
+std::atomic<bool> s_virtual{false};  // 1.6: wq_sky_set_virtual, from any thread
 
 GLuint compileShader(GLenum type, const char* src) {
     GLuint sh = glCreateShader(type);
@@ -495,6 +734,9 @@ float smooth01(float x) {
 
 }  // namespace
 
+// 1.6: see wq_sky.h
+extern "C" void wq_sky_set_virtual(bool on) { s_virtual.store(on, std::memory_order_relaxed); }
+
 extern "C" void wq_xr_set_sea_color(const float* color) {
     std::lock_guard lock{s_weatherLock};
     std::copy(color, color + 3, s_weatherIn.seaDif);
@@ -552,8 +794,22 @@ void sceneTick(XrInstance instance, XrSession session, XrSpace space, XrTime tim
 bool layer(XrSession session, XrSpace space, XrTime time, bool srgb, bool open, const Room& room, int hz,
            XrCompositionLayerProjection* out, XrCompositionLayerProjectionView* views) {
     const float dt = hz > 0 ? 1.0f / float(hz) : 1.0f / 72.0f;
-    g.amount = std::clamp(g.amount + (open ? dt : -dt) / kOpenSeconds, 0.0f, 1.0f);
-    if (g.amount <= 0.0f || !init(session, srgb)) return false;
+    // 1.6: the virtual mode keeps the ceiling open while any of it shows, and the room solid at once (no passthrough
+    // behind: nothing left black); its sequence starts with the ceiling open, and on the way back the grey room
+    // fades only once the room is whole again. Without it: g.virt and g.solid stay 0, as in 1.5.
+    const bool virtualOn = s_virtual.load(std::memory_order_relaxed);
+    if (virtualOn) g.solid = 1.0f;
+    const bool roofOpen = open || virtualOn || g.virt > 0.0f || g.solid > 0.0f;
+    const float openSeconds = virtualOn ? kVirtualRoofSeconds : kOpenSeconds;
+    g.amount = std::clamp(g.amount + (roofOpen ? dt : -dt) / openSeconds, 0.0f, 1.0f);
+    if (virtualOn) {
+        if (g.amount >= 1.0f) g.virt = std::min(g.virt + dt / kVirtualSeconds, 1.0f);
+    } else if (g.virt > 0.0f) {
+        g.virt = std::max(g.virt - dt / kVirtualSeconds, 0.0f);
+    } else {
+        g.solid = std::max(g.solid - dt / kVirtualFadeSeconds, 0.0f);
+    }
+    if ((g.amount <= 0.0f && g.solid <= 0.0f) || !init(session, srgb)) return false;
 
     XrViewLocateInfo li{XR_TYPE_VIEW_LOCATE_INFO};
     li.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -626,8 +882,22 @@ bool layer(XrSession session, XrSpace space, XrTime time, bool srgb, bool open, 
     for (int i = 0; i < walls; i++)
         span = std::max({span, std::fabs(wallsHere[i][0]) + 0.1f, std::fabs(wallsHere[i][2]) + 0.1f});
     const float opening = smooth01(g.amount / 0.45f) * span;
-    const float wallTop = ceiling + (room.wall - ceiling) * smooth01((g.amount - 0.4f) / 0.6f);
+    float wallTop = ceiling + (room.wall - ceiling) * smooth01((g.amount - 0.4f) / 0.6f);
+    // 1.6: the virtual mode's sequence (g.virt 0 to 1 in kVirtualSeconds): the walls down to the floor in its first
+    // 40%, the island up in its first half, the sea up from 10% to 70%, the floor's halves apart in its second half
+    wallTop *= 1.0f - smooth01(g.virt / 0.4f);
     glUniform4f(glGetUniformLocation(g.prog, "u_room"), room.radius, wallTop, ceiling, opening);
+    const float floorGap = g.virt >= 1.0f ? -1.0f : smooth01((g.virt - 0.5f) / 0.5f) * span;
+    const float seaDepth = kSeaDepth + (kVirtualSea - kSeaDepth) * smooth01((g.virt - 0.1f) / 0.6f);
+    glUniform4f(glGetUniformLocation(g.prog, "u_virt"), g.solid, floorGap, seaDepth,
+                kIsleDeep * (1.0f - smooth01(g.virt / 0.5f)));
+    // 1.6: the island: its lawn a little past the room (the circle, or the farthest corner of the walls)
+    float reach = room.radius;
+    for (int i = 0; i < walls; i++)
+        reach = std::max({reach, std::hypot(wallsHere[i][0], wallsHere[i][1]),
+                          std::hypot(wallsHere[i][2], wallsHere[i][3])});
+    const float lawn = reach + 0.8f;
+    glUniform4f(glGetUniformLocation(g.prog, "u_isle"), lawn, lawn + 2.0f, lawn + 5.5f, lawn + 8.5f);
     setColor("u_zenith", g.now.zenith);
     setColor("u_horizon", g.now.horizon);
     setColor("u_cloud", g.now.cloud);

@@ -271,7 +271,7 @@ const char kDefaultSettings[] =
     "# screen_scale (the world's size on it: its 3D depth) when the ray is on it or it has no ambience) and its click puts what is held back in its place; the right stick's click\n"
     "# alone is the game's Z. Saved here when let go.\n"
     "# distance and width in metres, height in metres above the eyes,\n"
-    "# passthrough 1 = the room around the screen, 0 = black.\n"
+    "# passthrough 1 = the room around the screen, the window and the bubble, 0 = black (open roof: a beach).\n"
     "distance = 0.916\n"
     "width = 0.65\n"
     "# screen_scale 1 = the screen's 3D as it is; more: the world smaller, deeper. The eyes' separation does not\n"
@@ -570,7 +570,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "immersive_lift")) s.immersiveLift = clampf(f, -kWindowLiftMax, kWindowLiftMax);
     else if (!strcmp(key, "immersive_resolution")) s.immersiveResolution = f <= 0.0f ? 0 : int(clampf(f, 480.0f, 2400.0f));
     else if (!strcmp(key, "roof_open")) s.roofOpen = on;
-    else if (!strcmp(key, "roof_wall")) s.roofWall = clampf(f, 0.3f, 2.0f);
+    // 1.6: down to 0 (without the room, wq_sky.cpp's virtual beach); over the room still 0.3 at least (runFrame)
+    else if (!strcmp(key, "roof_wall")) s.roofWall = clampf(f, 0.0f, 2.0f);
     else if (!strcmp(key, "roof_radius")) s.roofRadius = clampf(f, 1.0f, 8.0f);
     else if (!strcmp(key, "ambient_anchor")) s.ambientWorld = strcmp(v, "camera") != 0;
     else if (!strcmp(key, "ambient_x")) s.ambientX = clampf(f, -10.0f, 10.0f);
@@ -660,6 +661,14 @@ std::mutex s_laserLock;
 float s_laserRay[6] = {};
 bool s_laserValid = false;
 std::atomic_bool s_bowScreen{false};  // wq_xr_set_bow_screen (1.2.1): aiming the bow, on the giant screen
+// 1.6: the eye switch's picture from the game (wq_xr_set_eye_texture): its four frames as RGBA8, w x h, and
+// whether they changed since the layer last copied them; and its presses (wq_xr_eye_presses)
+std::mutex s_eyeLock;
+std::vector<uint8_t> s_eyePixels[4];
+int s_eyeW = 0, s_eyeH = 0;
+bool s_eyeDirty = false;
+std::atomic<int> s_eyePresses{0};
+std::atomic_bool s_eyeOpened{false};
 // The giant screen in 3D: as the mode says (Pantalla 3D or Pantalla); a cutscene shown on it from the window or
 // the model (cine_only, "Cinemáticas en pantalla 3D") always, as those modes have no 3D row of their own (1.1.9).
 bool screenStereo(const Settings& s) { return s.stereo || (s_cineScreen.load() && (s.window || s.diorama)); }
@@ -913,6 +922,19 @@ struct Xr {
     bool grabWindow[2] = {false, false};  // the panel grab began in the window mode (the window's HUD)
     bool whTrigHold[2] = {false, false};  // its trigger kept from the game until let go
     bool trigWas[2] = {false, false};     // the trigger as updateGrips last saw it (its press, 1.1.5)
+    // 1.6: the eye switch over the giant screen or the window (updateEyeSwitch, eyeSwitchLayers): where it
+    // floated last frame (0 nowhere, 1 over the screen, 2 over the window), its pose, the right hand's ray on it
+    // and how far, its trigger kept from the game until let go, and the frame shown (0 open .. 3 closed; -1 not
+    // yet: it follows roof_open) and the one it steps to, a game frame a step
+    int eyeAnchor = 0;
+    XrPosef eyePose{};
+    bool eyeAimed = false;
+    float eyeHit = 0.0f;
+    bool eyeTrigHold = false, eyeTrigWas = false;
+    int eyeFrame = -1, eyeTarget = 0;
+    uint64_t eyeStepNs = 0;
+    XrSwapchain eyeSwapchain = XR_NULL_HANDLE;  // the four frames side by side
+    int eyeTexW = 0, eyeTexH = 0;
     XrVector3f dragHand{};
     float dragHandYaw = 0.0f;
     float dragX = 0.0f, dragHeight = 0.0f, dragDistance = 0.0f, dragYaw = 0.0f;
@@ -1742,11 +1764,11 @@ void onPerfNotification(const XrEventDataPerfSettingsEXT& e) {
 
 // The room as the bottom layer, started and paused as the setting changes. True while it shows.
 bool updatePassthrough() {
-    // the diorama and the window sit in the room
     // the immersive mode covers the room whole: none, but in a special scene through its window
-    const bool want = (!s.settings.immersive || s_special.load()) &&
-                      (s.settings.passthrough || s.settings.diorama || s.settings.window || s.settings.roofOpen ||
-                       s_special.load()) &&
+    // 1.6: the setting rules every other mode too (General tab): before, the diorama, the window and the open
+    // roof always showed the room. The diorama obeys it as well: off, the bubble floats in black (its fade
+    // and its birds still look right over black); a special scene still opens onto the room.
+    const bool want = (!s.settings.immersive || s_special.load()) && (s.settings.passthrough || s_special.load()) &&
                       s.hasPassthrough;
     if (want == s.passthroughRunning) return want;
     if (want && !s.passthrough) {
@@ -1957,6 +1979,7 @@ void updateGrips(float gripL, float gripR, bool click, XrVector2f* stick, XrVect
 void togglePanel();
 void updatePanelGrab(float gripL, float gripR);
 void pointerHaptic(int hand, float amplitude);
+void updateEyeSwitch(float* r);  // 1.6: the eye switch (below)
 
 void updatePad() {
     attachPad();
@@ -2086,6 +2109,8 @@ void updatePad() {
                     if (s.whTrigHold[h] && !(s.grabbed[h] && s.grabWindow[h]) && t < 0.2f) s.whTrigHold[h] = false;
                     if (s.whTrigHold[h]) t = 0.0f;
                 }
+                // 1.6: the right trigger on the eye switch over the screen or the window: not the game's either
+                updateEyeSwitch(&r);
             }
             // (1.1.6) the grips not run (the settings panel, the game's menu, a special scene over the
             // model, the controller just given back): no D-pad left pressed
@@ -3930,6 +3955,239 @@ XrQuaternionf facingPlayer(XrVector3f at) {
     return {0.0f, std::sin(0.5f * yaw), 0.0f, std::cos(0.5f * yaw)};
 }
 
+// ---- 1.6: the eye switch ------------------------------------------------------------------------------
+// Over the giant screen or the window, with the room shown (passthrough), a switch that opens and closes the
+// roof (roof_open): the game's eye switch (its picture from the player's disc, pc_vr_diorama.cpp), else a
+// generic button drawn here. The right hand's ray on it shows the ray and the red dot; its trigger presses it.
+
+constexpr float kEyeSize = 0.25f;     // m across
+constexpr float kEyeAbove = 0.2f;     // m from the top edge (with its frame) to its middle
+constexpr float kEyeReach = 0.15f;    // m, the sphere around its middle the ray hits
+constexpr uint64_t kEyeStepNs = 33333333ull;  // a game frame a step (30 fps), as the game's eye closes
+
+// The generic button's frame k (0 open .. 3 closed: the roof open), w x w, RGBA8: a dark disc in a light ring,
+// a dot in the middle that grows into a warm sun, its rays out at the last frame. Not the game's eye.
+void genericEyeFrame(int k, int w, std::vector<uint8_t>& out) {
+    out.assign(size_t(w) * w * 4, 0);
+    const float t = float(k) / 3.0f;
+    const float dotR = 0.10f + 0.16f * t;  // the middle's radius (of the half width)
+    const float dot[3] = {200.0f + 55.0f * t, 210.0f + 10.0f * t, 225.0f - 145.0f * t};
+    for (int y = 0; y < w; y++)
+        for (int x = 0; x < w; x++) {
+            const float px = (x + 0.5f) / w * 2.0f - 1.0f, py = (y + 0.5f) / w * 2.0f - 1.0f;
+            const float r = std::sqrt(px * px + py * py);
+            const float aa = 2.0f / w;  // a pixel, for the soft edges
+            auto band = [&](float r0, float r1) {
+                return clampf((r - r0) / aa + 0.5f, 0.0f, 1.0f) * clampf((r1 - r) / aa + 0.5f, 0.0f, 1.0f);
+            };
+            float c[3] = {28.0f, 34.0f, 42.0f};
+            float a = band(-1.0f, 0.96f) * 0.85f;  // the disc
+            const float ring = band(0.80f, 0.92f);
+            for (int i = 0; i < 3; i++) c[i] += (235.0f - c[i]) * ring;
+            a = std::max(a, ring);
+            float in = band(-1.0f, dotR);
+            if (k == 3 && r > dotR + 0.06f && r < 0.66f) {  // eight short rays
+                const float ang = std::atan2(py, px) * 8.0f / 6.2831853f;
+                const float f = std::fabs(ang - std::round(ang));
+                in = std::max(in, clampf((0.12f - f) * 20.0f, 0.0f, 1.0f));
+            }
+            for (int i = 0; i < 3; i++) c[i] += (dot[i] - c[i]) * in;
+            a = std::max(a, in);
+            uint8_t* o = &out[(size_t(y) * w + x) * 4];
+            for (int i = 0; i < 3; i++) o[i] = uint8_t(clampf(c[i], 0.0f, 255.0f));
+            o[3] = uint8_t(clampf(a * 255.0f, 0.0f, 255.0f));
+        }
+}
+
+// The eye's four frames into its swapchain (made again for another size): premultiplied, and the game's cut
+// to a soft circle (what is around the eye in its texture, if anything, left out)
+void uploadEyeFrames(const std::vector<uint8_t>* frames, int w, int h, bool circle) {
+    if (s.eyeSwapchain != XR_NULL_HANDLE && (w != s.eyeTexW || h != s.eyeTexH)) {
+        xrDestroySwapchain(s.eyeSwapchain);
+        s.eyeSwapchain = XR_NULL_HANDLE;
+    }
+    if (s.eyeSwapchain == XR_NULL_HANDLE) {
+        XrSwapchainCreateInfo sc{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+        sc.usageFlags = XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT |
+                        XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+        sc.format = s.srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+        sc.sampleCount = 1;
+        sc.width = uint32_t(4 * w);
+        sc.height = uint32_t(h);
+        sc.faceCount = 1;
+        sc.arraySize = 1;
+        sc.mipCount = 1;
+        if (!ok(xrCreateSwapchain(s.session, &sc, &s.eyeSwapchain), "xrCreateSwapchain (eye switch)")) {
+            s.eyeSwapchain = XR_NULL_HANDLE;
+            return;
+        }
+        s.eyeTexW = w;
+        s.eyeTexH = h;
+    }
+    uint32_t n = 0;
+    xrEnumerateSwapchainImages(s.eyeSwapchain, 0, &n, nullptr);
+    std::vector<XrSwapchainImageOpenGLESKHR> images(n, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
+    xrEnumerateSwapchainImages(s.eyeSwapchain, n, &n, (XrSwapchainImageBaseHeader*)images.data());
+    uint32_t idx = 0;
+    XrSwapchainImageAcquireInfo acq{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wait.timeout = XR_INFINITE_DURATION;
+    if (n == 0 || XR_FAILED(xrAcquireSwapchainImage(s.eyeSwapchain, &acq, &idx))) return;
+    if (XR_SUCCEEDED(xrWaitSwapchainImage(s.eyeSwapchain, &wait))) {
+        std::vector<uint8_t> px(size_t(w) * h * 4);
+        glBindTexture(GL_TEXTURE_2D, images[idx].image);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        for (int f = 0; f < 4; f++) {
+            const uint8_t* src = frames[f].data();
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++) {
+                    // 1.6: the texture's rows come top first, GL's row 0 is the bottom one (wq_panel.cpp too)
+                    const size_t i = (size_t(y) * w + x) * 4;
+                    const size_t si = (size_t(h - 1 - y) * w + x) * 4;
+                    float a = src[si + 3] / 255.0f;
+                    if (circle) {
+                        const float dx = (x + 0.5f) / w * 2.0f - 1.0f, dy = (y + 0.5f) / h * 2.0f - 1.0f;
+                        a *= clampf((1.0f - std::sqrt(dx * dx + dy * dy)) * 0.5f * float(std::min(w, h)) / 1.5f,
+                                    0.0f, 1.0f);
+                    }
+                    for (int c = 0; c < 3; c++) px[i + c] = uint8_t(src[si + c] * a + 0.5f);
+                    px[i + 3] = uint8_t(a * 255.0f + 0.5f);
+                }
+            glTexSubImage2D(GL_TEXTURE_2D, 0, f * w, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        }
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    XrSwapchainImageReleaseInfo rel{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    xrReleaseSwapchainImage(s.eyeSwapchain, &rel);
+}
+
+// The eye's picture as it stands: the game's four frames once they all came, else (the first time) the generic one
+void ensureEyeTexture() {
+    std::vector<uint8_t> frames[4];
+    int w = 0, h = 0;
+    {
+        std::lock_guard lock{s_eyeLock};
+        if (s_eyeDirty) {
+            bool all = true;
+            for (const std::vector<uint8_t>& p : s_eyePixels) all = all && !p.empty();
+            if (all) {
+                for (int f = 0; f < 4; f++) frames[f] = s_eyePixels[f];
+                w = s_eyeW;
+                h = s_eyeH;
+                s_eyeDirty = false;
+            }
+        }
+    }
+    if (w > 0) {
+        uploadEyeFrames(frames, w, h, true);
+        xrlog("eye switch: the game's eye (%dx%d)", w, h);
+    } else if (s.eyeSwapchain == XR_NULL_HANDLE) {
+        static bool tried = false;  // (once: a failed swapchain is not asked for every frame)
+        if (tried) return;
+        tried = true;
+        constexpr int kW = 128;
+        for (int f = 0; f < 4; f++) genericEyeFrame(f, kW, frames[f]);
+        uploadEyeFrames(frames, kW, kW, false);
+        xrlog("eye switch: the generic button (the game's eye not given yet)");
+    }
+}
+
+// Where a ray passes nearest a point: true within `reach`, with the distance along it
+bool raySphere(XrVector3f o, XrVector3f d, XrVector3f c, float reach, float* t) {
+    const float along = vdot(vsub(c, o), d);
+    if (along <= 0.0f) return false;
+    const XrVector3f off = vsub(c, vadd(o, vscale(d, along)));
+    if (vdot(off, off) > reach * reach) return false;
+    *t = along;
+    return true;
+}
+
+// updatePad, the game's right trigger `r` (the modes where the grips work, no panel nor menu open): the right
+// hand's ray on the eye, and its trigger's press toggles roof_open; that trigger is not the game's until let go
+void updateEyeSwitch(float* r) {
+    s.eyeAimed = false;
+    XrVector3f o, d;
+    float t = 0.0f;
+    if (s.eyeAnchor != 0 && aimRay(1, &o, &d) && raySphere(o, d, s.eyePose.position, kEyeReach, &t)) {
+        s.eyeAimed = true;
+        s.eyeHit = t;
+    }
+    const bool down = s.trig[1] > (s.eyeTrigWas ? 0.4f : 0.6f);
+    if (down && !s.eyeTrigWas && s.eyeAimed && !s.grabbed[1] && !s.gripDown[1]) {
+        s.eyeTrigHold = true;
+        const bool open = !s.settings.roofOpen;
+        wq_xr_set("roof_open", open ? "1" : "0");  // read again next frame (s_settingsDirty): the eye follows
+        s_eyeOpened.store(open);
+        s_eyePresses.fetch_add(1);  // the game thread plays the sounds
+        pointerHaptic(1, 0.4f);
+        xrlog("eye switch: the roof %s", open ? "opens" : "closes");
+    }
+    s.eyeTrigWas = down;
+    if (s.eyeTrigHold && s.trig[1] < 0.2f) s.eyeTrigHold = false;
+    if (s.eyeTrigHold || s.eyeAimed) *r = 0.0f;  // aimed at the eye, the trigger is not the game's
+}
+
+// runFrame, after the screen or the window: the eye's quad where they put it (`anchor` 0: none this frame), and
+// the ray and the red dot while the right hand points at it
+int eyeSwitchLayers(int anchor, const XrPosef& at, XrCompositionLayerQuad* out) {
+    const Settings& st = s.settings;
+    if (st.diorama || st.immersive || wqp::isOpen() || s_menuOpen.load()) anchor = 0;
+    s.eyeAnchor = anchor;
+    s.eyePose = at;
+    if (anchor == 0) {
+        s.eyeAimed = false;
+        return 0;
+    }
+    ensureEyeTexture();
+    if (s.eyeSwapchain == XR_NULL_HANDLE) return 0;
+    // the frame: a step a game frame toward the roof's state (closed eye: the roof open)
+    const int want = st.roofOpen ? 3 : 0;
+    const uint64_t now = monotonicNs();
+    if (s.eyeFrame < 0) s.eyeFrame = want, s.eyeStepNs = now;
+    s.eyeTarget = want;
+    if (s.eyeFrame != s.eyeTarget && now - s.eyeStepNs >= kEyeStepNs) {
+        s.eyeFrame += s.eyeTarget > s.eyeFrame ? 1 : -1;
+        s.eyeStepNs = now;
+    } else if (s.eyeFrame == s.eyeTarget) {
+        s.eyeStepNs = now;
+    }
+    int layers = 0;
+    XrCompositionLayerQuad& q = out[layers++];
+    q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    q.space = s.space;
+    q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    q.subImage.swapchain = s.eyeSwapchain;
+    q.subImage.imageRect = {{s.eyeFrame * s.eyeTexW, 0}, {s.eyeTexW, s.eyeTexH}};
+    q.pose = at;
+    q.size = {kEyeSize, kEyeSize * float(s.eyeTexH) / float(s.eyeTexW)};
+    XrVector3f o, d;
+    if (s.eyeAimed && aimRay(1, &o, &d)) {
+        ensurePointerTextures();
+        if (s.raySwapchain) rayLayer(o, d, s.eyeHit, 0.003f, &out[layers++]);
+        if (!s.laserDotSwapchain) s.laserDotSwapchain = makePointerTexture(64, 64, 2);
+        if (s.laserDotSwapchain) {
+            // on the eye's plane where the ray meets it (else at its nearest to the middle)
+            float t = s.eyeHit;
+            rayQuad(o, d, at, {2.0f * kEyeReach, 2.0f * kEyeReach}, &t);
+            const XrVector3f p = vadd(o, vscale(d, t));
+            XrCompositionLayerQuad& dot = out[layers++];
+            dot = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+            dot.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            dot.space = s.space;
+            dot.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+            dot.subImage.swapchain = s.laserDotSwapchain;
+            dot.subImage.imageRect = {{0, 0}, {64, 64}};
+            dot.pose.orientation = at.orientation;
+            dot.pose.position = vadd(p, vscale(qrot(at.orientation, {0, 0, 1}), 0.004f));
+            const float size = std::max(0.03f, t * 0.025f);
+            dot.size = {size, size};
+        }
+    }
+    return layers;
+}
+
 // The giant screen's 3D (the diorama sets its own eye shift every frame, pc_vr_diorama.cpp): the
 // settings', clip.x += eye * strength * (w - focus), what is nearer than focus (w, game units) coming out
 // of the screen. None during the title's flat screen (intro_2d), whatever stereo says.
@@ -4006,7 +4264,7 @@ void runFrame() {
     updateRumble();
     const bool screen = s.frame.shouldRender && copyNewestFrame();
 
-    const XrCompositionLayerBaseHeader* layers[19];
+    const XrCompositionLayerBaseHeader* layers[22];  // 1.6: three more, the eye switch's
     uint32_t layerCount = 0;
     XrCompositionLayerQuad pointerQuads[2], panelQuad, labelQuad, frameQuads[4];
     s.hudShown = s.dialogueShown = false;
@@ -4038,7 +4296,9 @@ void runFrame() {
     XrCompositionLayerProjection skyLayer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     XrCompositionLayerProjectionView skyViews[2];
     if (s.frame.shouldRender) {
-        wqs::Room skyRoom{{0.0f, 0.0f}, -1.5f, s.settings.roofRadius, s.settings.roofWall};
+        // 1.6: over the room the walls keep 0.3 m at least, as before (roof_wall now goes down to 0)
+        wqs::Room skyRoom{{0.0f, 0.0f}, -1.5f, s.settings.roofRadius,
+                          s.passthroughRunning ? std::max(0.3f, s.settings.roofWall) : s.settings.roofWall};
         if (s.stageSpace != XR_NULL_HANDLE) {
             XrSpaceLocation sl{XR_TYPE_SPACE_LOCATION};
             if (XR_SUCCEEDED(xrLocateSpace(s.stageSpace, s.space, s.frame.predictedDisplayTime, &sl)) &&
@@ -4050,6 +4310,12 @@ void runFrame() {
         }
         const bool roof = s.settings.roofOpen && !s.settings.immersive;
         wqs::sceneTick(s.instance, s.session, s.space, s.frame.predictedDisplayTime, roof);
+        // 1.6: without the room (passthrough off, or a headset without it) the open roof is the virtual beach:
+        // the walls come down, the floor opens and an island rises out of the sea (wq_sky.cpp, which plays it
+        // backwards when this goes off). Off with the roof closed: black around the screen, as before.
+        // The setting, not the passthrough running: a special scene forcing the room on keeps the beach
+        // rather than playing it all backwards and again (the review of 1.6)
+        wq_sky_set_virtual(roof && (!s.settings.passthrough || !s.passthroughRunning && !s_special.load()));
         if (wqs::layer(s.session, s.space, s.frame.predictedDisplayTime, s.srgb, roof, skyRoom,
                        activeRefresh(s.settings), &skyLayer, skyViews))
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&skyLayer;
@@ -4068,6 +4334,10 @@ void runFrame() {
     XrCompositionLayerProjection ambProj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
     XrCompositionLayerProjectionView ambViews[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
                                                     {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
+    // 1.6: the eye switch, over what is shown: 1 the giant screen, 2 the window (eyeSwitchLayers), at eyeAt
+    int eyeAnchor = 0;
+    XrPosef eyeAt{{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.0f}};
+    XrCompositionLayerQuad eyeQuads[3];
     if (screen && s.dioramaFrame && s.sideBySide && headForTag(s.frameTag, drawnFor)) {
         // left | right | HUD (Aurora patch 0026), or left | right
         // (then the window's ambience's left | right, Aurora patch 0034)
@@ -4101,6 +4371,14 @@ void runFrame() {
             for (int i = 0; i < fl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&frameQuads[i];
         }
         layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&proj;
+        // 1.6: the eye switch above the window (its frame included)
+        if (s.settings.window && !s.settings.immersive) {
+            const Settings& st = s.settings;
+            const float top = 0.5f * st.windowWidth * 9.0f / 16.0f + (st.screenFrame ? 0.02f * st.windowWidth : 0.0f);
+            eyeAnchor = 2;
+            eyeAt.orientation = windowPose(st).orientation;
+            eyeAt.position = onWindow(st, 0.0f, top + kEyeAbove, 0.0f);
+        }
         // the room's ambience through the window (Aurora patch 0034): its eyes after the HUD, drawn for
         // the frame's head pose with the head's own frustum (not the one fitted to the window)
         if (s.ambientFrame && s.hudFrame) {
@@ -4265,6 +4543,11 @@ void runFrame() {
             quad.size = screenSize;
             layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&quad;
         }
+        // 1.6: the eye switch above the giant screen (its frame included: frameLayers' bar)
+        eyeAnchor = 1;
+        eyeAt.orientation = screenAt.orientation;
+        eyeAt.position = onScreen(st, 0.0f, 0.5f * screenSize.height + (st.screenFrame ? 0.02f * st.width : 0.0f) +
+                                                kEyeAbove, 0.0f);
         // the room's ambience (Aurora patch 0034): its eyes drawn for the head pose of the frame's tag
         // with the head's frustum, over the screen (their alpha 0 where it is)
         HeadSnap ambFor;
@@ -4288,6 +4571,11 @@ void runFrame() {
             const int pl = updatePointer(quads[0].pose, quads[0].size, pointerQuads);
             for (int i = 0; i < pl; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&pointerQuads[i];
         }
+    }
+    // 1.6: the eye switch (none in the diorama, the immersive mode, without the room or with a panel open)
+    if (s.frame.shouldRender) {
+        const int el = eyeSwitchLayers(screen ? eyeAnchor : 0, eyeAt, eyeQuads);
+        for (int i = 0; i < el; i++) layers[layerCount++] = (const XrCompositionLayerBaseHeader*)&eyeQuads[i];
     }
     // the settings panel over everything, in either mode, with the laser pointer; or, in the diorama,
     // a faint ray where a hand points at the HUD or the dialogues (a grip there takes them)
@@ -4611,6 +4899,25 @@ extern "C" void wq_xr_set_laser(bool on, float length) {
 
 extern "C" void wq_xr_set_bow_screen(bool on) {
     if (s_bowScreen.exchange(on) != on) xrlog("the bow on the screen: %s", on ? "its own 3D depth" : "over");
+}
+
+// 1.6: the eye switch's frames from the game (a size that differs from the frames before drops them: all four
+// come at the same size)
+extern "C" void wq_xr_set_eye_texture(int frame, const uint8_t* rgba, int w, int h) {
+    if (frame < 0 || frame > 3 || rgba == nullptr || w <= 0 || h <= 0 || w > 1024 || h > 1024) return;
+    std::lock_guard lock{s_eyeLock};
+    if (w != s_eyeW || h != s_eyeH) {
+        for (std::vector<uint8_t>& p : s_eyePixels) p.clear();
+        s_eyeW = w;
+        s_eyeH = h;
+    }
+    s_eyePixels[frame].assign(rgba, rgba + size_t(w) * size_t(h) * 4);
+    s_eyeDirty = true;
+}
+
+extern "C" int wq_xr_eye_presses(bool* opened) {
+    if (opened != nullptr) *opened = s_eyeOpened.load();
+    return s_eyePresses.load();
 }
 
 extern "C" void wq_xr_set_cine_screen(bool on) {

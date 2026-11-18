@@ -19,6 +19,24 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra con grip izquierdo + Y.
 
+### Novedades de la 1.6.1
+
+- **El ojo, centrado:** la textura del disco es solo una cuarta parte del ojo (el juego la repite en espejo), y
+  la 1.6 la mostraba sola, con la pupila arriba a la derecha. Ahora se monta el ojo entero, con la pupila en el
+  centro, justo donde apuntas.
+
+### Novedades de la 1.6
+
+- **Botón Passthrough en General:** la fila *Passthrough (tu habitación)* pasa de la pestaña Pantalla a General y
+  ahora vale para todos los modos (pantalla, ventana, maqueta y Techo abierto; el Inmersivo sigue tapando la
+  habitación). Apagado, alrededor se ve negro.
+- **Interruptor de ojo encima de la pantalla:** en Pantalla y en Ventana flota un
+  ojo encima de la pantalla gigante o de la ventana. Apunta con la mano derecha (sale el rayo y el punto rojo) y
+  pulsa el gatillo: el ojo se cierra y se abre el Techo abierto; otra vez, se reabre y el techo se cierra. Suena
+  como el interruptor del juego y un cofre al abrirse. El ojo se lee de tu propio disco; si no se puede, sale un botón genérico.
+- **Playa virtual:** con el passthrough apagado, el Techo abierto ya no deja ver tu habitación: las paredes
+  bajan, el suelo se abre y aparece una isla de arena y césped que se hunde en el mar.
+
 ### Novedades de la 1.5
 
 - **Quitarse el visor ya no cierra el juego:** al quitártelo (o si salta un aviso del sistema, como el permiso de
@@ -238,6 +256,12 @@ starts.
 
 Taking the headset off pauses the game (from 1.5); it goes on where it was when you put it back on. Closing the
 app from the headset's menu ends it; the game saves only when you save.
+
+New in 1.6: the *Passthrough (your room)* switch moves to the panel's General tab and rules every mode; an eye switch floats above the giant screen and the window (point the right hand at it and pull the trigger) and
+opens or closes the open roof; with passthrough off, the open roof becomes a virtual beach: the walls come down, the
+floor opens onto an island of sand and grass that sinks into the sea.
+
+New in 1.6.1: the eye switch is whole and centred (the disc's texture is a quarter of the eye, mirrored by the game).
 
 ### Credits
 

@@ -128,6 +128,12 @@ const Item kGeneral[] = {
      {"Pantalla, ventana, maqueta, o el mundo a tu alrededor", "Screen, window, diorama, or the world around you",
       "Écran 2D ou 3D, fenêtre, ou le monde en bulle"},
      kStepper, OPTS(kMode)},
+    // 1.6: here from the Pantalla tab, and for every mode but the immersive one (wq_xr.cpp updatePassthrough):
+    // off, black around the screen, the window and the bubble, and the open roof's virtual beach (wq_sky.cpp)
+    {kXr, "passthrough", {"Passthrough (tu habitación)", "Passthrough (your room)", "Passthrough (votre pièce)"},
+     {"Apagado: negro, o la playa con el techo abierto", "Off: black, or the beach with the open roof",
+      "Éteint : noir, ou la plage avec le toit ouvert"},
+     kSwitch},
     {kXr, "language", {"Idioma del panel", "Panel language", "Langue du panneau"},
      {"Este panel de ajustes", "This settings panel", "Ce panneau de réglages"}, kStepper, OPTS(kPanelLanguage)},
     {kGame, "COS_GAME_LANGUAGE", {"Idioma del juego", "Game language", "Langue du jeu"},
@@ -157,8 +163,6 @@ const Item kScreen[] = {
      {"Más = más cerca; o grip izq. + stick izq.", "More = closer; or left grip + left stick",
       "Plus = plus près ; ou grip gauche + stick gauche"},
      kStepper, nullptr, 0, -5.0f, 5.0f, 0.25f, "%+.2f m"},
-    {kXr, "passthrough", {"Tu habitación", "Your room", "Votre pièce"},
-     {"Alrededor de la pantalla gigante", "Around the giant screen", "Autour de l'écran géant"}, kSwitch},
     {kXr, "screen_frame", {"Marco", "Frame", "Cadre"},
      {"Cuero verde alrededor de la pantalla y la ventana", "Green leather around the screen and the window",
       "Cuir vert autour de l'écran et de la fenêtre"},

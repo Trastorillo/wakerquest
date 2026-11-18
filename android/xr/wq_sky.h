@@ -30,3 +30,11 @@ bool layer(XrSession session, XrSpace space, XrTime time, bool srgb, bool open, 
            XrCompositionLayerProjection* out, XrCompositionLayerProjectionView* views);
 
 }  // namespace wqs
+
+// 1.6: the virtual mode (passthrough off, the open roof on): the layer turns opaque, the room's walls, ceiling and
+// floor drawn in grey; the ceiling opens, the walls come down to the floor, the floor parts over an island in the
+// risen sea. Off: the same backwards, then the grey room fades out over the passthrough. Any thread.
+extern "C" void wq_sky_set_virtual(bool on);
+namespace wqs {
+using ::wq_sky_set_virtual;  // also as wqs::wq_sky_set_virtual, the same function
+}  // namespace wqs

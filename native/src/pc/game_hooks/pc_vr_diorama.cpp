@@ -51,6 +51,13 @@
 #include "d/d_kankyo_wether.h"
 #include "d/d_meter.h"
 #include "m_Do/m_Do_lib.h"
+// 1.6: the eye switch (eyeswitch below)
+#include "JSystem/J3DGraphAnimator/J3DAnimation.h"
+#include "JSystem/J3DGraphBase/J3DTexture.h"
+#include "JSystem/JUtility/JUTTexture.h"
+#include "SSystem/SComponent/c_phase.h"
+#include "m_Do/m_Do_audio.h"
+#include "res/Object/Hys.h"
 
 #include <algorithm>
 
@@ -62,6 +69,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <vector>
 #include <time.h>
 #include <unistd.h>
 
@@ -1442,6 +1450,218 @@ void roofWeather() {
     wq_xr_set_weather(total > 0 ? colors : nullptr, storm, e.mThunderEff.mFlashTimer, e.mCurTime);
 }
 
+// 1.6: the eye switch over the giant screen and the window (wq_xr.cpp, the open roof's switch). Its picture is the
+// game's own eye switch's (daHys_c, d_a_hys.cpp), from the player's disc: Hys.arc loaded as an actor loads it
+// (dComIfG_resLoad) once the game is in a stage, its model's textures that the BTP steps through (frames 0 open
+// to 3 closed) decoded from their GX format to RGBA8 here on the CPU and handed to the layer; then the arc is let
+// go (the layer keeps its copy). Without the arc, the layer's own generic button.
+namespace eyeswitch {
+
+uint16_t be16(const uint8_t* p) { return uint16_t(p[0] << 8 | p[1]); }
+
+void rgb565(uint16_t c, uint8_t* o) {
+    o[0] = uint8_t((c >> 11 & 0x1f) * 255 / 31);
+    o[1] = uint8_t((c >> 5 & 0x3f) * 255 / 63);
+    o[2] = uint8_t((c & 0x1f) * 255 / 31);
+    o[3] = 255;
+}
+
+void rgb5a3(uint16_t c, uint8_t* o) {
+    if (c & 0x8000) {
+        o[0] = uint8_t((c >> 10 & 0x1f) * 255 / 31);
+        o[1] = uint8_t((c >> 5 & 0x1f) * 255 / 31);
+        o[2] = uint8_t((c & 0x1f) * 255 / 31);
+        o[3] = 255;
+    } else {
+        o[0] = uint8_t((c >> 8 & 0xf) * 17);
+        o[1] = uint8_t((c >> 4 & 0xf) * 17);
+        o[2] = uint8_t((c & 0xf) * 17);
+        o[3] = uint8_t((c >> 12 & 0x7) * 255 / 7);
+    }
+}
+
+// a palette entry (ResTIMG colorFormat: 0 IA8, 1 RGB565, 2 RGB5A3)
+void tlutColor(const uint8_t* pal, int fmt, int count, int i, uint8_t* o) {
+    if (i >= count) i = 0;
+    const uint16_t c = be16(pal + 2 * i);
+    if (fmt == 1)
+        rgb565(c, o);
+    else if (fmt == 2)
+        rgb5a3(c, o);
+    else
+        o[0] = o[1] = o[2] = uint8_t(c & 0xff), o[3] = uint8_t(c >> 8);
+}
+
+// The first level of a GX texture (the disc's layout: tiles, big-endian) as RGBA8, w x h; false for a format
+// it does not know. I4, I8, IA4, IA8, RGB565, RGB5A3, RGBA8, C4, C8, C14X2 and CMPR.
+bool decode(const ResTIMG* t, std::vector<uint8_t>& out, int* w, int* h) {
+    const int fmt = t->format, tw = t->width, th = t->height;
+    if (tw <= 0 || th <= 0 || tw > 1024 || th > 1024) return false;
+    const uint8_t* src = (const uint8_t*)t + uint32_t(t->imageOffset);
+    const uint8_t* pal = (const uint8_t*)t + uint32_t(t->paletteOffset);
+    const int palFmt = t->colorFormat, palCount = t->numColors;
+    int bw, bh, bpb;  // a tile's size and its bytes
+    switch (fmt) {
+    case 0: bw = 8, bh = 8, bpb = 32; break;      // I4
+    case 1: bw = 8, bh = 4, bpb = 32; break;      // I8
+    case 2: bw = 8, bh = 4, bpb = 32; break;      // IA4
+    case 3: bw = 4, bh = 4, bpb = 32; break;      // IA8
+    case 4: bw = 4, bh = 4, bpb = 32; break;      // RGB565
+    case 5: bw = 4, bh = 4, bpb = 32; break;      // RGB5A3
+    case 6: bw = 4, bh = 4, bpb = 64; break;      // RGBA8
+    case 8: bw = 8, bh = 8, bpb = 32; break;      // C4
+    case 9: bw = 8, bh = 4, bpb = 32; break;      // C8
+    case 10: bw = 4, bh = 4, bpb = 32; break;     // C14X2
+    case 14: bw = 8, bh = 8, bpb = 32; break;     // CMPR
+    default: return false;
+    }
+    if ((fmt == 8 || fmt == 9 || fmt == 10) && (t->paletteOffset == 0 || palCount == 0)) return false;
+    out.assign(size_t(tw) * th * 4, 0);
+    const int tilesX = (tw + bw - 1) / bw, tilesY = (th + bh - 1) / bh;
+    for (int ty = 0; ty < tilesY; ty++)
+        for (int tx = 0; tx < tilesX; tx++) {
+            const uint8_t* b = src + size_t(ty * tilesX + tx) * bpb;
+            for (int py = 0; py < bh; py++)
+                for (int px = 0; px < bw; px++) {
+                    const int x = tx * bw + px, y = ty * bh + py;
+                    uint8_t c[4] = {0, 0, 0, 0};
+                    const int i = py * bw + px;
+                    switch (fmt) {
+                    case 0: {
+                        const uint8_t v = uint8_t((b[i >> 1] >> ((i & 1) ? 0 : 4) & 0xf) * 17);
+                        c[0] = c[1] = c[2] = c[3] = v;
+                        break;
+                    }
+                    case 1: c[0] = c[1] = c[2] = c[3] = b[i]; break;
+                    case 2:
+                        c[0] = c[1] = c[2] = uint8_t((b[i] & 0xf) * 17);
+                        c[3] = uint8_t((b[i] >> 4) * 17);
+                        break;
+                    case 3: c[0] = c[1] = c[2] = b[2 * i + 1], c[3] = b[2 * i]; break;
+                    case 4: rgb565(be16(b + 2 * i), c); break;
+                    case 5: rgb5a3(be16(b + 2 * i), c); break;
+                    case 6:  // AR pairs, then GB pairs
+                        c[3] = b[2 * i], c[0] = b[2 * i + 1], c[1] = b[32 + 2 * i], c[2] = b[32 + 2 * i + 1];
+                        break;
+                    case 8: tlutColor(pal, palFmt, palCount, b[i >> 1] >> ((i & 1) ? 0 : 4) & 0xf, c); break;
+                    case 9: tlutColor(pal, palFmt, palCount, b[i], c); break;
+                    case 10: tlutColor(pal, palFmt, palCount, be16(b + 2 * i) & 0x3fff, c); break;
+                    case 14: {
+                        // four 4x4 DXT1 blocks, big-endian, in Z order
+                        const uint8_t* d = b + ((py >> 2) * 2 + (px >> 2)) * 8;
+                        const uint16_t c0 = be16(d), c1 = be16(d + 2);
+                        uint8_t p[4][4];
+                        rgb565(c0, p[0]);
+                        rgb565(c1, p[1]);
+                        for (int k = 0; k < 3; k++) {
+                            if (c0 > c1) {
+                                p[2][k] = uint8_t((2 * p[0][k] + p[1][k]) / 3);
+                                p[3][k] = uint8_t((p[0][k] + 2 * p[1][k]) / 3);
+                            } else {
+                                p[2][k] = uint8_t((p[0][k] + p[1][k]) / 2);
+                                p[3][k] = 0;
+                            }
+                        }
+                        p[2][3] = 255;
+                        p[3][3] = c0 > c1 ? 255 : 0;
+                        const int sel = d[4 + (py & 3)] >> (6 - 2 * (px & 3)) & 3;
+                        memcpy(c, p[sel], 4);
+                        break;
+                    }
+                    }
+                    if (x < tw && y < th) memcpy(&out[(size_t(y) * tw + x) * 4], c, 4);
+                }
+        }
+    *w = tw;
+    *h = th;
+    return true;
+}
+
+request_of_phase_process_class sPhase{};
+int sState = 0;  // 0 not asked, 1 loading, 2 handed to the layer, -1 failed (the generic button stays)
+int sPresses = -1;
+
+// The game thread, every frame of a stage: loads the arc, then hands the frames to the layer
+void load() {
+    if (sState == 0) sState = 1;
+    if (sState != 1) return;
+    const cPhs_State st = dComIfG_resLoad(&sPhase, "Hys");
+    if (st == cPhs_ERROR_e) {
+        sState = -1;
+        pc::writef(STDERR_FILENO, "[vr] eye switch: Hys.arc not loaded, the generic button stays\n");
+        return;
+    }
+    if (st != cPhs_COMPLEATE_e) return;
+    sState = -1;
+    J3DModelData* model = (J3DModelData*)dComIfG_getObjectRes("Hys", dRes_INDEX_HYS_BDL_HYS_e);
+    J3DAnmTexPattern* btp = (J3DAnmTexPattern*)dComIfG_getObjectRes("Hys", dRes_INDEX_HYS_BTP_HYS_e);
+    J3DTexture* tex = model != nullptr ? model->getTexture() : nullptr;
+    if (tex != nullptr && tex->getNum() > 0) {
+        int sent = 0;
+        const f32 was = btp != nullptr ? btp->getFrame() : 0.0f;
+        for (int f = 0; f < 4; f++) {
+            u16 no = 0;
+            if (btp != nullptr && btp->getUpdateMaterialNum() > 0) {
+                btp->setFrame(f32(f));
+                btp->getTexNo(0, &no);
+            }
+            if (no >= tex->getNum()) no = 0;
+            const ResTIMG* t = tex->getResTIMG(no);
+            std::vector<uint8_t> rgba;
+            int w = 0, h = 0;
+            if (t != nullptr && decode(t, rgba, &w, &h)) {
+                // 1.6.1: the eye's texture is a quarter of it, the pupil at its top right corner; the model
+                // shows it mirrored on both axes (wrap S and T: mirror). The whole eye, 2w x 2h, its pupil in
+                // the middle: each quarter the texture flipped toward that corner.
+                if (t->wrapS == GX_MIRROR && t->wrapT == GX_MIRROR) {
+                    std::vector<uint8_t> whole(size_t(4) * w * h * 4);
+                    for (int y = 0; y < 2 * h; y++)
+                        for (int x = 0; x < 2 * w; x++) {
+                            const int sx = x < w ? x : 2 * w - 1 - x;
+                            const int sy = y < h ? h - 1 - y : y - h;
+                            memcpy(&whole[(size_t(y) * 2 * w + x) * 4], &rgba[(size_t(sy) * w + sx) * 4], 4);
+                        }
+                    rgba.swap(whole);
+                    w *= 2;
+                    h *= 2;
+                }
+                wq_xr_set_eye_texture(f, rgba.data(), w, h);
+                if (f == 0)
+                    pc::writef(STDERR_FILENO, "[vr] eye switch: texture %d, GX format %d, %dx%d (palette %d)\n",
+                               (int)no, (int)t->format, w, h, t->indexTexture ? (int)t->colorFormat : -1);
+                sent++;
+            }
+        }
+        if (btp != nullptr) btp->setFrame(was);  // (the game's own: its actors set it before each use)
+        if (sent == 4) {
+            sState = 2;
+            pc::writef(STDERR_FILENO, "[vr] eye switch: the game's eye, 4 frames\n");
+        } else {
+            pc::writef(STDERR_FILENO, "[vr] eye switch: %d of 4 frames decoded, the generic button stays\n", sent);
+        }
+    }
+    dComIfG_resDelete(&sPhase, "Hys");  // the layer has its copy: the arc as before (an actor's while one uses it)
+}
+
+// The game thread, every frame: the eye's sounds, as the game's switch and a chest opening (no fanfare)
+void sounds() {
+    bool opened = false;
+    const int presses = wq_xr_eye_presses(&opened);
+    if (sPresses < 0 || !mDoAud_zelAudio_c::isInitFlag()) {
+        sPresses = presses;
+        return;
+    }
+    if (presses == sPresses) return;
+    sPresses = presses;
+    mDoAud_seStart(JA_SE_OBJ_ARROW_SW_ON, NULL, 0);
+    if (opened) {
+        mDoAud_seStart(JA_SE_OBJ_TBOX_OPEN_S1, NULL, 0);
+        mDoAud_seStart(JA_SE_OBJ_TBOX_UNLOCK, NULL, 0);
+    }
+}
+
+}  // namespace eyeswitch
+
 bool pc_vr_view_begin(view_class* view) {
     s.on = false;
     sSeeOn = sClipOn = sPopClipOn = false;
@@ -1450,6 +1670,9 @@ bool pc_vr_view_begin(view_class* view) {
     if (table.roofOpen) roofWeather();
     WqXrHead head;
     fopAc_ac_c* player = dComIfGp_getPlayer(0);
+    // 1.6: the eye switch over the screen (wq_xr.cpp): its picture once the game is in a stage, and its sounds
+    if (player != nullptr) eyeswitch::load();
+    eyeswitch::sounds();
     // the game's own first-person views, which the model cannot show: the giant screen meanwhile
     // (auto_screen): the telescope (the item, or the scope of an event), looking around, the picto box,
     // aiming the bow, the hookshot, the boomerang and the grappling hook

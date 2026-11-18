@@ -175,6 +175,13 @@ void wq_xr_set_bow_screen(bool on);
 void wq_xr_set_weather(const float* colors, float storm, float flash, float daytime);
 // The open roof's sea (1.2.12): every frame outdoors, the colour of the game's sea (RGB, 0-255).
 void wq_xr_set_sea_color(const float* color);
+// 1.6: the eye switch over the giant screen and the window, which opens and closes the roof (roof_open). The game
+// thread (pc_vr_diorama.cpp), once: one frame of its picture, 0 open to 3 closed, as RGBA8 (w x h, rows from the
+// top); the layer copies it and shows it on its quad (until then, and without the game's, a generic button).
+void wq_xr_set_eye_texture(int frame, const uint8_t* rgba, int w, int h);
+// The eye's presses so far (the layer adds one each time the right hand's trigger presses it), and whether the
+// last one opened the roof: the game thread compares it every frame and plays the switch's sounds.
+int wq_xr_eye_presses(bool* opened);
 // The options menu (pc_menu.cpp), every frame: open, ImGui's display size (the pointer's coordinates)
 // and whether the pointer is over something it can press.
 void wq_xr_menu_state(bool open, float width, float height, bool hovered);
