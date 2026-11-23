@@ -383,6 +383,12 @@ const Item kPerformance[] = {
      {"Si aun así no llega, baja la resolución", "If it still cannot keep up, a lower resolution",
       "Si ça ne suit toujours pas, baisse la résolution"},
      kSwitch},
+    // rama reproyeccion (wq_reproj.cpp): the window's, the model's and the immersive mode's eyes drawn again at every
+    // headset frame for where the eyes are now, with the game's depth
+    {kXr, "reprojection", {"Reproyección", "Reprojection", "Reprojection"},
+     {"Lo cercano no salta al mover la cabeza", "Near things do not jump as the head moves",
+      "Le proche ne saute plus en bougeant la tête"},
+     kSwitch},
     {kXr, "npc_draw_distance", {"Distancia de personajes", "Character distance", "Distance des personnages"},
      {"Más lejos no se dibujan; menos = más fluido", "Farther ones are not drawn; less = smoother",
       "Plus loin, non dessinés ; moins = plus fluide"},

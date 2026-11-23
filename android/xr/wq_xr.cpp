@@ -32,10 +32,12 @@
 #include "wq_xr.h"
 #include "wq_panel.h"
 #include "wq_sky.h"
+#include "wq_reproj.h"
 
 #include <aurora/xr.h>
 
 extern "C" __attribute__((noreturn)) void pc_exit(int code);  // native/include/pc/pc_harness.h
+extern "C" void COSAISetPaused(bool paused);                  // native/sdk/include/cos_sdk/audio.h
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -259,6 +261,13 @@ struct Settings {
     float windowPopoutSpecial = 1.8f;  // m
     float windowFade = 0.03f;     // m, the pop-out front's fade (the sides end sharp at the frame: 1.0.8)
     bool windowVignette = false;  // a comfort vignette when the camera moves fast (not done yet)
+    // rama reproyeccion: the window's, the model's and the immersive mode's eyes drawn again at every headset frame
+    // for where the eyes are now, with Aurora's depth (wq_reproj.cpp). 0 off (as before), 1 on (the eyes' position
+    // now), 2 on (the eyes' whole pose and frustum now)
+    int reprojection = 1;
+    // reprojection_refine: each pixel along its line of sight in the depth (wq_reproj.cpp); 0 off, 2 the pixels that
+    // did not converge in magenta
+    int reprojectionRefine = 0;
 };
 
 const char kDefaultSettings[] =
@@ -444,7 +453,14 @@ const char kDefaultSettings[] =
     "ambient_move = 1\n"
     "# ambient_anchor = world: anchored in the room around Link, not turning with the game camera; camera: as\n"
     "# the camera sees it (lined up with the screen's picture, moving with the camera).\n"
-    "ambient_anchor = world\n";
+    "ambient_anchor = world\n"
+    "# reprojection 1 = the window, the model and the immersive mode drawn again at every headset frame for where\n"
+    "# the eyes are now, with the game's depth (near things no longer jump at 30 Hz as the head moves); 0 = off.\n"
+    "reprojection = 1\n"
+    "# reprojection_refine 1 = each pixel found along its line of sight in the game's depth (sharp edges); 0 = the\n"
+    "# grid's alone; 2 = as 1, the pixels it could not settle painted magenta; 3 = as 1, the depth shown over the\n"
+    "# picture (grey, near light: it must sit on its objects) (tests).\n"
+    "reprojection_refine = 0\n";
 
 // The Rendimiento presets (perf_preset): the keys each sets when chosen, in xr.ini's form.
 const char* const kPresetNames[] = {"personal", "ahorro", "equilibrado", "maximo"};
@@ -595,6 +611,8 @@ void applySetting(Settings& s, const char* key, const char* v) {
     else if (!strcmp(key, "window_popout_special")) s.windowPopoutSpecial = clampf(f, 0.0f, 5.0f);
     else if (!strcmp(key, "window_fade")) s.windowFade = clampf(f, 0.0f, 0.5f);
     else if (!strcmp(key, "window_vignette")) s.windowVignette = on;
+    else if (!strcmp(key, "reprojection")) s.reprojection = !on ? 0 : f >= 2.0f ? 2 : 1;
+    else if (!strcmp(key, "reprojection_refine")) s.reprojectionRefine = !on ? 0 : f >= 3.0f ? 3 : f >= 2.0f ? 2 : 1;
     else if (!strcmp(key, "window_hud_scale")) s.windowHudScale = clampf(f, 0.2f, 5.0f);
     else if (!strcmp(key, "window_hud_move")) s.windowHudMove = on;
     else if (!strcmp(key, "window_hud_pose")) {
@@ -804,6 +822,8 @@ std::string settingValue(const Settings& s, const char* key) {
     if (!strcmp(key, "window_popout_special")) return num(s.windowPopoutSpecial);
     if (!strcmp(key, "window_fade")) return num(s.windowFade);
     if (!strcmp(key, "window_vignette")) return flag(s.windowVignette);
+    if (!strcmp(key, "reprojection")) return s.reprojection == 2 ? "2" : flag(s.reprojection > 0);
+    if (!strcmp(key, "reprojection_refine")) return s.reprojectionRefine >= 2 ? std::to_string(s.reprojectionRefine) : flag(s.reprojectionRefine > 0);
     return std::string();
 }
 
@@ -1023,6 +1043,11 @@ struct HeadSnap {
     bool windowFrame = false;
     bool fitted = false;
     float fit[4] = {0, 0, 0, 0};
+    // reprojection (wq_reproj.cpp): the frame was drawn through the window with its mask (a window's frame, not the
+    // immersive mode's), and the window then: its pose and half size (metres), as the game had them
+    bool windowMask = false;
+    XrPosef windowAt{};
+    float windowHalf[2] = {0.0f, 0.0f};
 };
 std::mutex s_shared;
 Settings s_sharedSettings;
@@ -1084,6 +1109,16 @@ uint64_t monotonicNs() {
 }
 float s_stereoApplied[3] = {-1.0f, 0.0f, 0.0f};  // the screen's 3D as last given to Aurora: on, strength, focus
 bool s_refreshDirty = false;               // the refresh rate changed while running
+
+// 2.0: before the layer ends the game (the app closed, the session or the instance lost): the sound off at once,
+// and the process ended in 2 s even if pc_exit waits on something (a game thread or Aurora blocked)
+void quitGuard() {
+    COSAISetPaused(true);
+    std::thread([] {
+        usleep(2000 * 1000);
+        _exit(0);
+    }).detach();
+}
 
 void readSettings(bool force) {
     const time_t now = time(nullptr);
@@ -1852,7 +1887,10 @@ void pollEvents() {
                     }
                     xrlog("session running; Aurora presents to the headset (device support %s)",
                           aurora_xr_present_supported() ? "yes" : "not yet known or no");
-                    if (s_paused.exchange(false)) xrlog("session running again: resumed");
+                    if (s_paused.exchange(false)) {
+                        COSAISetPaused(false);  // (the game thread's headsetPause does the same as it resumes)
+                        xrlog("session running again: resumed");
+                    }
                     // 1.5: the first time, the panel's combination on the size label for 5 s
                     static bool hinted = false;
                     if (!hinted) {
@@ -1862,6 +1900,7 @@ void pollEvents() {
                     }
                 } else if (s_paused.exchange(false)) {
                     // 1.5: no session to go back to: the game goes on rather than wait for ever
+                    COSAISetPaused(false);
                     xrlog("session could not begin again: the game no longer paused");
                 }
                 break;
@@ -1882,6 +1921,9 @@ void pollEvents() {
                     s_sharedRunning = false;
                 }
                 s_paused.store(true);
+                // 2.0: the sound held from here, not only once the game thread reaches its pause (headsetPause):
+                // a game frame waiting on the window that cannot present no longer keeps it playing
+                COSAISetPaused(true);
                 xrlog("session stopping: paused");
                 break;
             case XR_SESSION_STATE_EXITING:
@@ -1894,6 +1936,7 @@ void pollEvents() {
                 s.running = false;
                 s.exiting = true;
                 xrlog("session %s: the game ends", sc.state == XR_SESSION_STATE_EXITING ? "exiting" : "lost");
+                quitGuard();
                 pc_exit(0);
             default:
                 break;
@@ -1908,6 +1951,7 @@ void pollEvents() {
             s.running = false;
             s.exiting = true;
             xrlog("instance loss pending: the game ends");
+            quitGuard();
             pc_exit(0);
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
@@ -3861,10 +3905,13 @@ bool copyNewestFrame() {
         // buffers) whatever it hands out; released once the copy is submitted (textureFor and the
         // EGL image hold theirs)
         AHardwareBuffer_acquire(s.heldFrame.buffer);
+        // the eyes' depth (Aurora patch 0042; only while reprojection asks for it): the same, released with it
+        if (s.heldFrame.depth != nullptr) AHardwareBuffer_acquire(s.heldFrame.depth);
         s.held = true;
         s.heldSinceNs = monotonicNs();
     }
-    if (!fenceSignaled(s.heldFrame.syncFd)) {
+    // (the eyes' depth's too, Aurora patch 0042: -1 without it, signaled at once)
+    if (!fenceSignaled(s.heldFrame.syncFd) || !fenceSignaled(s.heldFrame.depthSyncFd)) {
         s.framesHeld++;
         return s.haveScreen;  // still rendering: the last picture meanwhile
     }
@@ -3887,6 +3934,25 @@ bool copyNewestFrame() {
             glFinish();
         }
     }
+    // reprojection (wq_reproj.cpp): a diorama frame with both eyes and their depth (Aurora patch 0042) keeps them;
+    // the depth's sync file waited for as the colour's (the same submit wrote both). Without it, nothing of this.
+    const bool reprojFrame = f.depth != nullptr && wqr::mode() > 0 && f.diorama && f.sideBySide && f.stereo && f.hud;
+    if (f.depthSyncFd >= 0) {
+        if (reprojFrame) {
+            const EGLint attr[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID, f.depthSyncFd, EGL_NONE};
+            EGLSyncKHR fence = s.createSync(s.display, EGL_SYNC_NATIVE_FENCE_ANDROID, attr);
+            if (fence != EGL_NO_SYNC_KHR) {
+                s.waitSync(s.display, fence, 0);
+                s.destroySync(s.display, fence);
+            } else {
+                close(f.depthSyncFd);
+                glFinish();
+            }
+        } else {
+            close(f.depthSyncFd);
+        }
+    }
+    bool reprojCaptured = false;
     const GLuint tex = textureFor(f.buffer);
     bool copied = false;
     if (tex && ensureSwapchain(f.width, f.height)) {
@@ -3912,6 +3978,18 @@ bool copyNewestFrame() {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, tex);
             glDrawArrays(GL_TRIANGLES, 0, 3);
+            if (reprojFrame) {
+                // the eyes (the buffer's first two parts) again into the reprojection's own copy, with the same
+                // program and uniforms, so it has them as the swapchain does; then the depth, texel for texel
+                const uint32_t parts = (f.hud ? 3 : 2) + (f.ambient ? 2 : 0);
+                if (wqr::beginColor(f.width, f.height, f.width / parts, s.srgb)) {
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, tex);  // (beginColor may have bound its own while making it)
+                    glDrawArrays(GL_TRIANGLES, 0, 3);
+                    wqr::captureDepth(f.depth, f.depthWidth, f.depthHeight);
+                    reprojCaptured = true;
+                }
+            }
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             XrSwapchainImageReleaseInfo rel{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
             xrReleaseSwapchainImage(s.swapchain, &rel);
@@ -3921,6 +3999,7 @@ bool copyNewestFrame() {
     s.pendingRead = s.createSync(s.display, EGL_SYNC_FENCE_KHR, nullptr);
     glFlush();
     AHardwareBuffer_release(f.buffer);  // the hold's reference (above)
+    if (f.depth != nullptr) AHardwareBuffer_release(f.depth);  // (the depth's too)
     if (s.pendingRead == EGL_NO_SYNC_KHR) {
         glFinish();
         aurora_xr_present_done();
@@ -3936,6 +4015,19 @@ bool copyNewestFrame() {
         s.hudFrame = f.hud;
         if (f.ambient != s.ambientFrame) xrlog("picture: %s", f.ambient ? "with the room's ambience" : "no ambience");
         s.ambientFrame = f.ambient;
+        // reprojection: this frame's eyes and depth kept (or none: it is shown as before), with the eyes' poses and
+        // the frustum it was drawn for, taken now (its own tag only: never the newest pose in its place)
+        if (wqr::mode() > 0) {
+            HeadSnap h;
+            const bool known = reprojCaptured && headForTag(f.tag, h) && h.head.tag == f.tag;
+            const XrFovf fov = !known   ? XrFovf{}
+                               : h.fitted ? XrFovf{std::atan(h.fit[0]), std::atan(h.fit[1]), std::atan(h.fit[3]),
+                                                 std::atan(h.fit[2])}
+                                          : XrFovf{std::atan(h.head.tanLeft), std::atan(h.head.tanRight),
+                                                   std::atan(h.head.tanUp), std::atan(h.head.tanDown)};
+            wqr::commit(known, f.tag, known ? h.eyes : nullptr, fov, known && h.windowMask ? &h.windowAt : nullptr,
+                        h.windowHalf[0], h.windowHalf[1]);
+        }
         s.haveScreen = true;
         s_framesShown.store(++s.frames, std::memory_order_relaxed);
         if (s.frames == 1 || s.frames % 600 == 0) {
@@ -4255,6 +4347,7 @@ void runFrame() {
         s_refreshDirty = false;
         setRefreshRate();
     }
+    wqr::configure(s.session, s.settings.reprojection, s.settings.reprojectionRefine);  // (only acts when it changes)
     updatePerformance();
     pollGpuBusy();
     updateScreenStereo();
@@ -4348,13 +4441,22 @@ void runFrame() {
                                         std::atan(drawnFor.fit[2])}
                                : XrFovf{std::atan(drawnFor.head.tanLeft), std::atan(drawnFor.head.tanRight),
                                         std::atan(drawnFor.head.tanUp), std::atan(drawnFor.head.tanDown)};
-        for (int eye = 0; eye < 2; eye++) {
-            projViews[eye].pose = drawnFor.eyes[eye];
-            projViews[eye].fov = fov;
-            projViews[eye].subImage.swapchain = s.swapchain;
-            // a flat frame (a menu open) has the left eye's picture only, for both
-            const int src = s.stereoFrame ? eye : 0;
-            projViews[eye].subImage.imageRect = {{src * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+        // reprojection (xr.ini reprojection, wq_reproj.cpp): the eyes drawn again for where they are now, from this
+        // frame's eyes and depth, into its own swapchain; when it cannot (off, or no depth with this frame), as before
+        // (whether the frame is a window's is its own, kept with it: here only where the window stands now, for the
+        // mask done again for the eye now)
+        const XrPosef reprojWindowAt = windowPose(s.settings);
+        if (!(s.settings.reprojection > 0 &&
+              wqr::render(s.session, s.space, s.frame.predictedDisplayTime, s.frameTag, s.srgb, &reprojWindowAt,
+                          0.5f * s.settings.windowWidth, 0.5f * s.settings.windowWidth * 9.0f / 16.0f, projViews))) {
+            for (int eye = 0; eye < 2; eye++) {
+                projViews[eye].pose = drawnFor.eyes[eye];
+                projViews[eye].fov = fov;
+                projViews[eye].subImage.swapchain = s.swapchain;
+                // a flat frame (a menu open) has the left eye's picture only, for both
+                const int src = s.stereoFrame ? eye : 0;
+                projViews[eye].subImage.imageRect = {{src * eyeW, 0}, {eyeW, int32_t(s.screenH)}};
+            }
         }
         proj.space = s.space;
         proj.viewCount = 2;
@@ -4707,6 +4809,7 @@ void threadMain() {
         aurora_xr_present_enable(false);
         return;
     }
+    wqr::init({s.display, s.createImage, s.destroyImage, s.nativeClientBuffer, s.imageTargetTexture});
     wqp::init({hostGet, hostSet, hostResetPosition, hostResetPanels, hostInfo, hostCheckUpdate}, s.session, s.srgb);
     s.panelReady = true;
     xrlog("headset layer ready; waiting for the session");
@@ -4952,6 +5055,11 @@ extern "C" void wq_xr_set_frame_view(uint32_t tag, bool window, const float* tan
     HeadSnap& h = s_heads[tag % kHeadHistory];
     if (tag == 0 || h.head.tag != tag) return;
     h.windowFrame = window;
+    // (the settings the game drew this frame with: wq_xr_table reads the same, under the same lock)
+    h.windowMask = window && !s_sharedSettings.immersive;
+    h.windowAt = windowPose(s_sharedSettings);
+    h.windowHalf[0] = 0.5f * s_sharedSettings.windowWidth;
+    h.windowHalf[1] = 0.5f * s_sharedSettings.windowWidth * 9.0f / 16.0f;
     h.fitted = tangents != nullptr;
     if (tangents != nullptr) memcpy(h.fit, tangents, sizeof h.fit);
 }

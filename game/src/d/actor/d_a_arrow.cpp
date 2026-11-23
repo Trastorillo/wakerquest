@@ -14,6 +14,9 @@
 #include "d/d_jnt_hit.h"
 #include "d/d_s_play.h"
 #include "res/Object/Link.h"
+#if TARGET_PC
+#include "d/actor/d_a_npc_hr.h"
+#endif
 
 s16 daArrow_c::m_count;
 
@@ -619,9 +622,37 @@ BOOL daArrow_c::procWait() {
     return TRUE;
 }
 
+#if TARGET_PC
+// Aim help for one fight only: Cyclos in his tornado (daNpc_Hr in the RT_ANGRY state, where three arrows
+// win the Ballad of Gales). An arrow flying roughly towards him (within ~70 degrees) is steered straight at
+// the middle of his body every frame, keeping its speed, so a rough aim with the hand's laser is enough.
+static void pcArrowAimHelpHr(fopAc_ac_c* arrow) {
+    fopAc_ac_c* actor;
+    if (!fopAcM_SearchByName(fpcNm_NPC_HR_e, &actor) || actor == NULL) return;
+    daNpc_Hr_c* hr = (daNpc_Hr_c*)actor;
+    if (hr->mState != daNpc_Hr_c::HR_STATE_RT_ANGRY || hr->mHitDelayTimer != 0) return;
+    cXyz target = hr->current.pos;
+    target.y += hr->scale.y * 50.0f;  // the middle of mCyl (height 100 * scale)
+    cXyz to = target - arrow->current.pos;
+    const f32 dist = to.abs();
+    const f32 vel = arrow->speed.abs();
+    if (dist < 1.0f || vel < 1.0f) return;
+    const f32 cosAngle = to.inprod(arrow->speed) / (dist * vel);
+    if (cosAngle < 0.34f) return;
+    arrow->speed = to * (vel / dist);
+    arrow->current.angle.y = cM_atan2s(arrow->speed.x, arrow->speed.z);
+    arrow->current.angle.x = cM_atan2s(arrow->speed.y, arrow->speed.absXZ());
+    arrow->shape_angle.y = arrow->current.angle.y;
+    arrow->shape_angle.x = -arrow->current.angle.x;
+}
+#endif
+
 /* 800D5B20-800D6BF4       .text procMove__9daArrow_cFv */
 BOOL daArrow_c::procMove() {
     speedF = 100.0f;
+#if TARGET_PC
+    pcArrowAimHelpHr(this);
+#endif
     current.pos += speed;
     cXyz quarterStepPos = current.pos + speed*0.25f;
     mLinChk.Set(&old.pos, &quarterStepPos, this);

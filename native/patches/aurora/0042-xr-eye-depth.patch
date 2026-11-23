@@ -1,0 +1,677 @@
+XR eye depth: the eyes' linear depth for the XR layer's reprojection (aurora_xr_set_eye_depth)
+
+WakerQuest (rama reproyeccion). While the XR layer asks for it, each diorama frame (the diorama, the window,
+the immersive mode) also carries its eyes' depth in an AHardwareBuffer of its own (AuroraXrFrame.depth), in the
+colour's slot, written by the same submit and handed over with the same take/done and its own sync file. Each eye's
+depth is written right after its mask (the EFB depth still its own), at half size, as the inverse of the distance
+along the eye's view axis in metres of the room (the head's space, through the eye's own clip matrix), 16 bits over
+R and G; 0 where nothing was drawn (infinitely far). Off by default: nothing drawn nor allocated while off.
+
+diff --git a/include/aurora/xr.h b/include/aurora/xr.h
+--- a/include/aurora/xr.h
++++ b/include/aurora/xr.h
+@@ -45,8 +45,31 @@ typedef struct AuroraXrFrame {
+    * `tag` with the head's frustum, its alpha (straight) 0 where the screen is and fading away from it,
+    * for a projection layer over the screen. Each of these is as wide as the screen's eye. */
+   bool ambient;
++  /* Patch 0042: the eyes' depth, for the XR layer's reprojection (only while aurora_xr_set_eye_depth is on,
++   * and only on a diorama frame with both eyes: the diorama, the window, the immersive mode; NULL
++   * otherwise). R8G8B8A8_UNORM, GPU_COLOR_OUTPUT | GPU_SAMPLED_IMAGE, depthWidth x depthHeight: the left
++   * eye's half and the right eye's, each half of the eye's picture a side (row 0 the top, as the picture).
++   * Each texel: the inverse of the distance along the eye's view axis (the eye's -z, in metres of the
++   * room: the head's space the frame was drawn in, for the head pose `tag`), as
++   *   v = (R * 255 * 256 + G * 255) / 65535,  1 / distance = v / AURORA_XR_DEPTH_REF
++   * so v 1 is AURORA_XR_DEPTH_REF metres (or nearer) and v 0 is nothing drawn there (no data: taken as
++   * infinitely far). B 0; A 1 where drawn. Read it texel by texel (unfiltered). Written by the same GPU
++   * work as `buffer` (the same submit): depthSyncFd (or -1; the caller owns it) signals when it is done,
++   * and it lives in the same slot as `buffer`: not written again until aurora_xr_present_done, Aurora
++   * keeping its reference while the slot exists (a consumer that keeps it longer acquires its own). */
++  AHardwareBuffer* depth;
++  int depthSyncFd;
++  uint32_t depthWidth;
++  uint32_t depthHeight;
+ } AuroraXrFrame;
+ 
++/* Patch 0042: the distance (metres) that the depth's v = 1 stands for (see AuroraXrFrame.depth). */
++#define AURORA_XR_DEPTH_REF 0.05f
++
++/* Patch 0042, any thread: whether diorama frames also carry the eyes' depth (AuroraXrFrame.depth), from the
++ * next frame. Off by default; while off nothing of it is drawn or allocated (and its buffers are dropped). */
++void aurora_xr_set_eye_depth(bool enable);
++
+ /* Patch 0026, from the game thread with the frame info: the diorama's table for the eyes' mask.
+  * tableFromHead (row-major 3x4) maps the head's space (metres, the eyes' midpoint) to the table's:
+  * x and z within +-1 over its top, y 0 on it and -1 at the cut below; proj is the frustum both eyes
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -507,6 +507,15 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+         }
+       }
+       pass.End();
++      // patch 0042: the eyes' depth (drawn only while the XR layer asks for it) into the frame's own depth
++      // buffer, in the same slot and the same submit as the colour (include/aurora/xr.h, AuroraXrFrame.depth)
++      if (gfx::stereo::eye_depth_ready()) {
++        uint32_t depthW = 0, depthH = 0;
++        gfx::stereo::eye_depth_size(depthW, depthH);
++        if (const auto depthView = webgpu::xr_present::begin_depth(2 * depthW, depthH)) {
++          gfx::stereo::copy_eye_depth(encoder, depthView);
++        }
++      }
+     } else if (canPresent && xrFrame && xrAmbient) {
+       // patch 0034: the screen's picture (the left eye's copy, then the right's in stereo), then the
+       // ambience's eyes stretched over theirs with their alpha
+diff --git a/lib/gfx/stereo.cpp b/lib/gfx/stereo.cpp
+--- a/lib/gfx/stereo.cpp
++++ b/lib/gfx/stereo.cpp
+@@ -7,6 +7,8 @@
+ #include "../webgpu/xr_present.hpp"
+ #include "../internal.hpp"
+ 
++#include <aurora/xr.h>  // patch 0042: AURORA_XR_DEPTH_REF
++
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -40,6 +42,15 @@ webgpu::TextureWithSampler g_masked[2];
+ wgpu::RenderPipeline g_maskPipeline;
+ wgpu::BindGroupLayout g_maskLayout;
+ wgpu::Buffer g_maskUniform[2];
++// patch 0042: the eyes' depth for the XR layer (both eyes side by side, half size), the pass that writes it
++// after each eye's mask and the copy into the frame's depth buffer
++webgpu::TextureWithSampler g_depthPair;
++bool g_depthReady[2] = {false, false};
++wgpu::RenderPipeline g_depthPipeline;
++wgpu::BindGroupLayout g_depthLayout;
++wgpu::Buffer g_depthUniform[2];
++wgpu::RenderPipeline g_depthCopyPipeline;
++wgpu::BindGroupLayout g_depthCopyLayout;
+ 
+ std::atomic_bool g_request{false};
+ 
+@@ -85,6 +96,7 @@ void begin_frame() noexcept {
+   g_hudReplay = false;
+   g_ambientReplay = false;
+   g_maskLatched = false;  // patch 0035
++  g_depthReady[0] = g_depthReady[1] = false;  // patch 0042
+ }
+ 
+ void latch_mask(bool valid, const webgpu::xr_present::DioramaMask& mask) noexcept {
+@@ -407,9 +419,10 @@ void create_mask_pipeline() {
+   }
+ }
+ 
+-// Table from the eye's clip space: tableFromHead * (the eye's clip from head)^-1, the clip matrix as
+-// Aurora's GX uniforms build it (fill_uniform: the projection's depth row reversed) plus the eye's shift.
+-M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
++// The eye's clip space from the head's (metres of the room, the eyes' midpoint), the clip matrix as Aurora's
++// GX uniforms build it (fill_uniform: the projection's depth row reversed) plus the eye's shift
++// (patch 0042: apart from table_from_clip, for the eyes' depth).
++M4 clip_from_head(const webgpu::xr_present::DioramaMask& mk, int eye) {
+   const float* p = mk.proj;
+   const float shift = (eye == 0 ? -1.f : 1.f) * mk.eyeShift;
+   M4 clip{};
+@@ -426,6 +439,12 @@ M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
+   } else {
+     for (int j = 0; j < 4; j++) clip.m[2][j] += clip.m[3][j];
+   }
++  return clip;
++}
++
++// Table from the eye's clip space: tableFromHead * (the eye's clip from head)^-1.
++M4 table_from_clip(const webgpu::xr_present::DioramaMask& mk, int eye) {
++  const M4 clip = clip_from_head(mk, eye);
+   M4 table{};
+   for (int i = 0; i < 3; i++)
+     for (int j = 0; j < 4; j++) table.m[i][j] = mk.tableFromHead[i * 4 + j];
+@@ -640,6 +659,187 @@ void clear_efb(wgpu::CommandEncoder& cmd) {
+   pass.End();
+ }
+ 
++namespace {
++// Patch 0042: the eyes' depth for the XR layer's reprojection (include/aurora/xr.h, AuroraXrFrame.depth).
++// Each texel of an eye's half-size picture: the nearest of the 2x2 EFB depths under it that something was
++// drawn at, taken back to the head's space by the eye's clip matrix (clip_from_head: the frame's own
++// frustum, eye shift and depth convention, as the mask), as the inverse of its distance along the view
++// axis (-z; the eye is the head moved along its x, so the head's z is the eye's), in metres of the room,
++// times AURORA_XR_DEPTH_REF, in 16 bits over R (high) and G (low). 0: nothing drawn (the depth as
++// cleared): the XR layer takes it as infinitely far. The XR layer undoes it (android/xr/wq_reproj.cpp).
++struct DepthUniform {
++  float headFromClip[16];  // column-major for WGSL
++  float size[4];           // the EFB's picture (present source) w, h; the eye's depth w, h
++  float misc[4];           // the eye's x offset in the pair (px), AURORA_XR_DEPTH_REF, the cleared depth,
++                           // 1 with reversed Z (nearer: larger), -1 without
++};
++
++constexpr const char* kEyeDepthShader = R"(
++struct U {
++    head_from_clip: mat4x4f,
++    size: vec4f,
++    misc: vec4f,
++};
++@group(0) @binding(0) var<uniform> u: U;
++@group(0) @binding(1) var depth_tex: texture_depth_2d;
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
++    var p = array<vec2f, 3>(vec2f(-1.0, 1.0), vec2f(-1.0, -3.0), vec2f(3.0, 1.0));
++    return vec4f(p[i], 0.0, 1.0);
++}
++
++@fragment
++fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
++    let p = pos.xy - vec2f(u.misc.x, 0.0);
++    let k = u.size.xy / u.size.zw;
++    let hi = vec2i(u.size.xy) - vec2i(1, 1);
++    let a = clamp(vec2i(floor((p - 0.25) * k)), vec2i(0, 0), hi);
++    let b = clamp(vec2i(floor((p + 0.25) * k)), vec2i(0, 0), hi);
++    // the nearest of the four (s: nearer is larger with reversed Z); none drawn: the cleared value
++    let s = u.misc.w;
++    let key = max(max(s * textureLoad(depth_tex, a, 0), s * textureLoad(depth_tex, vec2i(b.x, a.y), 0)),
++                  max(s * textureLoad(depth_tex, vec2i(a.x, b.y), 0), s * textureLoad(depth_tex, b, 0)));
++    if (key <= s * u.misc.z) {
++        return vec4f(0.0);
++    }
++    let uv = p / u.size.zw;
++    let h = u.head_from_clip * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, key * s, 1.0);
++    let dist = -h.z / h.w;
++    if (!(dist > 0.0)) {
++        return vec4f(0.0);
++    }
++    let q = u32(round(clamp(u.misc.y / dist, 0.0, 1.0) * 65535.0));
++    if (q == 0u) {
++        return vec4f(0.0);
++    }
++    return vec4f(f32(q >> 8u) / 255.0, f32(q & 255u) / 255.0, 0.0, 1.0);
++}
++)";
++
++constexpr const char* kEyeDepthCopyShader = R"(
++@group(0) @binding(0) var src: texture_2d<f32>;
++
++@vertex
++fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
++    var p = array<vec2f, 3>(vec2f(-1.0, 1.0), vec2f(-1.0, -3.0), vec2f(3.0, 1.0));
++    return vec4f(p[i], 0.0, 1.0);
++}
++
++@fragment
++fn fs_main(@builtin(position) pos: vec4f) -> @location(0) vec4f {
++    return textureLoad(src, vec2i(pos.xy), 0);
++}
++)";
++
++wgpu::RenderPipeline make_plain_pipeline(const char* label, const char* code, const wgpu::BindGroupLayout& layout) {
++  wgpu::ShaderSourceWGSL source{};
++  source.code = code;
++  const wgpu::ShaderModuleDescriptor moduleDesc{.nextInChain = &source, .label = label};
++  const auto module = webgpu::g_device.CreateShaderModule(&moduleDesc);
++  const wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{.bindGroupLayoutCount = 1, .bindGroupLayouts = &layout};
++  const auto pipelineLayout = webgpu::g_device.CreatePipelineLayout(&pipelineLayoutDesc);
++  const wgpu::ColorTargetState target{.format = wgpu::TextureFormat::RGBA8Unorm, .writeMask = wgpu::ColorWriteMask::All};
++  const wgpu::FragmentState fragment{.module = module, .entryPoint = "fs_main", .targetCount = 1, .targets = &target};
++  const wgpu::RenderPipelineDescriptor desc{
++      .label = label,
++      .layout = pipelineLayout,
++      .vertex = {.module = module, .entryPoint = "vs_main"},
++      .primitive = {.topology = wgpu::PrimitiveTopology::TriangleList},
++      .multisample = {.count = 1, .mask = UINT32_MAX},
++      .fragment = &fragment,
++  };
++  return webgpu::g_device.CreateRenderPipeline(&desc);
++}
++
++void create_depth_pipelines() {
++  {
++    const std::array entries{
++        wgpu::BindGroupLayoutEntry{
++            .binding = 0,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = sizeof(DepthUniform)},
++        },
++        wgpu::BindGroupLayoutEntry{
++            .binding = 1,
++            .visibility = wgpu::ShaderStage::Fragment,
++            .texture = {.sampleType = wgpu::TextureSampleType::Depth, .viewDimension = wgpu::TextureViewDimension::e2D},
++        },
++    };
++    const wgpu::BindGroupLayoutDescriptor layoutDesc{.entryCount = entries.size(), .entries = entries.data()};
++    g_depthLayout = webgpu::g_device.CreateBindGroupLayout(&layoutDesc);
++    g_depthPipeline = make_plain_pipeline("XR eye depth", kEyeDepthShader, g_depthLayout);
++  }
++  {
++    const wgpu::BindGroupLayoutEntry entry{
++        .binding = 0,
++        .visibility = wgpu::ShaderStage::Fragment,
++        .texture = {.sampleType = wgpu::TextureSampleType::UnfilterableFloat,
++                    .viewDimension = wgpu::TextureViewDimension::e2D},
++    };
++    const wgpu::BindGroupLayoutDescriptor layoutDesc{.entryCount = 1, .entries = &entry};
++    g_depthCopyLayout = webgpu::g_device.CreateBindGroupLayout(&layoutDesc);
++    g_depthCopyPipeline = make_plain_pipeline("XR eye depth copy", kEyeDepthCopyShader, g_depthCopyLayout);
++  }
++  for (auto& buffer : g_depthUniform) {
++    const wgpu::BufferDescriptor bufferDesc{
++        .label = "XR eye depth uniform",
++        .usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform,
++        .size = sizeof(DepthUniform),
++    };
++    buffer = webgpu::g_device.CreateBuffer(&bufferDesc);
++  }
++}
++
++// Right after the eye's mask, its depth still in the EFB: its half of g_depthPair (the left eye clears it)
++void encode_eye_depth(wgpu::CommandEncoder& cmd, int eye, const webgpu::xr_present::DioramaMask& mk) {
++  if (!g_depthPipeline) {
++    create_depth_pipelines();
++  }
++  uint32_t w = 0, h = 0;
++  eye_depth_size(w, h);
++  if (!g_depthPair.texture || g_depthPair.size.width != 2 * w || g_depthPair.size.height != h) {
++    g_depthPair = webgpu::create_render_texture(2 * w, h, false);
++    g_depthReady[0] = g_depthReady[1] = false;
++  }
++  const auto& source = webgpu::present_source();
++  const M4 m = inverse(clip_from_head(mk, eye));
++  DepthUniform u{};
++  for (int i = 0; i < 4; i++)
++    for (int j = 0; j < 4; j++) u.headFromClip[j * 4 + i] = m.m[i][j];
++  u.size[0] = static_cast<float>(source.size.width);
++  u.size[1] = static_cast<float>(source.size.height);
++  u.size[2] = static_cast<float>(w);
++  u.size[3] = static_cast<float>(h);
++  u.misc[0] = static_cast<float>(eye * w);
++  u.misc[1] = AURORA_XR_DEPTH_REF;
++  u.misc[2] = gx::UseReversedZ ? 0.f : 1.f;  // the depth as cleared: nothing drawn
++  u.misc[3] = gx::UseReversedZ ? 1.f : -1.f;
++  webgpu::g_queue.WriteBuffer(g_depthUniform[eye], 0, &u, sizeof(u));
++  const std::array bindEntries{
++      wgpu::BindGroupEntry{.binding = 0, .buffer = g_depthUniform[eye], .size = sizeof(DepthUniform)},
++      wgpu::BindGroupEntry{.binding = 1, .textureView = webgpu::g_depthBuffer.view},
++  };
++  const wgpu::BindGroupDescriptor bindDesc{.layout = g_depthLayout, .entryCount = bindEntries.size(), .entries = bindEntries.data()};
++  const auto bindGroup = webgpu::g_device.CreateBindGroup(&bindDesc);
++  const wgpu::RenderPassColorAttachment color{
++      .view = g_depthPair.view,
++      .loadOp = eye == 0 ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  };
++  const wgpu::RenderPassDescriptor desc{.label = "XR eye depth", .colorAttachmentCount = 1, .colorAttachments = &color};
++  auto pass = cmd.BeginRenderPass(&desc);
++  pass.SetPipeline(g_depthPipeline);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.SetViewport(static_cast<float>(eye * w), 0.f, static_cast<float>(w), static_cast<float>(h), 0.f, 1.f);
++  pass.Draw(3);
++  pass.End();
++  // the right eye counts only after the left (its Load keeps the left's half of this frame)
++  g_depthReady[eye] = eye == 0 || g_depthReady[0];
++}
++} // namespace
++
+ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+   webgpu::xr_present::DioramaMask mk;
+   if (!frame_mask(mk)) {
+@@ -700,10 +900,48 @@ void encode_mask(wgpu::CommandEncoder& cmd, int eye) {
+   pass.SetBindGroup(0, bindGroup, 0, nullptr);
+   pass.Draw(3);
+   pass.End();
++  // patch 0042: the eye's depth while it is still in the EFB, when the XR layer asks for it
++  if (webgpu::xr_present::eye_depth_wanted()) {
++    encode_eye_depth(cmd, eye, mk);
++  }
+ }
+ 
+ const webgpu::TextureWithSampler& masked_eye(int eye) noexcept { return g_masked[eye]; }
+ 
++// (the copy's pipeline too: copy_eye_depth can then always write the buffer begin_depth gives)
++bool eye_depth_ready() noexcept {
++  return g_depthReady[0] && g_depthReady[1] && g_depthPair.view && g_depthCopyPipeline;
++}
++
++void eye_depth_size(uint32_t& width, uint32_t& height) noexcept {
++  // half of the XR buffer's eye (aurora.cpp present_frame: the present source's size, even, at least 2)
++  const auto& source = webgpu::present_source();
++  width = std::max<uint32_t>((std::max<uint32_t>(source.size.width, 2) & ~1u) / 2, 1);
++  height = std::max<uint32_t>((std::max<uint32_t>(source.size.height, 2) & ~1u) / 2, 1);
++}
++
++// The frame's eyes' depth into the XR layer's buffer (both eyes, the same size): texel for texel
++void copy_eye_depth(wgpu::CommandEncoder& cmd, const wgpu::TextureView& target) {
++  if (!eye_depth_ready() || !target || !g_depthCopyPipeline) {
++    return;
++  }
++  const wgpu::BindGroupEntry entry{.binding = 0, .textureView = g_depthPair.view};
++  const wgpu::BindGroupDescriptor bindDesc{.layout = g_depthCopyLayout, .entryCount = 1, .entries = &entry};
++  const auto bindGroup = webgpu::g_device.CreateBindGroup(&bindDesc);
++  const wgpu::RenderPassColorAttachment color{
++      .view = target,
++      .loadOp = wgpu::LoadOp::Clear,
++      .storeOp = wgpu::StoreOp::Store,
++      .clearValue = {0.0, 0.0, 0.0, 0.0},
++  };
++  const wgpu::RenderPassDescriptor desc{.label = "XR eye depth copy", .colorAttachmentCount = 1, .colorAttachments = &color};
++  auto pass = cmd.BeginRenderPass(&desc);
++  pass.SetPipeline(g_depthCopyPipeline);
++  pass.SetBindGroup(0, bindGroup, 0, nullptr);
++  pass.Draw(3);
++  pass.End();
++}
++
+ // Patch 0034: the screen's picture kept aside before the ambience's replays clear the EFB
+ void copy_screen_eye(wgpu::CommandEncoder& cmd, int eye) {
+   const auto& source = webgpu::present_source();
+@@ -826,6 +1064,14 @@ void shutdown() noexcept {
+   g_maskPipeline = {};
+   g_maskLayout = {};
+   g_maskUniform[0] = g_maskUniform[1] = {};
++  // patch 0042
++  g_depthPair = {};
++  g_depthReady[0] = g_depthReady[1] = false;
++  g_depthPipeline = {};
++  g_depthLayout = {};
++  g_depthUniform[0] = g_depthUniform[1] = {};
++  g_depthCopyPipeline = {};
++  g_depthCopyLayout = {};
+ }
+ 
+ } // namespace aurora::gfx::stereo
+diff --git a/lib/gfx/stereo.hpp b/lib/gfx/stereo.hpp
+--- a/lib/gfx/stereo.hpp
++++ b/lib/gfx/stereo.hpp
+@@ -84,6 +84,15 @@ void clear_efb(wgpu::CommandEncoder& cmd);
+ // Eye 0 (left) or 1 (right): the EFB's picture with the table's mask in its alpha.
+ void encode_mask(wgpu::CommandEncoder& cmd, int eye);
+ const webgpu::TextureWithSampler& masked_eye(int eye) noexcept;
++// Patch 0042: the eyes' depth for the XR layer's reprojection (include/aurora/xr.h, AuroraXrFrame.depth).
++// While the XR layer asks for it (xr_present::eye_depth_wanted), encode_mask also writes its eye's depth,
++// linearised (the inverse of the distance along the eye's view axis, metres of the room, packed into
++// R and G), at half the eye's size, into its half of a texture both eyes wide. Both eyes written this
++// frame: eye_depth_ready; the present copies it into the frame's depth buffer (copy_eye_depth) with
++// eye_depth_size's size (both eyes: twice its width).
++bool eye_depth_ready() noexcept;
++void eye_depth_size(uint32_t& width, uint32_t& height) noexcept;
++void copy_eye_depth(wgpu::CommandEncoder& cmd, const wgpu::TextureView& target);
+ // encoding.cpp: the HUD replay
+ void encode_hud(wgpu::CommandEncoder& cmd, detail::FramePacket& frame);
+ 
+diff --git a/lib/webgpu/xr_present.cpp b/lib/webgpu/xr_present.cpp
+--- a/lib/webgpu/xr_present.cpp
++++ b/lib/webgpu/xr_present.cpp
+@@ -30,6 +30,7 @@ DioramaMask g_mask{};
+ bool g_maskValid = false;
+ AmbientMask g_ambient{};                     // patch 0034: aurora_xr_set_ambient (under g_maskMutex)
+ std::atomic_bool g_ambientOn{false};
++std::atomic_bool g_eyeDepth{false};          // patch 0042: aurora_xr_set_eye_depth
+ 
+ #ifdef __ANDROID__
+ Module Log("aurora::xr");
+@@ -41,6 +42,14 @@ struct Slot {
+   wgpu::SharedTextureMemory memory;
+   wgpu::Texture texture;
+   wgpu::TextureView view;
++  // patch 0042: the eyes' depth, made the first time a frame in this slot carries it (and dropped
++  // with the slot, or once the XR layer no longer asks for it)
++  AHardwareBuffer* depthBuffer = nullptr;
++  wgpu::SharedTextureMemory depthMemory;
++  wgpu::Texture depthTexture;
++  wgpu::TextureView depthView;
++  uint32_t depthWidth = 0, depthHeight = 0;
++  bool depthBegun = false;  // begin_depth this frame (EndAccess in end())
+ };
+ 
+ // The ring and its hand-over to the XR layer. The render worker writes a slot that is neither the
+@@ -58,11 +67,29 @@ bool g_latestDiorama = false;                              // patch 0025
+ uint32_t g_latestTag = 0;
+ bool g_latestHud = false;                                  // patch 0026
+ bool g_latestAmbient = false;                              // patch 0034
++int g_latestDepthFd = -1;                                  // patch 0042: the depth's sync file
++bool g_latestDepth = false;                                // patch 0042: the latest frame carries depth
++std::atomic_bool g_depthFailed{false};                     // patch 0042: its buffers could not be made
++uint32_t g_depthAccessFails = 0;                           // patch 0042: Begin/EndAccess failures (logged rarely)
+ uint32_t g_serial = 0;
+ bool g_failed = false;  // creating the buffers failed: the surface for good
+ 
++// patch 0042: a slot's depth buffer dropped (the XR layer keeps its own reference while it reads it)
++void drop_depth(Slot& slot) {
++  slot.depthView = {};
++  slot.depthTexture = {};
++  slot.depthMemory = {};
++  if (slot.depthBuffer != nullptr) {
++    AHardwareBuffer_release(slot.depthBuffer);
++    slot.depthBuffer = nullptr;
++  }
++  slot.depthWidth = slot.depthHeight = 0;
++  slot.depthBegun = false;
++}
++
+ void drop_slots_locked() {
+   for (auto& slot : g_slots) {
++    drop_depth(slot);  // patch 0042
+     slot.view = {};
+     slot.texture = {};
+     slot.memory = {};
+@@ -74,6 +101,11 @@ void drop_slots_locked() {
+   if (g_latestFd >= 0) {
+     close(g_latestFd);
+   }
++  if (g_latestDepthFd >= 0) {  // patch 0042
++    close(g_latestDepthFd);
++  }
++  g_latestDepthFd = -1;
++  g_latestDepth = false;
+   g_latest = g_latestFd = g_reading = g_writing = -1;
+   g_width = g_height = 0;
+ }
+@@ -115,6 +147,47 @@ bool create_slot(Slot& slot, uint32_t width, uint32_t height) {
+   slot.view = slot.texture.CreateView();
+   return true;
+ }
++
++// Patch 0042: the slot's depth buffer, as the colour's (same format and usage: Dawn imports these for sure)
++bool create_depth(Slot& slot, uint32_t width, uint32_t height) {
++  AHardwareBuffer_Desc desc{};
++  desc.width = width;
++  desc.height = height;
++  desc.layers = 1;
++  desc.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
++  desc.usage = AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
++  if (AHardwareBuffer_allocate(&desc, &slot.depthBuffer) != 0 || slot.depthBuffer == nullptr) {
++    Log.error("XR eye depth: AHardwareBuffer_allocate {}x{} failed", width, height);
++    slot.depthBuffer = nullptr;
++    return false;
++  }
++  wgpu::SharedTextureMemoryAHardwareBufferDescriptor ahbDesc;
++  ahbDesc.handle = slot.depthBuffer;
++  wgpu::SharedTextureMemoryDescriptor memoryDesc{.nextInChain = &ahbDesc, .label = "XR eye depth"};
++  slot.depthMemory = g_device.ImportSharedTextureMemory(&memoryDesc);
++  if (!slot.depthMemory) {
++    Log.error("XR eye depth: ImportSharedTextureMemory failed");
++    return false;
++  }
++  const wgpu::TextureDescriptor textureDesc{
++      .label = "XR eye depth",
++      .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
++      .dimension = wgpu::TextureDimension::e2D,
++      .size = {width, height, 1},
++      .format = wgpu::TextureFormat::RGBA8Unorm,
++      .mipLevelCount = 1,
++      .sampleCount = 1,
++  };
++  slot.depthTexture = slot.depthMemory.CreateTexture(&textureDesc);
++  if (!slot.depthTexture) {
++    Log.error("XR eye depth: SharedTextureMemory::CreateTexture failed");
++    return false;
++  }
++  slot.depthView = slot.depthTexture.CreateView();
++  slot.depthWidth = width;
++  slot.depthHeight = height;
++  return true;
++}
+ #endif
+ } // namespace
+ 
+@@ -152,6 +225,13 @@ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept {
+     ++index;
+   }
+   Slot& slot = g_slots[index];
++  // patch 0042: the eyes' depth no longer asked for: this slot's buffer dropped as it is written again (never
++  // made while it is off). Only this one: the latest and the read slot's may still be handed over or read (the XR
++  // layer takes its own reference only after aurora_xr_present_take returns)
++  if (!g_eyeDepth.load(std::memory_order_relaxed) && slot.depthBuffer != nullptr) {
++    drop_depth(slot);
++  }
++  slot.depthBegun = false;
+   // The contents are not kept (the pass clears them) and the XR layer only reads the buffer, so
+   // the image starts in an undefined layout with nothing to wait for.
+   wgpu::SharedTextureMemoryVkImageLayoutBeginState layout;
+@@ -176,6 +256,58 @@ wgpu::TextureView begin(uint32_t width, uint32_t height) noexcept {
+ #endif
+ }
+ 
++wgpu::TextureView begin_depth(uint32_t width, uint32_t height) noexcept {
++#ifdef __ANDROID__
++  if (!eye_depth_wanted() || g_depthFailed || width == 0 || height == 0) {
++    return {};
++  }
++  std::lock_guard lock{g_mutex};
++  if (g_writing < 0) {
++    return {};
++  }
++  Slot& slot = g_slots[g_writing];
++  if (slot.depthBuffer == nullptr || slot.depthWidth != width || slot.depthHeight != height) {
++    drop_depth(slot);
++    if (!create_depth(slot, width, height)) {
++      drop_depth(slot);
++      g_depthFailed = true;
++      Log.error("XR eye depth unavailable: frames go without it");
++      return {};
++    }
++    Log.info("XR eye depth: a buffer of {}x{} (slot {})", width, height, g_writing);
++  }
++  wgpu::SharedTextureMemoryVkImageLayoutBeginState layout;
++  layout.oldLayout = 0; // VK_IMAGE_LAYOUT_UNDEFINED, as the colour's: written whole, read only by the XR layer
++  layout.newLayout = 0;
++  wgpu::SharedTextureMemoryBeginAccessDescriptor access{
++      .nextInChain = &layout,
++      .concurrentRead = false,
++      .initialized = false,
++      .fenceCount = 0,
++  };
++  if (!slot.depthMemory.BeginAccess(slot.depthTexture, &access)) {
++    if (g_depthAccessFails++ % 600 == 0) {
++      Log.error("XR eye depth: SharedTextureMemory::BeginAccess failed ({} times)", g_depthAccessFails);
++    }
++    return {};
++  }
++  slot.depthBegun = true;
++  return slot.depthView;
++#else
++  (void)width;
++  (void)height;
++  return {};
++#endif
++}
++
++bool eye_depth_wanted() noexcept {
++#ifdef __ANDROID__
++  return g_eyeDepth.load(std::memory_order_relaxed) && active();
++#else
++  return false;
++#endif
++}
++
+ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag, bool ambient) noexcept {
+ #ifdef __ANDROID__
+   std::lock_guard lock{g_mutex};
+@@ -183,6 +315,27 @@ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag, bool ambient)
+     return;
+   }
+   Slot& slot = g_slots[g_writing];
++  // patch 0042: the eyes' depth, written by the same submit as the colour: its own sync file
++  int depthFd = -1;
++  const bool depth = slot.depthBegun;
++  if (depth) {
++    slot.depthBegun = false;
++    wgpu::SharedTextureMemoryVkImageLayoutEndState depthLayout;
++    wgpu::SharedTextureMemoryEndAccessState depthState;
++    depthState.nextInChain = &depthLayout;
++    if (slot.depthMemory.EndAccess(slot.depthTexture, &depthState)) {
++      for (size_t i = 0; i < depthState.fenceCount && depthFd < 0; ++i) {
++        wgpu::SharedFenceSyncFDExportInfo syncFd;
++        wgpu::SharedFenceExportInfo info{.nextInChain = &syncFd};
++        depthState.fences[i].ExportInfo(&info);
++        if (info.type == wgpu::SharedFenceType::SyncFD && syncFd.handle >= 0) {
++          depthFd = dup(syncFd.handle);
++        }
++      }
++    } else if (g_depthAccessFails++ % 600 == 0) {
++      Log.error("XR eye depth: SharedTextureMemory::EndAccess failed ({} times)", g_depthAccessFails);
++    }
++  }
+   wgpu::SharedTextureMemoryVkImageLayoutEndState layout;
+   wgpu::SharedTextureMemoryEndAccessState state;
+   state.nextInChain = &layout;
+@@ -223,6 +376,11 @@ void end(bool sideBySide, bool stereo, bool diorama, uint32_t tag, bool ambient)
+   g_latestTag = tag;
+   g_latestHud = diorama && sideBySide;  // patch 0026: the diorama's buffers are left | right | HUD
+   g_latestAmbient = ambient;            // patch 0034: then the ambience's left | right
++  if (g_latestDepthFd >= 0) {           // patch 0042
++    close(g_latestDepthFd);
++  }
++  g_latestDepthFd = depthFd;
++  g_latestDepth = depth;
+   g_writing = -1;
+   ++g_serial;
+ #else
+@@ -300,6 +458,15 @@ extern "C" {
+ 
+ void aurora_xr_present_enable(bool enable) { g_enabled.store(enable); }
+ 
++void aurora_xr_set_eye_depth(bool enable) {  // patch 0042
++#ifdef __ANDROID__
++  if (enable) {
++    g_depthFailed.store(false);  // asked again: its buffers tried again
++  }
++#endif
++  g_eyeDepth.store(enable);
++}
++
+ bool aurora_xr_present_supported(void) { return g_supported; }
+ 
+ void aurora_xr_set_stereo(bool enable, float strength, float focus) {
+@@ -374,6 +541,18 @@ bool aurora_xr_present_take(AuroraXrFrame* out) {
+   out->tag = g_latestTag;
+   out->hud = g_latestHud;
+   out->ambient = g_latestAmbient;
++  // patch 0042: the eyes' depth of the same frame (same slot), and its sync file (the caller's now)
++  const Slot& slot = g_slots[g_latest];
++  const bool depth = g_latestDepth && slot.depthBuffer != nullptr;
++  out->depth = depth ? slot.depthBuffer : nullptr;
++  out->depthSyncFd = depth ? g_latestDepthFd : -1;
++  out->depthWidth = depth ? slot.depthWidth : 0;
++  out->depthHeight = depth ? slot.depthHeight : 0;
++  if (!depth && g_latestDepthFd >= 0) {
++    close(g_latestDepthFd);
++  }
++  g_latestDepthFd = -1;
++  g_latestDepth = false;
+   g_reading = g_latest;
+   g_latest = g_latestFd = -1;
+   return true;
+diff --git a/lib/webgpu/xr_present.hpp b/lib/webgpu/xr_present.hpp
+--- a/lib/webgpu/xr_present.hpp
++++ b/lib/webgpu/xr_present.hpp
+@@ -25,6 +25,12 @@ void end(bool sideBySide = false, bool stereo = false, bool diorama = false, uin
+ // Patch 0025: the frame info the game set (aurora_xr_set_frame_info), taken once per frame by the
+ // present on the thread that ends frames.
+ void take_frame_info(uint32_t& tag, bool& diorama) noexcept;
++// Patch 0042: on the render worker, between begin() and end(), for a diorama frame whose eyes' depth was
++// drawn (gfx::stereo::eye_depth_ready): a target of the given size in the slot being written, for the
++// eyes' depth (include/aurora/xr.h, AuroraXrFrame.depth), or a null view (no depth with this frame).
++wgpu::TextureView begin_depth(uint32_t width, uint32_t height) noexcept;
++// Patch 0042: the XR layer asked for the eyes' depth (aurora_xr_set_eye_depth), while active().
++bool eye_depth_wanted() noexcept;
+ // Drops the buffers (device shutdown).
+ void shutdown() noexcept;
+ 

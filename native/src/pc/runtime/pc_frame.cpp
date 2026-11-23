@@ -64,6 +64,7 @@
 #include <fcntl.h>
 #include <numeric>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -1048,6 +1049,15 @@ void pumpEvents() {
             const bool expected = gConfig.milestone != nullptr || gConfig.frames != 0;
             writef(STDERR_FILENO, "[cos] quit requested (window closed) at frame %u%s\n",
                    pc_frame_count(), expected ? " before the expected end of the run" : "");
+#if defined(__ANDROID__)
+            // the sound off first, and the process ended in 2 s whatever pc_exit waits for (the headset's
+            // app closed: nothing must keep playing)
+            COSAISetPaused(true);
+            std::thread([] {
+                usleep(2000 * 1000);
+                _exit(0);
+            }).detach();
+#endif
             pc_exit(expected ? PC_EXIT_CHECK_FAILED : PC_EXIT_REACHED);
         }
     }
@@ -1069,7 +1079,7 @@ void headsetPause() {
         watchdogPulse();
         pumpEvents();
     }
-    COSAISetPaused(false);
+    COSAISetPaused(pc_vr_paused());  // the XR thread may have stopped the session again meanwhile
     writef(STDERR_FILENO, "[cos] headset session running again after %.1f s: the game resumed\n",
            (monotonicNs() - startNs) / 1e9);
     sFrameStartNs = monotonicNs();  // the pause is not this frame's time (FPS overlay, pacing CSV)
@@ -1632,6 +1642,9 @@ void pc_frame_begin(void) {
         }
         usleep(10 * 1000);
         pumpEvents();
+        // the headset's session may stop while the frame waits here (its present went back to the window,
+        // which cannot present): the pause (the sound held) must not wait for a frame that never begins
+        headsetPause();
     }
     sBeginDoneNs = monotonicNs();
 }

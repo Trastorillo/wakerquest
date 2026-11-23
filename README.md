@@ -19,6 +19,19 @@ de tu propia ISO cada vez que arranca.
 4. Las opciones de pantalla, 3D, maqueta, ventana y ambiente están en el panel de ajustes de las gafas, que se
    abre y se cierra con grip izquierdo + Y.
 
+### Novedades de la 2.0
+
+- **Más fluido en Ventana, Maqueta e Inmersivo (reproyección):** el juego se pinta a 30 fps, pero ahora la
+  imagen se recoloca en cada refresco del visor a la posición actual de tus ojos, usando la profundidad del
+  propio juego. Lo cercano ya no da saltitos al girar o mover la cabeza. A cambio se ven algunas distorsiones en
+  los bordes de los objetos cercanos al moverte. Se apaga con la casilla *Reproyección* de la pestaña Rendimiento
+  o con `reprojection = 0` en `xr.ini`. La idea viene de [GalaxyQuest](https://github.com/bigmak94/GalaxyQuest).
+- **El marco de la ventana, quieto:** con la reproyección, el borde de la ventana se queda en su sitio al mover
+  la cabeza.
+- **Ciclos, más fácil:** en el combate del tornado (las tres flechas), las flechas que van más o menos hacia él
+  le buscan y su zona de impacto es más grande. Solo en ese combate.
+- **El sonido se para al cerrar la app.**
+
 ### Novedades de la 1.6.1
 
 - **El ojo, centrado:** la textura del disco es solo una cuarta parte del ojo (el juego la repite en espejo), y
@@ -215,6 +228,11 @@ Sigue pendiente una mancha de rayas amarillas y azules en el HUD, debajo del bot
   el juego que se cerraba al quitarse el visor, el menú VR, el mapa y la cámara libre) / for reporting the bugs 1.5 fixes.
 - **T-Bone**, por su aportación sobre los formatos `.ciso` y `.nkit.iso` de Vimm's Lair / for the help with the
   `.ciso` and `.nkit.iso` formats from Vimm's Lair.
+- **[bigmak94](https://github.com/bigmak94)**, autor de [GalaxyQuest](https://github.com/bigmak94/GalaxyQuest), el port
+  a las Quest de un juego de plataformas de Wii: de su versión vienen la idea de volver a pintar la imagen con la
+  pose de los ojos en cada refresco del visor (la reproyección de la 2.0), el panel de ajustes en el visor y su
+  lienzo y fuente / for GalaxyQuest, where the 2.0 reprojection idea, the headset settings panel and its canvas
+  and font come from.
 
 ## WakerQuest (English)
 
@@ -261,6 +279,14 @@ New in 1.6: the *Passthrough (your room)* switch moves to the panel's General ta
 opens or closes the open roof; with passthrough off, the open roof becomes a virtual beach: the walls come down, the
 floor opens onto an island of sand and grass that sinks into the sea.
 
+New in 2.0: smoother Window, Diorama and Immersive modes. The game still draws at 30 fps, but the picture is
+now moved to where your eyes are at every refresh of the headset, using the game's own depth, so near things no
+longer jump as you turn or move your head; some distortion shows at the edges of near objects as you move. Turn
+it off with *Reprojection* in the Performance tab or `reprojection = 0` in `xr.ini`. The idea comes from
+[GalaxyQuest](https://github.com/bigmak94/GalaxyQuest). Also: the window's frame stays put, an easier Cyclos fight
+in the tornado (arrows home in on him and he is easier to hit, only in that fight), and the sound stops when the
+app is closed.
+
 New in 1.6.1: the eye switch is whole and centred (the disc's texture is a quarter of the eye, mirrored by the game).
 
 ### Credits
@@ -268,6 +294,9 @@ New in 1.6.1: the eye switch is whole and centred (the disc's texture is a quart
 - **[mrchrisster](https://github.com/mrchrisster)**, for reporting the bugs 1.5 fixes: the language, the diorama zooming out, the game
   ending when the headset came off, the VR menu, the map and the free camera icon.
 - **T-Bone**, for the help with the `.ciso` and `.nkit.iso` formats from Vimm's Lair.
+- **[bigmak94](https://github.com/bigmak94)**, author of [GalaxyQuest](https://github.com/bigmak94/GalaxyQuest): the
+  idea of drawing the picture again for the eyes' pose at every refresh of the headset (2.0's reprojection), the
+  headset settings panel and its canvas and font come from it.
 
 ## About this repository
 

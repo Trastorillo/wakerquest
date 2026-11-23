@@ -1235,6 +1235,15 @@ void daNpc_Hr_c::setCollision() {
     cXyz temp = current.pos;
     f32 temp1 = scale.x * 45.0f;
     f32 temp2 = scale.y * 100.0f;
+#if TARGET_PC
+    // Easier fight with Cyclos in his tornado (the three arrows): only in RT_ANGRY, a wider and
+    // taller target, reaching 30% of his height below his feet as well
+    if (mState == HR_STATE_RT_ANGRY) {
+        temp.y -= temp2 * 0.3f;
+        temp1 *= 2.0f;
+        temp2 *= 1.6f;
+    }
+#endif
     mCyl.SetC(temp);
     mCyl.SetR(temp1);
     mCyl.SetH(temp2);
